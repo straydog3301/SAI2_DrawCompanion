@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.venv
+.env
+
+# PyInstaller Build
+build/
+dist/
+*.spec
+*.log
+
+# App configuration and database
+sai2_draw_time.json
+sai2_timer_settings.json
+watcher_out.log
+pythonw_error.log
+
+# Operating System
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
