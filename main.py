@@ -1091,22 +1091,44 @@ class App:
                 ))
                 return
             try:
-                # 优先找尋正在執行的 SAI2 進程路徑
+                # 優先找尋正在執行的 SAI2 執行檔路徑
                 sai2_exe = None
+                
+                # 1. 優先從當前已開啟的 SAI 視窗取得執行路徑（精準且極速）
                 try:
-                    import psutil
-                    for proc in psutil.process_iter(['name', 'exe']):
-                        n = (proc.info.get('name') or '').lower()
-                        # 排除本計時器與安全隔離進程，精確尋找繪圖軟體
-                        if n in ('sai.exe', 'sai2.exe', 'sai2_backup.exe') or (
-                            'sai' in n and 'drawtimer' not in n and 'lsaiso' not in n and n.endswith('.exe')
-                        ):
-                            exe_path = proc.info.get('exe')
-                            if exe_path and os.path.isfile(exe_path):
-                                sai2_exe = exe_path
-                                break
+                    from timelapse import scan_sai_windows
+                    main_win, _ = scan_sai_windows(os.getpid())
+                    if main_win:
+                        import win32process
+                        import psutil
+                        _, pid = win32process.GetWindowThreadProcessId(main_win[0])
+                        proc = psutil.Process(pid)
+                        exe_path = proc.exe()
+                        if exe_path and os.path.isfile(exe_path):
+                            sai2_exe = exe_path
                 except Exception:
                     pass
+                
+                # 2. 備用方案：如果未開啟，遍歷行程尋找符合名稱的軟體
+                if not sai2_exe:
+                    try:
+                        import psutil
+                        for proc in psutil.process_iter(['name', 'exe']):
+                            n = (proc.info.get('name') or '').lower()
+                            # 排除本計時器與安全隔離進程，精確尋找繪圖軟體
+                            if n in ('sai.exe', 'sai2.exe', 'sai2_backup.exe') or (
+                                ('painttool' in n or 'sai' in n)
+                                and 'drawtimer' not in n
+                                and 'drawcompanion' not in n
+                                and 'lsaiso' not in n
+                                and n.endswith('.exe')
+                            ):
+                                exe_path = proc.info.get('exe')
+                                if exe_path and os.path.isfile(exe_path):
+                                    sai2_exe = exe_path
+                                    break
+                    except Exception:
+                        pass
 
                 # 備援一：尋找同層或上層目錄下的 PaintTool SAI 執行檔
                 if not sai2_exe:

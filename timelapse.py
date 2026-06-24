@@ -858,6 +858,20 @@ class TimelapseRecorder:
 
     def _export_worker(self, filename: str, temp_dir: str, frame_count: int):
         """ffmpeg 合成背景工作程序"""
+        ext = "png" if self.quality_preset == "lossless" else "jpg"
+
+        # 等待所有佇列中的影格檔案完全寫入磁碟，確保不丟影格，防範 shutil.rmtree 造成的競態衝突
+        if frame_count > 0:
+            last_frame_name = f"frame_{frame_count-1:06d}.{ext}"
+            last_frame_path = os.path.join(temp_dir, last_frame_name)
+            
+            # 最多等待 15 秒安全逾時，以免無限期阻塞
+            wait_start = time.perf_counter()
+            while not os.path.exists(last_frame_path):
+                if time.perf_counter() - wait_start > 15.0:
+                    break
+                time.sleep(0.05)
+
         if not find_ffmpeg():
             if self.on_status_msg:
                 self.on_status_msg(_tr("timelapse.status.ffmpeg_missing"))
@@ -897,7 +911,9 @@ class TimelapseRecorder:
         elif self.quality_preset == 'high':
             crf_val = '18'
         elif self.quality_preset == 'lossless':
-            crf_val = '0'
+            # 使用 CRF 1 代替 0。因為 CRF 0 (H.264 Lossless) 會強制使用 High 4:2:0 Predictive Profile，
+            # 導致 Windows 內建「媒體播放器」無法解碼播放。CRF 1 具備極致的近無損畫質且 100% 相容。
+            crf_val = '1'
 
         # libx264, preset fast (兼顧速度)，並輸出 progress 資訊
         cmd = [
