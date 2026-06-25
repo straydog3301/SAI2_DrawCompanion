@@ -243,6 +243,7 @@ class DrawTracker:
 
         # 持久化資料
         self._persist: dict = self._load_json()
+        self.locked_file: str | None = None
 
         # 目前工作階段狀態（由 _loop 修改，_lock 保護讀取）
         self._cur_file:               str | None = None
@@ -285,16 +286,24 @@ class DrawTracker:
                         d = {'files': {}}
                     if 'daily_history' not in d:
                         d['daily_history'] = {}
+                    if 'aliases' not in d:
+                        d['aliases'] = {}
                     # 啟動時清理所有未存檔圖檔的暫存紀錄，避免留在歷史清單中
                     cleaned_files = {}
                     for fname, rec in d['files'].items():
                         if is_saved_filename(fname):
                             cleaned_files[fname] = rec
                     d['files'] = cleaned_files
+                    # 清理失效的別名
+                    valid_aliases = {}
+                    for k, v in d['aliases'].items():
+                        if v in cleaned_files:
+                            valid_aliases[k] = v
+                    d['aliases'] = valid_aliases
                     return d
             except Exception:
                 pass
-        return {'files': {}, 'daily_history': {}}
+        return {'files': {}, 'daily_history': {}, 'aliases': {}}
 
     def _save_json(self, data: dict):
         try:
@@ -386,15 +395,34 @@ class DrawTracker:
                     raw_title = self._cached_raw_title
                     sai_running = self._cached_is_running
 
+                # ── 解析別名與鎖定處理 ──
+                raw_detected_file = filename
+                
+                # 1. 優先透過 aliases 將別名解析為對應的主圖檔
+                if filename and 'aliases' in self._persist:
+                    if filename in self._persist['aliases']:
+                        filename = self._persist['aliases'][filename]
+                
+                # 2. 如果設定了鎖定，強制將 filename 覆寫為鎖定圖檔
+                if self.locked_file is not None:
+                    # 只有在 SAI 仍在執行，且偵測到的 filename 不是 None 時才套用鎖定
+                    # （若 filename 為 None，代表所有圖檔皆已關閉，此時解鎖）
+                    if sai_running and filename is not None:
+                        filename = self.locked_file
+                    else:
+                        self.locked_file = None
+
                 with self._lock:
                     self._last_raw_title = raw_title
                     self._sai2_active = sai_foreground
                     self._sai2_running = sai_running
+                    self._raw_cur_file = raw_detected_file
 
                     if not sai_running:
                         # PaintTool SAI 沒開 → 切換為 None（結束當前 session）
                         if self._cur_file is not None:
                             self._switch_file(None, now)
+                        self.locked_file = None
                     else:
                         # PaintTool SAI 有開
                         if filename is None:
@@ -577,6 +605,7 @@ class DrawTracker:
             'sai2_active':  self._sai2_active,
             'sai2_running':  self._sai2_running,
             'current_file': f,
+            'raw_current_file': getattr(self, '_raw_cur_file', None),
             'session_open': session_open_s,
             'session_draw': session_draw_s,
             'files':        all_files,
@@ -622,6 +651,11 @@ class DrawTracker:
         """刪除特定檔案的記錄。"""
         with self._lock:
             self._persist['files'].pop(filename, None)
+            # 清理指向它的別名
+            if 'aliases' in self._persist:
+                targets_to_remove = [k for k, v in self._persist['aliases'].items() if v == filename]
+                for k in targets_to_remove:
+                    self._persist['aliases'].pop(k, None)
             # 若是目前追蹤中的檔案，也重置工作階段
             if self._cur_file == filename:
                 self._cur_file               = None
@@ -632,12 +666,14 @@ class DrawTracker:
                 self._session_last_mouse     = 0.0
                 self._base_open              = 0.0
                 self._base_draw              = 0.0
+            if self.locked_file == filename:
+                self.locked_file = None
         self.save()
 
     def reset_all(self):
         """清空全部記錄。"""
         with self._lock:
-            self._persist = {'files': {}}
+            self._persist = {'files': {}, 'aliases': {}}
             self._cur_file               = None
             self._session_open_accum     = 0.0
             self._session_open_seg_start = 0.0
@@ -646,4 +682,53 @@ class DrawTracker:
             self._session_last_mouse     = 0.0
             self._base_open              = 0.0
             self._base_draw              = 0.0
+            self.locked_file             = None
+        self.save()
+
+    def add_alias(self, alias_name: str, target_name: str):
+        """新增別名，並合併現有的計時紀錄。"""
+        with self._lock:
+            if 'aliases' not in self._persist:
+                self._persist['aliases'] = {}
+            self._persist['aliases'][alias_name] = target_name
+            
+            # 合併別名的計時紀錄至主圖檔
+            if alias_name in self._persist['files']:
+                alias_rec = self._persist['files'].pop(alias_name)
+                if target_name not in self._persist['files']:
+                    self._persist['files'][target_name] = _new_record()
+                target_rec = self._persist['files'][target_name]
+                
+                target_rec['open_seconds'] += alias_rec.get('open_seconds', 0.0)
+                target_rec['draw_seconds'] += alias_rec.get('draw_seconds', 0.0)
+                target_rec['sessions'] += alias_rec.get('sessions', 0)
+                
+                t_seen = target_rec.get('last_seen', '')
+                a_seen = alias_rec.get('last_seen', '')
+                if a_seen and t_seen:
+                    target_rec['last_seen'] = max(t_seen, a_seen)
+                elif a_seen:
+                    target_rec['last_seen'] = a_seen
+
+            # 若當前正在追蹤的檔案是別名，無縫切換主圖檔的 session
+            if self._cur_file == alias_name:
+                self._cur_file = target_name
+                if target_name in self._persist['files']:
+                    self._base_open = self._persist['files'][target_name]['open_seconds'] - self._session_open_accum
+                    self._base_draw = self._persist['files'][target_name]['draw_seconds'] - self._session_draw_accum
+                else:
+                    self._base_open = 0.0
+                    self._base_draw = 0.0
+
+            # 若處於鎖定狀態且被鎖定的是別名，將鎖定圖檔更新為主圖檔
+            if self.locked_file == alias_name:
+                self.locked_file = target_name
+                
+        self.save()
+
+    def remove_alias(self, alias_name: str):
+        """移除別名。"""
+        with self._lock:
+            if 'aliases' in self._persist:
+                self._persist['aliases'].pop(alias_name, None)
         self.save()

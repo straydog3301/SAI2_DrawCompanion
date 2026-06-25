@@ -812,6 +812,19 @@ class App:
         if self._closing or getattr(self, '_closing_temp', False):
             return
 
+        # ── 自動鎖定邏輯 ──
+        if self.timelapse_recorder.enabled:
+            if self.tracker.locked_file is None:
+                cur_tracked = self.tracker._cur_file
+                if cur_tracked is not None:
+                    # 優先解析別名後再鎖定
+                    if hasattr(self.tracker, '_persist') and 'aliases' in self.tracker._persist:
+                        if cur_tracked in self.tracker._persist['aliases']:
+                            cur_tracked = self.tracker._persist['aliases'][cur_tracked]
+                    self.tracker.locked_file = cur_tracked
+        else:
+            self.tracker.locked_file = None
+
         state = self.tracker.get_state()
         
         # 同步縮時錄影檔案狀態
@@ -845,8 +858,15 @@ class App:
 
         # ── 目前檔案 ───────────────────────────────────────────────
         raw = state.get('raw_title', '')
+        raw_file = state.get('raw_current_file')
         if cur:
-            self.var_cur_file.set(f'🖼  {cur}')
+            display_cur = self._get_display_name(cur)
+            lock_suffix = f" [{_tr('ui.tracker.lock_status_label', '🔒已鎖定')}]" if self.tracker.locked_file else ""
+            if raw_file and raw_file != cur:
+                display_raw = self._get_display_name(raw_file)
+                self.var_cur_file.set(f'🖼  {display_cur}{lock_suffix} (別名: {display_raw})')
+            else:
+                self.var_cur_file.set(f'🖼  {display_cur}{lock_suffix}')
         elif raw:  # 已偵測到但檔名解析失敗——顯示原始標題供除錯
             self.var_cur_file.set(_tr('msg.sai_detected_no_name', title=raw[:60]))
         elif sai2:
@@ -1080,6 +1100,14 @@ class App:
             return  # 群組列預設提供占開/摺疊行為
 
         fname = item
+        # 若啟用錄影，雙擊打開檔案時，自動將鎖定圖檔切換為此圖檔（支援別名自動解析）
+        if self.timelapse_recorder.enabled:
+            resolved_fname = fname
+            if hasattr(self.tracker, '_persist') and 'aliases' in self.tracker._persist:
+                if fname in self.tracker._persist['aliases']:
+                    resolved_fname = self.tracker._persist['aliases'][fname]
+            self.tracker.locked_file = resolved_fname
+
         self.var_status.set(_tr('msg.finding_path', file=fname))
         self.root.update_idletasks()
 
@@ -1204,6 +1232,15 @@ class App:
                     label=_tr('menu.revert_auto_group'),
                     command=lambda: self._revert_to_auto_group(fname)
                 )
+            menu.add_separator()
+            menu.add_command(
+                label=_tr('menu.manage_aliases', '🔗  別名管理 (關聯另存...)'),
+                command=lambda: self._manage_aliases_dialog(fname)
+            )
+            menu.add_command(
+                label=_tr('menu.set_as_alias', '🏷️  將此檔設為其他檔的別名...'),
+                command=lambda: self._set_as_alias_dialog(fname)
+            )
             menu.add_separator()
             menu.add_command(
                 label=_tr('menu.delete_record'),
@@ -1407,6 +1444,207 @@ class App:
 
         ent.bind('<Return>', lambda _: _confirm())
         ent.bind('<Escape>', lambda _: dlg.destroy())
+
+    def _set_as_alias_dialog(self, fname: str):
+        """彈出對話框讓使用者將此圖檔設定為其他圖檔的別名（關聯/合併）。"""
+        dlg = tk.Toplevel(self.root)
+        dlg.title(_tr('dialog.alias.set_title', "設定別名關聯"))
+        dlg.configure(bg=CARD)
+        dlg.resizable(False, False)
+        dlg.grab_set()
+        dlg.transient(self.root)
+
+        tk.Label(
+            dlg, 
+            text=_tr('dialog.alias.set_prompt', f"將圖檔「{self._get_display_name(fname)}」設定為別名，其計時紀錄將合併至所選的主圖檔中：", file=self._get_display_name(fname)), 
+            font=FS, fg=TEXT, bg=CARD, wraplength=320, justify='left'
+        ).pack(padx=14, pady=(12, 8), anchor='w')
+
+        # 獲取其他所有主圖檔（排除自身）
+        state = self.tracker.get_state()
+        files = state.get('files', {})
+        target_files = sorted([fn for fn in files.keys() if fn != fname])
+
+        if not target_files:
+            tk.Label(dlg, text="無其他可用的主圖檔。", font=FB, fg=RED, bg=CARD).pack(padx=14, pady=10)
+            _btn(dlg, _tr('dialog.close', "關閉"), CARD2, ACCH, dlg.destroy, font=FB).pack(pady=(0, 12))
+            return
+
+        var = tk.StringVar()
+        ent = ttk.Combobox(dlg, textvariable=var, values=target_files, font=FB, width=32, state='readonly')
+        ent.pack(padx=14, pady=(0, 12))
+        ent.focus_set()
+        if target_files:
+            ent.current(0)
+
+        def _confirm():
+            target = var.get().strip()
+            if not target:
+                return
+            
+            # 確認提示
+            if messagebox.askyesno(
+                "確認關聯", 
+                f"確定要將「{self._get_display_name(fname)}」設定為「{self._get_display_name(target)}」的別名嗎？\n此檔目前的計時數據將被合併至該主圖檔中，且此檔將不再獨立顯示於列表中。", 
+                parent=dlg
+            ):
+                # 呼叫 tracker 新增別名
+                self.tracker.add_alias(fname, target)
+                
+                # 清除該別名在 custom_groups 中的設定
+                if fname in self._custom_groups:
+                    self._custom_groups.pop(fname, None)
+                    self._settings['custom_groups'] = self._custom_groups
+                    _save_settings(self._settings)
+                
+                dlg.destroy()
+                
+                # 刷新列表和統計
+                state = self.tracker.get_state()
+                self._refresh_tree(state.get('files', {}))
+                self._refresh_stats_chart()
+                self.var_status.set(f"已將「{self._get_display_name(fname)}」設為「{self._get_display_name(target)}」的別名")
+
+        btn_row = tk.Frame(dlg, bg=CARD)
+        btn_row.pack(padx=14, pady=(0, 12))
+        _btn(btn_row, _tr('dialog.confirm'), ACCENT, ACCH, _confirm, font=FB).pack(side='left', padx=(0, 6))
+        _btn(btn_row, _tr('dialog.cancel'), CARD2, '#b91c1c', dlg.destroy, font=FB).pack(side='left')
+
+        ent.bind('<Return>', lambda _: _confirm())
+        ent.bind('<Escape>', lambda _: dlg.destroy())
+
+    def _manage_aliases_dialog(self, fname: str):
+        """彈出對話框管理此圖檔的別名。"""
+        dlg = tk.Toplevel(self.root)
+        dlg.title(_tr('dialog.alias.manage_title', "管理別名"))
+        dlg.configure(bg=CARD)
+        dlg.geometry("400x380")
+        dlg.grab_set()
+        dlg.transient(self.root)
+        
+        # 標題
+        tk.Label(
+            dlg, 
+            text=f"主圖檔：{self._get_display_name(fname)}", 
+            font=FH, fg=ACCENT, bg=CARD, justify='left'
+        ).pack(padx=14, pady=(12, 4), anchor='w')
+
+        # 說明
+        tk.Label(
+            dlg, 
+            text="設定別名可讓「另存新檔」或「匯出」的檔案共用同一個計時紀錄。", 
+            font=FS, fg=TEXTD, bg=CARD, justify='left'
+        ).pack(padx=14, pady=(0, 8), anchor='w')
+
+        # 別名列表區域 (Scrollable Frame)
+        list_frame = tk.LabelFrame(dlg, text="目前的別名清單", font=FH, fg=TEXT, bg=CARD, bd=1, relief='solid', padx=10, pady=8)
+        list_frame.pack(fill='both', expand=True, padx=14, pady=4)
+
+        # 滾動容器
+        canvas = tk.Canvas(list_frame, bg=CARD, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg=CARD)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        def _refresh_aliases():
+            # 清空舊列表
+            for child in scrollable_frame.winfo_children():
+                child.destroy()
+            
+            # 獲取目前的別名
+            aliases = []
+            if 'aliases' in self.tracker._persist:
+                aliases = sorted([k for k, v in self.tracker._persist['aliases'].items() if v == fname])
+            
+            if not aliases:
+                tk.Label(scrollable_frame, text="（無別名設定）", font=FB, fg=TEXTD, bg=CARD).pack(anchor='w', pady=4)
+                return
+                
+            for alias in aliases:
+                row = tk.Frame(scrollable_frame, bg=CARD)
+                row.pack(fill='x', expand=True, pady=2)
+                
+                # 顯示名稱及提示
+                lbl = tk.Label(row, text=self._get_display_name(alias), font=FB, fg=TEXT, bg=CARD, wraplength=220, justify='left')
+                lbl.pack(side='left', anchor='w')
+                
+                # 顯示 tooltip，滑鼠移上去可以看完整路徑
+                lbl.bind("<Enter>", lambda _, a=alias: self.var_status.set(f"別名完整路徑: {a}"))
+                lbl.bind("<Leave>", lambda _: self.var_status.set(""))
+                
+                # 刪除按鈕
+                def _remove(a_name=alias):
+                    if messagebox.askyesno("解除關聯", f"確定要解除別名「{self._get_display_name(a_name)}」的關聯嗎？\n解除後此檔的時間將不會扣除，但未來的時間將重新獨立計時。", parent=dlg):
+                        self.tracker.remove_alias(a_name)
+                        _refresh_aliases()
+                        # 立刻刷新主列表
+                        state = self.tracker.get_state()
+                        self._refresh_tree(state.get('files', {}))
+                        self.var_status.set(f"已解除別名「{self._get_display_name(a_name)}」的關聯")
+
+                _btn(row, "解除", CARD2, '#b91c1c', _remove, font=FS, pady=1).pack(side='right', padx=4)
+
+        _refresh_aliases()
+
+        # 新增別名區域
+        add_frame = tk.Frame(dlg, bg=CARD, pady=8)
+        add_frame.pack(fill='x', padx=14)
+
+        tk.Label(add_frame, text="手動新增別名（請輸入完整檔名，含副檔名）：", font=FS, fg=TEXTD, bg=CARD).pack(anchor='w', pady=(0, 2))
+        
+        row_input = tk.Frame(add_frame, bg=CARD)
+        row_input.pack(fill='x')
+        
+        var_new_alias = tk.StringVar()
+        ent_new = tk.Entry(row_input, textvariable=var_new_alias, font=FB, bg=CARD2, fg=TEXT, insertbackground=TEXT, relief='flat')
+        ent_new.pack(side='left', fill='x', expand=True, padx=(0, 6))
+
+        def _add_alias_action():
+            val = var_new_alias.get().strip()
+            if not val:
+                return
+            # 驗證檔名必須有副檔名
+            from tracker import is_saved_filename
+            if not is_saved_filename(val):
+                messagebox.showerror("格式錯誤", "別名必須是合法的檔案名稱（需包含副檔名，如 .sai2, .png 等）。", parent=dlg)
+                return
+                
+            # 檢查是否已是別名
+            if val in self.tracker._persist.get('aliases', {}):
+                current_target = self.tracker._persist['aliases'][val]
+                messagebox.showerror("重複設定", f"此檔已被設定為「{self._get_display_name(current_target)}」的別名。", parent=dlg)
+                return
+                
+            # 檢查是否已是主圖檔
+            if val in self.tracker._persist.get('files', {}):
+                # 警告合併
+                if not messagebox.askyesno("合併確認", f"「{val}」已經有計時紀錄。將其新增為別名會合併其歷史數據，且此後它將不再獨立顯示於列表中。確定要合併嗎？", parent=dlg):
+                    return
+            
+            self.tracker.add_alias(val, fname)
+            var_new_alias.set("")
+            _refresh_aliases()
+            # 刷新主列表
+            state = self.tracker.get_state()
+            self._refresh_tree(state.get('files', {}))
+            self.var_status.set(f"已成功為「{self._get_display_name(fname)}」新增別名「{val}」")
+
+        _btn(row_input, "新增", ACCENT, ACCH, _add_alias_action, font=FB).pack(side='right')
+
+        # 關閉按鈕
+        _btn(dlg, _tr('dialog.close', "關閉"), CARD2, ACCH, dlg.destroy, font=FB).pack(pady=(10, 12))
 
     def _open_video_dir(self, fname: str):
         """開啟該圖檔對應的錄影子目錄；若尚無錄影記錄則顯示提示。"""
