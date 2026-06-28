@@ -19,8 +19,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 優先使用同目錄下已打包的 .exe，否則使用 Python 腳本
 _candidates = [
-    os.path.join(SCRIPT_DIR, 'SAI2_DrawTimer.exe'),           # 打包後放同目錄
-    os.path.join(SCRIPT_DIR, 'dist', 'SAI2_DrawTimer.exe'),   # build.bat 預設輸出
+    os.path.join(SCRIPT_DIR, 'SAI2_DrawCompanion.exe'),           # 打包後放同目錄
+    os.path.join(SCRIPT_DIR, 'dist', 'SAI2_DrawCompanion.exe'),   # build.bat 預設輸出
     os.path.join(SCRIPT_DIR, 'main.py'),                       # 開發環境
 ]
 _exe  = next((p for p in _candidates if p.endswith('.exe') and os.path.exists(p)), None)
@@ -43,15 +43,15 @@ def _launch_cmd() -> list | None:
 
 # ─── 進程偵測 ────────────────────────────────────────────────────────────
 def _is_sai2_running() -> bool:
-    """偵測 PaintTool SAI (sai.exe 或 sai2.exe) 是否在執行中，排除本計時器"""
+    """偵測 PaintTool SAI 是否在執行中，排除本助手、監視器及 python 進程"""
     try:
         import psutil
-        return any(
-            'sai' in (p.info.get('name') or '').lower()
-            and 'drawtimer' not in (p.info.get('name') or '').lower()
-            and 'lsaiso' not in (p.info.get('name') or '').lower()
-            for p in psutil.process_iter(['name'])
-        )
+        for p in psutil.process_iter(['name']):
+            n = (p.info.get('name') or '').lower()
+            # 必須包含 sai 或 painttool，且排除本助手、監視器及 python/cmd 等進程
+            if ('sai' in n or 'painttool' in n) and not any(x in n for x in ('drawcompanion', 'drawtimer', 'watcher', 'python', 'cmd', 'powershell', 'explorer', 'lsaiso')):
+                return True
+        return False
     except Exception:
         pass
     # 備用：tasklist 指令
@@ -61,10 +61,10 @@ def _is_sai2_running() -> bool:
             capture_output=True, text=True, shell=True, timeout=4
         )
         lines = r.stdout.lower().splitlines()
-        return any(
-            ('sai.exe' in line or 'sai2.exe' in line) and 'drawtimer' not in line
-            for line in lines
-        )
+        for line in lines:
+            if ('sai.exe' in line or 'sai2.exe' in line) and not any(x in line for x in ('drawcompanion', 'drawtimer', 'watcher', 'python', 'cmd', 'powershell', 'explorer')):
+                return True
+        return False
     except Exception:
         return False
 

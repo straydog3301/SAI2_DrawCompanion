@@ -373,11 +373,14 @@ def _card(parent, **kw) -> tk.Frame:
 
 
 # ─── 主應用程式 ───────────────────────────────────────────────────────────
+VERSION = '1.2.0'
+
+
 class App:
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(_tr('ui.title'))
+        self.root.title(f"{_tr('ui.title')} v{VERSION}")
 
         # 設定與配色
         self._settings = _load_settings()
@@ -470,7 +473,7 @@ class App:
 
         left_hdr = tk.Frame(hdr, bg=ACCENT)
         left_hdr.pack(side='left', padx=14)
-        tk.Label(left_hdr, text=_tr('ui.hdr.title'), font=FT,
+        tk.Label(left_hdr, text=f"{_tr('ui.hdr.title')} v{VERSION}", font=FT,
                  fg=hdr_title_fg, bg=ACCENT).pack(anchor='w')
         tk.Label(left_hdr, text=_tr('ui.hdr.subtitle'), font=FS,
                  fg=hdr_sub_fg, bg=ACCENT).pack(anchor='w')
@@ -1143,12 +1146,10 @@ class App:
                         import psutil
                         for proc in psutil.process_iter(['name', 'exe']):
                             n = (proc.info.get('name') or '').lower()
-                            # 排除本計時器與安全隔離進程，精確尋找繪圖軟體
-                            if n in ('sai.exe', 'sai2.exe', 'sai2_backup.exe') or (
+                            # 排除本計時器、監視器及 python 進程，精確尋找繪圖軟體
+                            if n in ('sai.exe', 'sai2.exe', 'sai2c.exe', 'sai2_backup.exe') or (
                                 ('painttool' in n or 'sai' in n)
-                                and 'drawtimer' not in n
-                                and 'drawcompanion' not in n
-                                and 'lsaiso' not in n
+                                and not any(x in n for x in ('drawcompanion', 'drawtimer', 'watcher', 'python', 'cmd', 'powershell', 'explorer', 'lsaiso'))
                                 and n.endswith('.exe')
                             ):
                                 exe_path = proc.info.get('exe')
