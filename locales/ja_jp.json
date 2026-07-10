@@ -212,5 +212,7 @@
   "tracker.csv.header.draw_time": "描画時間",
   "tracker.csv.header.efficiency": "効率(%)",
   "tracker.csv.header.sessions": "計測回数",
-  "tracker.csv.header.last_use": "最終使用"
+  "tracker.csv.header.last_use": "最終使用",
+  "ui.tracker.btn_liquify": "液化ツール",
+  "dialog.settings.grp_liq_hotkey": "液化ショートカット"
 }

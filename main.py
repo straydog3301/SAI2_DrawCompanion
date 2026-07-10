@@ -16,6 +16,7 @@ from PIL import Image, ImageTk
 from tracker import DrawTracker, fmt_seconds
 from timelapse import TimelapseRecorder, find_ffmpeg, file_key_to_subdir
 from i18n import _tr, set_language, get_current_language, get_available_languages
+from liquify_helper import LiquifyEditor, read_image_from_clipboard
 
 # ─── 啟動參數 ─────────────────────────────────────────────────────────────
 # --auto-close：由 watcher.pyw 傳入，SAI2 關閉時自動儲存並關閉計時器
@@ -416,7 +417,7 @@ def _card(parent, **kw) -> tk.Frame:
 
 
 # ─── 主應用程式 ───────────────────────────────────────────────────────────
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 
 
 class App:
@@ -476,6 +477,7 @@ class App:
         self._closing          = False    # 是否已進入關閉流程
 
         self._is_mini = False
+        self.editor_active = False
 
         # 縮時錄影初始化
         tl_out = self._settings.get('timelapse_output_dir', os.path.join(_APP_DIR, 'videos'))
@@ -810,6 +812,8 @@ class App:
              self._delete_selected, font=FS).pack(side='left', padx=(0, 4))
         _btn(ctrl, _tr('ui.tracker.btn_reset'), CARD2, '#b91c1c',
              self._reset_all, font=FS).pack(side='left', padx=(0, 4))
+        _btn(ctrl, '✨ ' + (_tr('ui.tracker.btn_liquify') if get_current_language() != 'zh_tw' else '啟動液化'),
+             CARD2, ACCENT, self._trigger_liquify, font=FS).pack(side='left', padx=(0, 4))
         _btn(ctrl, _tr('ui.tracker.btn_settings'), CARD2, ACCH,
              self._open_settings, font=FS).pack(side='right')
         _btn(ctrl, _tr('ui.tracker.btn_save'), CARD2, ACCH,
@@ -2136,6 +2140,7 @@ class App:
         
         MINI_HOTKEY_ID = 1234
         RECORD_HOTKEY_ID = 5678
+        LIQUIFY_HOTKEY_ID = 9012
         
         # 註冊 Ctrl+Alt+T (精簡模式)
         ctypes.windll.user32.RegisterHotKey(None, MINI_HOTKEY_ID, 0x0003, 0x54)
@@ -2160,6 +2165,26 @@ class App:
             else:
                 self.root.after(0, lambda: self.var_status.set(f"⚠️ 全域快捷鍵 {rec_key} 註冊失敗，可能已被佔用"))
         
+        # 解析並註冊液化熱鍵 (預設 Ctrl + Alt + L)
+        liq_key = self._settings.get('hotkey_liquify_key', 'L')
+        liq_ctrl = self._settings.get('hotkey_liquify_ctrl', True)
+        liq_alt = self._settings.get('hotkey_liquify_alt', True)
+        liq_shift = self._settings.get('hotkey_liquify_shift', False)
+        
+        liq_vk = self._parse_key_to_vk(liq_key)
+        liq_mods = 0
+        if liq_alt:   liq_mods |= 0x0001
+        if liq_ctrl:  liq_mods |= 0x0002
+        if liq_shift: liq_mods |= 0x0004
+        
+        liq_registered = False
+        if liq_vk > 0:
+            res = ctypes.windll.user32.RegisterHotKey(None, LIQUIFY_HOTKEY_ID, liq_mods, liq_vk)
+            if res:
+                liq_registered = True
+            else:
+                self.root.after(0, lambda: self.var_status.set(f"⚠️ 液化快捷鍵 {liq_key} 註冊失敗"))
+        
         self._hotkey_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
         
         try:
@@ -2170,6 +2195,8 @@ class App:
                         self.root.after(0, self.toggle_mini_mode)
                     elif msg.wParam == RECORD_HOTKEY_ID:
                         self.root.after(0, self._toggle_record_from_hotkey)
+                    elif msg.wParam == LIQUIFY_HOTKEY_ID:
+                        self.root.after(0, self._trigger_liquify)
                 elif msg.message == 0x0012: # WM_QUIT
                     break
                 ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
@@ -2180,6 +2207,57 @@ class App:
             ctypes.windll.user32.UnregisterHotKey(None, MINI_HOTKEY_ID)
             if rec_registered:
                 ctypes.windll.user32.UnregisterHotKey(None, RECORD_HOTKEY_ID)
+            if liq_registered:
+                ctypes.windll.user32.UnregisterHotKey(None, LIQUIFY_HOTKEY_ID)
+
+    def _trigger_liquify(self):
+        if self.editor_active:
+            return
+            
+        # 1. 釋放 Alt 與 Ctrl 鍵以避免按鍵模擬干擾
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.keybd_event(0x11, 0, 2, 0)  # VK_CONTROL release
+        user32.keybd_event(0x12, 0, 2, 0)  # VK_MENU (ALT) release
+        import time
+        time.sleep(0.05)
+        
+        # 2. 模擬 Ctrl + C 複製選區
+        user32.keybd_event(0x11, 0, 0, 0)  # Press Ctrl
+        user32.keybd_event(0x43, 0, 0, 0)  # Press C
+        user32.keybd_event(0x43, 0, 2, 0)  # Release C
+        user32.keybd_event(0x11, 0, 2, 0)  # Release Ctrl
+        
+        time.sleep(0.2) # 等待剪貼簿更新
+        
+        try:
+            img = read_image_from_clipboard()
+            if img is None:
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+                messagebox.showwarning("提示", "剪貼簿中沒有圖像數據！\n請先在 SAI2 中選擇並複製 (Ctrl+C)。")
+                return
+                
+            # 建立液化編輯視窗
+            LiquifyEditor(self, img, on_save_callback=self._on_liquify_save_success)
+        except Exception as e:
+            messagebox.showerror("錯誤", f"開啟液化工具失敗: {e}")
+
+    def _on_liquify_save_success(self):
+        # 延遲一點點等待剪貼簿寫入完畢
+        import time
+        time.sleep(0.15)
+        
+        # 模擬 Ctrl + V 貼回原視窗
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.keybd_event(0x11, 0, 0, 0)  # Press Ctrl
+        user32.keybd_event(0x56, 0, 0, 0)  # Press V
+        user32.keybd_event(0x56, 0, 2, 0)  # Release V
+        user32.keybd_event(0x11, 0, 2, 0)  # Release Ctrl
+        
+        import winsound
+        winsound.MessageBeep(winsound.MB_OK)
 
     def _toggle_record_from_hotkey(self):
         enabled = not self.timelapse_recorder.enabled
@@ -2840,6 +2918,13 @@ class SettingsDialog(tk.Toplevel):
         self._callback = callback
         self._settings = dict(settings)
         
+        self.geometry('650x560')
+        self.update_idletasks()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        x = (sw - 650) // 2
+        y = (sh - 560) // 2
+        self.geometry(f'650x560+{x}+{y}')
         # 根據螢幕解析度動態計算設定對話框大小
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
@@ -3043,6 +3128,30 @@ class SettingsDialog(tk.Toplevel):
         self.combo_key = ttk.Combobox(f_hotkey, textvariable=self.var_key, state='readonly', width=10, font=FS, values=keys)
         self.combo_key.grid(row=1, column=1, sticky='w', pady=4)
         
+        # ── 5. 液化快速鍵 (右欄) ──
+        f_liq_hotkey = tk.LabelFrame(right_col, text=_tr('dialog.settings.grp_liq_hotkey') if get_current_language() != 'zh_tw' else '液化全域快速鍵', font=FH, fg=ACCENT, bg=CARD, bd=1, relief='solid', padx=10, pady=8)
+        f_liq_hotkey.pack(fill='x', pady=(10, 0))
+        
+        liq_mods_frame = tk.Frame(f_liq_hotkey, bg=CARD)
+        liq_mods_frame.grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
+        
+        self.var_liq_ctrl = tk.BooleanVar(value=self._settings.get('hotkey_liquify_ctrl', True))
+        self.chk_liq_ctrl = tk.Checkbutton(liq_mods_frame, text='Ctrl', variable=self.var_liq_ctrl, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT, cursor='hand2')
+        self.chk_liq_ctrl.pack(side='left', padx=(0, 8))
+        
+        self.var_liq_alt = tk.BooleanVar(value=self._settings.get('hotkey_liquify_alt', True))
+        self.chk_liq_alt = tk.Checkbutton(liq_mods_frame, text='Alt', variable=self.var_liq_alt, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT, cursor='hand2')
+        self.chk_liq_alt.pack(side='left', padx=(0, 8))
+        
+        self.var_liq_shift = tk.BooleanVar(value=self._settings.get('hotkey_liquify_shift', False))
+        self.chk_liq_shift = tk.Checkbutton(liq_mods_frame, text='Shift', variable=self.var_liq_shift, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT, cursor='hand2')
+        self.chk_liq_shift.pack(side='left', padx=(0, 8))
+        
+        tk.Label(f_liq_hotkey, text=_tr('dialog.settings.hotkey_key'), font=FB, fg=TEXT, bg=CARD).grid(row=1, column=0, sticky='w', pady=4)
+        self.var_liq_key = tk.StringVar(value=self._settings.get('hotkey_liquify_key', 'L'))
+        self.combo_liq_key = ttk.Combobox(f_liq_hotkey, textvariable=self.var_liq_key, state='readonly', width=10, font=FS, values=keys)
+        self.combo_liq_key.grid(row=1, column=1, sticky='w', pady=4)
+        
         self._on_preset_change()
         self.wait_window()
 
@@ -3125,6 +3234,11 @@ class SettingsDialog(tk.Toplevel):
         self._settings['hotkey_record_alt'] = self.var_alt.get()
         self._settings['hotkey_record_shift'] = self.var_shift.get()
         self._settings['hotkey_record_key'] = self.var_key.get()
+        
+        self._settings['hotkey_liquify_ctrl'] = self.var_liq_ctrl.get()
+        self._settings['hotkey_liquify_alt'] = self.var_liq_alt.get()
+        self._settings['hotkey_liquify_shift'] = self.var_liq_shift.get()
+        self._settings['hotkey_liquify_key'] = self.var_liq_key.get()
         
         # Save Language code
         selected_lang_name = self.var_lang_name.get()

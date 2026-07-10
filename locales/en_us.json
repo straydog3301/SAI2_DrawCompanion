@@ -212,5 +212,7 @@
   "tracker.csv.header.draw_time": "Draw Time",
   "tracker.csv.header.efficiency": "Efficiency (%)",
   "tracker.csv.header.sessions": "Session Count",
-  "tracker.csv.header.last_use": "Last Used"
+  "tracker.csv.header.last_use": "Last Used",
+  "ui.tracker.btn_liquify": "Liquify",
+  "dialog.settings.grp_liq_hotkey": "Global Liquify Hotkey"
 }
