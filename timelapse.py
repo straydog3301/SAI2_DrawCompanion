@@ -18,9 +18,6 @@ from ctypes import wintypes
 from PIL import Image
 import queue
 from i18n import _tr
-from logger import get_logger
-
-log = get_logger()
 
 
 def file_key_to_subdir(key: str) -> str:
@@ -232,33 +229,18 @@ def capture_window_gdi(hwnd) -> Image.Image | None:
         # 注意：Image.frombuffer 僅持有指標而不複製資料，若延遲轉換，
         # buffer 超出作用域後背景執行緒讀取時會拿到失效記憶體，導致影片靜止
         img = Image.frombuffer('RGBA', (w, h), buffer, 'raw', 'BGRA', 0, 1)
-        result = img.convert('RGB')
-        return result
-    except Exception as e:
-        log.error(f"GDI 截圖失敗：{e}", exc_info=True)
+        return img.convert('RGB')
+    except Exception:
         return None
     finally:
-        # 確保 GDI 物件正確釋放，避免記憶體洩漏
-        if hOldSel and saveDC:
-            try:
-                gdi32.SelectObject(saveDC, hOldSel)
-            except Exception:
-                pass
+        if saveDC and hOldSel:
+            gdi32.SelectObject(saveDC, hOldSel)
         if saveBitMap:
-            try:
-                gdi32.DeleteObject(saveBitMap)
-            except Exception:
-                pass
+            gdi32.DeleteObject(saveBitMap)
         if saveDC:
-            try:
-                gdi32.DeleteDC(saveDC)
-            except Exception:
-                pass
+            gdi32.DeleteDC(saveDC)
         if hwndDC:
-            try:
-                user32.ReleaseDC(hwnd, hwndDC)
-            except Exception:
-                pass
+            user32.ReleaseDC(hwnd, hwndDC)
 
 
 def make_even_dimensions(img: Image.Image) -> Image.Image:
@@ -275,20 +257,8 @@ def make_even_dimensions(img: Image.Image) -> Image.Image:
 
 
 def find_ffmpeg() -> bool:
-    """檢查系統 PATH 中是否存在 ffmpeg 執行檔（向後相容）"""
-    from ffmpeg_helper import find_ffmpeg_auto
-    return find_ffmpeg_auto() is not None
-
-
-def get_ffmpeg_path() -> Optional[str]:
-    """
-    取得 FFmpeg 執行檔路徑
-    
-    Returns:
-        FFmpeg 路徑，若找不到則回傳 None
-    """
-    from ffmpeg_helper import find_ffmpeg_auto
-    return find_ffmpeg_auto()
+    """檢查系統 PATH 中是否存在 ffmpeg 執行檔"""
+    return shutil.which('ffmpeg') is not None
 
 
 def _mouse_pressed() -> bool:
@@ -473,15 +443,13 @@ class TimelapseRecorder:
                     img.save(path, format='PNG')
                 else:
                     img.save(path, format='JPEG', quality=quality_val)
-                log.debug(f"幀圖已寫入：{path}")
-            except Exception as e:
-                log.error(f"寫入幀圖失敗 {path}: {e}", exc_info=True)
+            except Exception:
+                pass
             finally:
                 self._write_queue.task_done()
 
     def start(self):
         """啟動錄製監控執行緒"""
-        log.info(f"TimelapseRecorder 啟動 (模式：{self.target_mode})")
         with self._lock:
             if self._running:
                 return
@@ -500,7 +468,6 @@ class TimelapseRecorder:
 
     def stop(self):
         """停止監控，並將剩餘尚未合成的圖檔進行合成導出"""
-        log.info("TimelapseRecorder 停止")
         with self._lock:
             self._running = False
         if self._thread and self._thread.is_alive():
@@ -511,8 +478,8 @@ class TimelapseRecorder:
             try:
                 self._write_queue.put(None, timeout=1.0)
                 self._writer_thread.join(timeout=5.0)
-            except Exception as e:
-                log.error(f"停止寫入執行緒失敗：{e}", exc_info=True)
+            except Exception:
+                pass
         
         # 停止時若有正在進行的檔案，觸發最終導出
         if self.active_file:
@@ -780,8 +747,7 @@ class TimelapseRecorder:
                                     img = img.crop((rel_left, rel_top, rel_right, rel_bottom))
                                 else:
                                     img = None
-                            except Exception as e:
-                                log.warning(f"裁剪畫布區域失敗：{e}")
+                            except Exception:
                                 img = None
                     else:
                         # 頂層浮動視窗：直接擷取該視窗，並裁剪掉非客戶區（邊框、標題列）
@@ -800,8 +766,8 @@ class TimelapseRecorder:
                                 
                                 if client_w > 0 and client_h > 0:
                                     img = img.crop((offset_x, offset_y, offset_x + client_w, offset_y + client_h))
-                            except Exception as e:
-                                log.warning(f"裁剪浮動視窗失敗：{e}")
+                            except Exception:
+                                pass
                 else:
                     target_hwnd = main_hwnd
                     fallback_msg = " " + _tr("timelapse.status.canvas_missing")
@@ -816,8 +782,7 @@ class TimelapseRecorder:
                 if target_hwnd is not None:
                     try:
                         img = capture_window_gdi(target_hwnd)
-                    except Exception as e:
-                        log.warning(f"截圖失敗 (mode={target_mode}): {e}")
+                    except Exception:
                         img = None
 
             if img:
@@ -836,16 +801,15 @@ class TimelapseRecorder:
                 # 將圖片放入非同步寫入佇列，避免磁碟寫入阻塞主錄影執行緒
                 try:
                     self._write_queue.put((img, frame_path, quality_val), block=False)
-                except Exception as e:
+                except Exception:
                     # 佇列滿了則同步寫入以防丟幀
-                    log.warning(f"寫入佇列失敗，改用同步寫入：{e}")
                     try:
                         if ext == "png":
                             img.save(frame_path, format='PNG')
                         else:
                             img.save(frame_path, format='JPEG', quality=quality_val)
-                    except Exception as e2:
-                        log.error(f"同步寫入幀圖失敗：{e2}", exc_info=True)
+                    except Exception:
+                        pass
                 
                 # 在背景執行緒生成縮圖，減輕 UI 執行緒的負擔
                 thumb = None
@@ -858,8 +822,8 @@ class TimelapseRecorder:
                             thumb = img.copy()
                             # 採用雙線性插值，速度快，開銷低
                             thumb.thumbnail((160, 90), Image.BILINEAR)
-                        except Exception as e:
-                            log.warning(f"生成縮圖失敗：{e}")
+                        except Exception:
+                            pass
                 
                 with self._lock:
                     self.frame_count += 1
@@ -869,8 +833,8 @@ class TimelapseRecorder:
                     try:
                         # 傳送預先生成好的縮圖 (thumb) 而非高解析度的 img 檔案給 UI 回呼
                         self.on_frame_captured(current_count, thumb, fallback_msg)
-                    except Exception as e:
-                        log.warning(f"on_frame_captured 回呼失敗：{e}")
+                    except Exception:
+                        pass
 
     def _trigger_export(self, filename: str, temp_dir: str, frame_count: int):
         """啟動背景執行緒，將暫存圖檔合成影片"""
@@ -908,8 +872,7 @@ class TimelapseRecorder:
                     break
                 time.sleep(0.05)
 
-        ffmpeg_path = get_ffmpeg_path()
-        if not ffmpeg_path:
+        if not find_ffmpeg():
             if self.on_status_msg:
                 self.on_status_msg(_tr("timelapse.status.ffmpeg_missing"))
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -954,7 +917,7 @@ class TimelapseRecorder:
 
         # libx264, preset fast (兼顧速度)，並輸出 progress 資訊
         cmd = [
-            ffmpeg_path, '-y',
+            'ffmpeg', '-y',
             '-framerate', f"{input_fps:.3f}",
             '-i', input_pattern,
             '-c:v', 'libx264',
@@ -994,20 +957,17 @@ class TimelapseRecorder:
                             pct = min(100, max(0, pct))
                             if self.on_export_progress:
                                 self.on_export_progress(pct, _tr("timelapse.status.ffmpeg_progress", name=output_filename, pct=pct))
-                    except Exception as e:
-                        log.warning(f"解析 FFmpeg 進度失敗：{e}")
+                    except Exception:
+                        pass
             
             process.wait(timeout=30)
             if process.returncode == 0:
-                log.info(f"FFmpeg 合成成功：{output_path}")
                 if self.on_export_progress:
                     self.on_export_progress(100, _tr("timelapse.status.ffmpeg_success", path=output_path))
             else:
-                log.error(f"FFmpeg 合成失敗，返回碼：{process.returncode}")
                 if self.on_export_progress:
                     self.on_export_progress(0, _tr("timelapse.status.ffmpeg_failed", code=process.returncode))
         except Exception as e:
-            log.error(f"FFmpeg 匯出過程發生錯誤：{e}", exc_info=True)
             if process:
                 try:
                     process.kill()
@@ -1036,6 +996,5 @@ class TimelapseRecorder:
                     img.convert('RGB').save(dest, 'JPEG', quality=90)
             else:
                 shutil.copy2(last_frame_src, dest)
-            log.debug(f"已儲存最後一幀縮圖：{dest}")
-        except Exception as e:
-            log.warning(f"儲存最後一幀失敗：{e}")
+        except Exception:
+            pass
