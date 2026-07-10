@@ -17,6 +17,10 @@ from tracker import DrawTracker, fmt_seconds
 from timelapse import TimelapseRecorder, find_ffmpeg, file_key_to_subdir
 from i18n import _tr, set_language, get_current_language, get_available_languages
 from liquify_helper import LiquifyEditor, read_image_from_clipboard
+from logger import StructuredLogger, install_exception_hook, get_logger
+
+# ─── 日誌系統初始化 ────────────────────────────────────────────────────────
+logger = get_logger()
 
 # ─── 啟動參數 ─────────────────────────────────────────────────────────────
 # --auto-close：由 watcher.pyw 傳入，SAI2 關閉時自動儲存並關閉計時器
@@ -30,14 +34,16 @@ try:
 except Exception:
     pass
 
-# ─── 全域例外攔截 ─────────────────────────────────────────────────────────
+# ─── 全域例外攔截（使用日誌系統） ──────────────────────────────────────────
 def _excepthook(et, ev, etb):
+    tb_str = ''.join(traceback.format_exception(et, ev, etb))[:900]
+    logger.critical(f"未處理的例外：{tb_str}")
     try:
-        messagebox.showerror(_tr('err.unexpected'),
-                             ''.join(traceback.format_exception(et, ev, etb))[:900])
+        messagebox.showerror(_tr('err.unexpected'), tb_str)
     except Exception:
         pass
-sys.excepthook = _excepthook
+
+install_exception_hook(logger)
 
 # ─── 螢幕解析度自適應 ─────────────────────────────────────────────────────
 def _get_scaled_size(screen_width: int, base_width: int = 540, base_height: int = 820) -> tuple[int, int]:
@@ -452,6 +458,7 @@ class App:
         data_path = self._settings.get('data_path', _DEFAULT_DATA)
         idle_to   = float(self._settings.get('idle_timeout', 10.0))
 
+        logger.info(f"初始化 DrawTracker，資料路徑：{data_path}")
         self.tracker = DrawTracker(data_path=data_path, idle_timeout=idle_to)
 
         self._blink    = False

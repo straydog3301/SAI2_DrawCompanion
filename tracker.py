@@ -12,13 +12,18 @@ from __future__ import annotations
 import csv
 import json
 import os
+import shutil
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 import win32api
 import win32gui
 from i18n import _tr
+from logger import get_logger
+
+log = get_logger()
 
 
 # ─── 工具函式 ─────────────────────────────────────────────────────────────
@@ -300,17 +305,84 @@ class DrawTracker:
                         if v in cleaned_files:
                             valid_aliases[k] = v
                     d['aliases'] = valid_aliases
+                    log.debug(f"載入追蹤資料：{len(cleaned_files)} 個檔案")
                     return d
-            except Exception:
-                pass
+            except json.JSONDecodeError as e:
+                log.error(f"tracker.json 解析失敗：{e}")
+                # 自動建立備份並返回空資料
+                self._backup_corrupt_file()
+            except Exception as e:
+                log.error(f"載入追蹤資料失敗：{e}", exc_info=True)
         return {'files': {}, 'daily_history': {}, 'aliases': {}}
+
+    def _backup_corrupt_file(self):
+        """當資料檔損毀時，自動建立備份檔"""
+        try:
+            backup_path = Path(self.data_path).with_suffix('.json.bak')
+            shutil.copy2(self.data_path, backup_path)
+            log.info(f"已建立損毀檔案備份：{backup_path}")
+        except Exception as e:
+            log.error(f"建立備份失敗：{e}")
 
     def _save_json(self, data: dict):
         try:
-            with open(self.data_path, 'w', encoding='utf-8') as f:
+            # 寫入前建立臨時檔案，確保原子性寫入
+            temp_path = self.data_path + '.tmp'
+            with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+            # 原子性替換原檔案
+            os.replace(temp_path, self.data_path)
+            log.debug(f"追蹤資料已儲存：{len(data.get('files', {}))} 個檔案")
+        except Exception as e:
+            log.error(f"儲存追蹤資料失敗：{e}", exc_info=True)
+            # 清理臨時檔案（如果有）
+            try:
+                if os.path.exists(self.data_path + '.tmp'):
+                    os.remove(self.data_path + '.tmp')
+            except Exception:
+                pass
+
+    def export_csv(self, output_path: str) -> bool:
+        """
+        匯出追蹤資料為 CSV 格式
+        
+        Args:
+            output_path: 輸出的 CSV 檔案路徑
+        
+        Returns:
+            成功返回 True，失敗返回 False
+        """
+        try:
+            with self._lock:
+                self._flush_session()
+                data = json.loads(json.dumps(self._persist))
+            
+            with open(output_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                # 寫入標頭
+                writer.writerow(['檔案名稱', '開啟時間 (秒)', '動筆時間 (秒)', 
+                               '開啟時間 (格式化)', '動筆時間 (格式化)', 
+                               '工作階段數', '最後開啟時間'])
+                
+                # 寫入資料
+                for fname, rec in sorted(data.get('files', {}).items()):
+                    open_secs = rec.get('open_seconds', 0)
+                    draw_secs = rec.get('draw_seconds', 0)
+                    writer.writerow([
+                        fname,
+                        f'{open_secs:.1f}',
+                        f'{draw_secs:.1f}',
+                        fmt_seconds(open_secs),
+                        fmt_seconds(draw_secs),
+                        rec.get('sessions', 0),
+                        rec.get('last_seen', '')
+                    ])
+            
+            log.info(f"CSV 匯出成功：{output_path}")
+            return True
+        except Exception as e:
+            log.error(f"CSV 匯出失敗：{e}", exc_info=True)
+            return False
 
     def save(self):
         """將目前工作階段合併後存檔（可從任意執行緒呼叫）。"""
@@ -356,6 +428,7 @@ class DrawTracker:
     # ── 執行緒 ────────────────────────────────────────────────────────────
 
     def start(self):
+        log.info("DrawTracker 啟動")
         if self._running:
             return
         self._running = True
@@ -363,6 +436,7 @@ class DrawTracker:
         self._thread.start()
 
     def stop(self):
+        log.info("DrawTracker 停止")
         self._running = False
         self.save()
 
@@ -478,7 +552,7 @@ class DrawTracker:
 
             except Exception as e:
                 # 避免背景執行緒因為任何未預期例外而中斷
-                pass
+                log.error(f"Tracker 迴圈發生錯誤：{e}", exc_info=True)
 
             time.sleep(self.POLL)
 
