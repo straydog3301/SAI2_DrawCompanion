@@ -14,6 +14,7 @@ pip-delete-this-directory.txt
 # PyInstaller Build
 build/
 dist/
+videos/
 *.spec
 *.log
 

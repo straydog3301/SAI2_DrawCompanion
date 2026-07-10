@@ -38,6 +38,49 @@ def _excepthook(et, ev, etb):
         pass
 sys.excepthook = _excepthook
 
+# ─── 螢幕解析度自適應 ─────────────────────────────────────────────────────
+def _get_scaled_size(screen_width: int, base_width: int = 540, base_height: int = 820) -> tuple[int, int]:
+    """
+    根據螢幕寬度計算合適的視窗大小。
+    在 2560x1440 上使用 540x820，在 3840x2160 上適當放大。
+    """
+    # 基準解析度 (2560x1440)
+    base_screen_width = 2560
+    
+    # 計算縮放比例，但限制在合理範圍內
+    scale_factor = screen_width / base_screen_width
+    
+    # 針對不同解析度進行調整
+    if screen_width >= 3840:  # 4K
+        width = int(base_width * 1.2)  # 放大20%
+        height = int(base_height * 1.15)  # 放大15%
+    elif screen_width >= 1920:  # Full HD
+        width = int(base_width * 1.1)  # 放大10%
+        height = int(base_height * 1.05)  # 放大5%
+    else:  # 較低解析度
+        width = base_width
+        height = base_height
+    
+    # 確保視窗不會超出螢幕範圍
+    max_width = int(screen_width * 0.7)
+    max_height = int(screen_width * 0.8)  # 基於寬度計算最大高度
+    
+    width = min(width, max_width)
+    height = min(height, max_height)
+    
+    return width, height
+
+def _get_scaled_dialog_size(screen_width: int, base_width: int) -> int:
+    """
+    計算對話框的適當大小。
+    """
+    if screen_width >= 3840:  # 4K
+        return int(base_width * 1.3)
+    elif screen_width >= 1920:  # Full HD
+        return int(base_width * 1.15)
+    else:
+        return base_width
+
 # ─── 色彩 / 字型 ──────────────────────────────────────────────────────────
 BG     = '#111111'
 CARD   = '#1e1e1e'
@@ -388,9 +431,20 @@ class App:
         _load_theme_colors(self._settings)
 
         self.root.configure(bg=BG)
-        self.root.geometry('540x820')
-        self.root.resizable(False, True)
+        
+        # 取得螢幕解析度並計算合適的視窗大小
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        window_width, window_height = _get_scaled_size(screen_width)
+        
+        # 設定視窗大小並允許調整寬度
+        self.root.geometry(f'{window_width}x{window_height}')
+        self.root.resizable(True, True)  # 允許調整寬度和高度
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
+        
+        # 儲存基礎大小供精簡模式使用
+        self._base_width = window_width
+        self._base_height = window_height
 
         _setup_styles()
 
@@ -2004,11 +2058,21 @@ class App:
             # 隱藏標題列邊框
             self.root.overrideredirect(True)
             
-            # 調整為精簡模式尺寸
+            # 調整為精簡模式尺寸，根據螢幕解析度動態計算
             parts = self._normal_geometry.split('+')
             x = parts[1] if len(parts) > 1 else "100"
             y = parts[2] if len(parts) > 2 else "100"
-            self.root.geometry(f"300x36+{x}+{y}")
+            
+            # 根據螢幕寬度計算精簡模式寬度
+            screen_width = self.root.winfo_screenwidth()
+            if screen_width >= 3840:  # 4K
+                mini_width = 400
+            elif screen_width >= 2560:  # 2K
+                mini_width = 350
+            else:  # 較低解析度
+                mini_width = 300
+            
+            self.root.geometry(f"{mini_width}x36+{x}+{y}")
             
             # 關閉縮圖生成，節省 CPU
             self.timelapse_recorder.needs_thumbnail = False
@@ -2133,13 +2197,25 @@ class App:
         top.configure(bg=CARD)
         top.resizable(False, False)
         top.attributes('-topmost', True)
-        top.geometry('360x160')
-        top.update_idletasks()
+        
+        # 根據螢幕解析度動態計算對話框大小
         sw = top.winfo_screenwidth()
+        if sw >= 3840:  # 4K
+            dialog_width = 430  # 360 * 1.2
+            dialog_height = 190  # 160 * 1.2
+        elif sw >= 2560:  # 2K
+            dialog_width = 390  # 360 * 1.083
+            dialog_height = 175  # 160 * 1.094
+        else:
+            dialog_width = 360
+            dialog_height = 160
+        
+        top.geometry(f'{dialog_width}x{dialog_height}')
+        top.update_idletasks()
         sh = top.winfo_screenheight()
-        x  = (sw - 360) // 2
-        y  = (sh - 160) // 2
-        top.geometry(f'360x160+{x}+{y}')
+        x  = (sw - dialog_width) // 2
+        y  = (sh - dialog_height) // 2
+        top.geometry(f'{dialog_width}x{dialog_height}+{x}+{y}')
         _apply_titlebar_theme(top)
 
 
@@ -2764,20 +2840,44 @@ class SettingsDialog(tk.Toplevel):
         self._callback = callback
         self._settings = dict(settings)
         
-        self.geometry('650x500')
-        self.update_idletasks()
+        # 根據螢幕解析度動態計算設定對話框大小
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        x = (sw - 650) // 2
-        y = (sh - 500) // 2
-        self.geometry(f'650x500+{x}+{y}')
+        
+        # 計算適合當前解析度的對話框大小
+        if sw >= 3840:  # 4K
+            dialog_width = 780  # 650 * 1.2
+            dialog_height = 600  # 500 * 1.2
+        elif sw >= 2560:  # 2K
+            dialog_width = 700  # 650 * 1.075
+            dialog_height = 540  # 500 * 1.08
+        else:  # 較低解析度
+            dialog_width = 650
+            dialog_height = 500
+        
+        self.geometry(f'{dialog_width}x{dialog_height}')
+        self.update_idletasks()
+        
+        x = (sw - dialog_width) // 2
+        y = (sh - dialog_height) // 2
+        self.geometry(f'{dialog_width}x{dialog_height}+{x}+{y}')
         _apply_titlebar_theme(self)
 
 
         # ── 底部按鈕欄 ──
         btn_row = tk.Frame(self, bg=CARD)
         btn_row.pack(side='bottom', fill='x', pady=(10, 14))
-        _btn(btn_row, _tr('dialog.settings.btn_apply'), ACCENT, ACCH, self._apply, font=FB, width=12).pack(side='left', padx=(200, 10))
+        
+        # 根據對話框寬度動態計算按鈕間距
+        dialog_width = self.winfo_width() or 650
+        if dialog_width >= 780:  # 4K
+            button_padx = 280
+        elif dialog_width >= 700:  # 2K
+            button_padx = 240
+        else:  # 原始大小
+            button_padx = 200
+        
+        _btn(btn_row, _tr('dialog.settings.btn_apply'), ACCENT, ACCH, self._apply, font=FB, width=12).pack(side='left', padx=(button_padx, 10))
         _btn(btn_row, _tr('dialog.settings.btn_cancel'), CARD2, BORDER, self.destroy, font=FB, width=12).pack(side='left', padx=10)
 
         # ── 主佈局左右兩欄 ──
