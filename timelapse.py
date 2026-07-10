@@ -275,8 +275,20 @@ def make_even_dimensions(img: Image.Image) -> Image.Image:
 
 
 def find_ffmpeg() -> bool:
-    """檢查系統 PATH 中是否存在 ffmpeg 執行檔"""
-    return shutil.which('ffmpeg') is not None
+    """檢查系統 PATH 中是否存在 ffmpeg 執行檔（向後相容）"""
+    from ffmpeg_helper import find_ffmpeg_auto
+    return find_ffmpeg_auto() is not None
+
+
+def get_ffmpeg_path() -> Optional[str]:
+    """
+    取得 FFmpeg 執行檔路徑
+    
+    Returns:
+        FFmpeg 路徑，若找不到則回傳 None
+    """
+    from ffmpeg_helper import find_ffmpeg_auto
+    return find_ffmpeg_auto()
 
 
 def _mouse_pressed() -> bool:
@@ -896,7 +908,8 @@ class TimelapseRecorder:
                     break
                 time.sleep(0.05)
 
-        if not find_ffmpeg():
+        ffmpeg_path = get_ffmpeg_path()
+        if not ffmpeg_path:
             if self.on_status_msg:
                 self.on_status_msg(_tr("timelapse.status.ffmpeg_missing"))
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -941,7 +954,7 @@ class TimelapseRecorder:
 
         # libx264, preset fast (兼顧速度)，並輸出 progress 資訊
         cmd = [
-            'ffmpeg', '-y',
+            ffmpeg_path, '-y',
             '-framerate', f"{input_fps:.3f}",
             '-i', input_pattern,
             '-c:v', 'libx264',

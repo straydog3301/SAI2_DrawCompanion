@@ -18,8 +18,10 @@ from timelapse import TimelapseRecorder, find_ffmpeg, file_key_to_subdir
 from i18n import _tr, set_language, get_current_language, get_available_languages
 from liquify_helper import LiquifyEditor, read_image_from_clipboard
 from logger import StructuredLogger, install_exception_hook, get_logger
+from config_manager import get_config, init_config
 
-# ─── 日誌系統初始化 ────────────────────────────────────────────────────────
+# ─── 設定管理器初始化 ────────────────────────────────────────────────────────
+config = init_config()
 logger = get_logger()
 
 # ─── 啟動參數 ─────────────────────────────────────────────────────────────
@@ -198,54 +200,88 @@ def _load_theme_colors(settings: dict):
 
 
 def _load_settings() -> dict:
-    try:
-        with open(_SETTINGS_PATH, 'r', encoding='utf-8') as f:
-            d = json.load(f)
-    except Exception:
-        d = {}
-        
-    # Map old values for backward compatibility
-    mode_map = {'深色模式': 'dark', '亮色模式': 'light'}
-    if d.get('theme_mode') in mode_map:
-        d['theme_mode'] = mode_map[d['theme_mode']]
-
-    target_map = {
-        '僅錄製畫布': 'canvas',
-        '錄製 SAI 視窗': 'window',
-        '整個螢幕': 'screen'
-    }
-    if d.get('timelapse_target_str') in target_map:
-        d['timelapse_target_str'] = target_map[d['timelapse_target_str']]
-
-    defaults = {
-        'idle_timeout': 10.0,
-        'always_on_top': False,
-        'timelapse_enabled': False,
-        'timelapse_multiplier_str': '5x (167ms)',
-        'timelapse_target_str': 'canvas',
-        'timelapse_fps': 30,
-        'timelapse_quality': 'standard',
-        'language': 'zh_tw',
-        'theme_mode': 'dark',
-        'theme_accent_preset': '羅蘭紫',
-        'theme_accent_custom': '#7c3aed',
-        'hotkey_record_key': 'F10',
-        'hotkey_record_ctrl': False,
-        'hotkey_record_alt': False,
-        'hotkey_record_shift': False
-    }
-    for k, v in defaults.items():
-        if k not in d:
-            d[k] = v
-    return d
+    """
+    載入設定（向後相容舊版 settings.json，並遷移至新系統）
+    
+    優先使用 config_manager，若偵測到舊版 settings.json 則自動遷移
+    """
+    # 嘗試從新系統載入
+    cfg = get_config()
+    settings = cfg.get_all()
+    
+    # 檢查是否有舊版 settings.json 需要遷移
+    if _SETTINGS_PATH.exists():
+        try:
+            with open(_SETTINGS_PATH, 'r', encoding='utf-8') as f:
+                old_d = json.load(f)
+            
+            logger.info("偵測到舊版 settings.json，執行遷移...")
+            
+            # 遷移語言設定
+            lang_map = {'zh_tw': 'zh_TW', 'zh_tw': 'zh_TW', 'en_us': 'en_US', 'ja_jp': 'ja_JP'}
+            if old_d.get('language') in lang_map:
+                cfg.set('language', lang_map[old_d['language']])
+            
+            # 遷移主題設定
+            theme_map = {'深色模式': 'dark', '亮色模式': 'light', 'dark': 'dark', 'light': 'light'}
+            if old_d.get('theme_mode') in theme_map:
+                cfg.set('theme', theme_map[old_d['theme_mode']])
+            
+            # 遷移縮時錄影設定
+            if 'timelapse_fps' in old_d:
+                cfg.set('timelapse.fps', old_d['timelapse_fps'])
+            
+            quality_map = {'standard': 'medium', 'high': 'high', 'low': 'low'}
+            if old_d.get('timelapse_quality') in quality_map:
+                cfg.set('timelapse.quality', quality_map[old_d['timelapse_quality']])
+            
+            # 遷移熱鍵設定
+            if 'hotkey_record_key' in old_d:
+                cfg.set('hotkeys.start_stop', old_d['hotkey_record_key'])
+            
+            # 遷移視窗設定
+            if 'always_on_top' in old_d:
+                cfg.set('topmost', old_d['always_on_top'])
+            
+            # 遷移完成後備份舊檔
+            backup_path = _SETTINGS_PATH.with_suffix('.json.migrated')
+            counter = 1
+            while backup_path.exists():
+                backup_path = _SETTINGS_PATH.with_name(f'settings.json.migrated.{counter}')
+                counter += 1
+            
+            import shutil
+            shutil.copy2(_SETTINGS_PATH, backup_path)
+            logger.info(f"已備份舊版設定檔至：{backup_path}")
+            
+            # 刪除舊檔（可選，先保留）
+            # _SETTINGS_PATH.unlink()
+            
+        except Exception as e:
+            logger.error(f"遷移舊版設定失敗：{e}")
+    
+    return settings
 
 
 def _save_settings(d: dict):
-    try:
-        with open(_SETTINGS_PATH, 'w', encoding='utf-8') as f:
-            json.dump(d, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+    """
+    儲存設定到新系統
+    
+    將 main.py 的設定字典同步到 config_manager
+    """
+    cfg = get_config()
+    
+    # 同步關鍵設定
+    cfg.set('language', d.get('language', 'zh_TW'))
+    cfg.set('theme', d.get('theme_mode', 'dark'))
+    cfg.set('color_scheme', d.get('theme_accent_preset', '羅蘭紫'))
+    cfg.set('timelapse.fps', d.get('timelapse_fps', 30))
+    cfg.set('timelapse.quality', d.get('timelapse_quality', 'standard'))
+    cfg.set('hotkeys.start_stop', d.get('hotkey_record_key', 'F10'))
+    cfg.set('topmost', d.get('always_on_top', False))
+    
+    # 記錄日誌
+    logger.debug("設定已透過 _save_settings 同步到 config_manager")
 
 
 # ─── ttk 樣式 ─────────────────────────────────────────────────────────────
