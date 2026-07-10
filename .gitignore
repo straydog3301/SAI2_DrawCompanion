@@ -1,3 +1,4 @@
+```
 # Python
 __pycache__/
 *.pyc
@@ -6,26 +7,73 @@ __pycache__/
 .Python
 env/
 venv/
-pip-log.txt
-pip-delete-this-directory.txt
-.venv
-.env
+.venv/
+.venv*/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage/
+htmlcov/
 
-# PyInstaller Build
-build/
-dist/
-videos/
-*.spec
+# Logs
 *.log
 
-# App configuration and database
-sai2_draw_time.json
-sai2_timer_settings.json
-watcher_out.log
-pythonw_error.log
+# Environment
+.env
+.env.local
+.env.*
 
-# Operating System
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+
+# OS
+.DS_Store
 Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
+
+# Build artifacts
+dist/
+build/
+*.o
+*.obj
+*.so
+*.a
+*.dll
+*.exe
+*.out
+
+# Dependencies
+node_modules/
+.gradle/
+target/
+julia-*/
+zig*/
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+```
