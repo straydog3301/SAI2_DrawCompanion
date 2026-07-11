@@ -417,7 +417,7 @@ def _card(parent, **kw) -> tk.Frame:
 
 
 # ─── 主應用程式 ───────────────────────────────────────────────────────────
-VERSION = '1.3.0'
+VERSION = '1.4.0'
 
 
 class App:
@@ -2261,10 +2261,28 @@ class App:
         time.sleep(0.25)
         sel_img = read_image_from_clipboard()
         if sel_img is None:
-            log_debug("Failed to read selection image from clipboard!")
-            import winsound
-            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
-            messagebox.showwarning("提示", "剪貼簿中沒有選區圖像！\n請先在 SAI2 中選擇並複製 (Ctrl+C)。")
+            # 沒有選區 → 自動遞補為「整層液化」模式。
+            # 使用角標錨定法取得從畫布 (0,0) 開始的圖層影像 (解決 SAI2
+            # 複製時自動裁掉透明邊界導致貼回錯位的問題)，貼回時保證原地對齊。
+            log_debug("No selection; falling back to whole-layer liquify mode (anchored)")
+            from liquify_helper import acquire_whole_layer_anchored
+            layer_img, warn = acquire_whole_layer_anchored()
+            if layer_img is None:
+                log_debug(f"Whole-layer acquire failed: {warn}")
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+                messagebox.showwarning("提示", warn or "無法取得圖層影像！")
+                return
+            if warn:
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+                messagebox.showwarning("警告", warn)
+            log_debug(f"Whole layer acquired (anchored): {layer_img.width}x{layer_img.height}")
+            try:
+                LiquifyEditor(self, layer_img, on_save_callback=self._on_liquify_save_success)
+            except Exception as e:
+                log_debug(f"Failed to launch editor: {e}")
+                messagebox.showerror("錯誤", f"開啟液化工具失敗: {e}")
             return
         log_debug(f"Selection acquired: {sel_img.width}x{sel_img.height}")
         
