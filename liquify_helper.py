@@ -312,6 +312,7 @@ class LiquifyEditor(tk.Toplevel):
         self.brush_size = settings.get("brush_size", 80)
         self.brush_strength = settings.get("brush_strength", 0.5)
         self.mode = "push"
+        self.bg_mode = "checkerboard"
         
         # 歷史紀錄佇列 (Undo/Redo)
         self.undo_stack = []
@@ -433,6 +434,30 @@ class LiquifyEditor(tk.Toplevel):
         divider2 = tk.Frame(sidebar, bg="#3d3d4d", height=1)
         divider2.pack(fill=tk.X, pady=12)
         
+        # 背景模式區
+        lbl_bg_sec = tk.Label(
+            sidebar, text="背景模式", bg="#2a2a35", fg="#a0a0b0", font=("Microsoft JhengHei", 9, "bold")
+        )
+        lbl_bg_sec.pack(anchor=tk.W, pady=(0, 5))
+        
+        self.bg_var = tk.StringVar(value="checkerboard")
+        bg_modes = [
+            ("🏁 棋盤方格", "checkerboard"),
+            ("⚪ 純白背景", "white"),
+            ("⚫ 純灰背景", "grey")
+        ]
+        for text, val in bg_modes:
+            rbtn = tk.Radiobutton(
+                sidebar, text=text, variable=self.bg_var, value=val, command=self.change_bg_mode,
+                bg="#2a2a35", fg="#d0d0d5", selectcolor="#3a3a4a", activebackground="#2a2a35",
+                activeforeground="white", font=("Microsoft JhengHei", 9), anchor=tk.W
+            )
+            rbtn.pack(fill=tk.X, pady=3)
+            
+        # 分隔線
+        divider_bg = tk.Frame(sidebar, bg="#3d3d4d", height=1)
+        divider_bg.pack(fill=tk.X, pady=12)
+        
         # 3. 歷史紀錄區 (復原/重做)
         lbl_hist_sec = tk.Label(
             sidebar, text="歷史紀錄", bg="#2a2a35", fg="#a0a0b0", font=("Microsoft JhengHei", 9, "bold")
@@ -502,6 +527,7 @@ class LiquifyEditor(tk.Toplevel):
         self.canvas.bind("<ButtonPress-3>", self.on_pan_press)
         self.canvas.bind("<B3-Motion>", self.on_pan_drag)
         self.canvas.bind("<ButtonRelease-3>", self.on_pan_release)
+        self.canvas.bind("<Configure>", self.on_resize)
 
     def update_history_buttons(self):
         if hasattr(self, "btn_undo") and hasattr(self, "btn_redo"):
@@ -564,6 +590,15 @@ class LiquifyEditor(tk.Toplevel):
     def change_mode(self):
         self.mode = self.mode_var.get()
         
+    def change_bg_mode(self):
+        self.bg_mode = self.bg_var.get()
+        self.render_warp()
+        
+    def on_resize(self, event):
+        if not hasattr(self, "edit_img") or self.edit_img is None:
+            return
+        self.render_warp()
+        
     def update_brush_size(self, val):
         self.brush_size = int(val)
         
@@ -593,19 +628,6 @@ class LiquifyEditor(tk.Toplevel):
         ew, eh = self.edit_img.size
         self.cols = math.ceil(ew / self.cell_size)
         self.rows = math.ceil(eh / self.cell_size)
-        
-        # 建立深色棋盤格背景以視覺化顯示透明度
-        tiny = Image.new("RGBA", (2, 2))
-        c1 = (60, 60, 70, 255)
-        c2 = (45, 45, 55, 255)
-        tiny.putpixel((0, 0), c1)
-        tiny.putpixel((1, 1), c1)
-        tiny.putpixel((1, 0), c2)
-        tiny.putpixel((0, 1), c2)
-        num_checkers_x = math.ceil(ew / 10)
-        num_checkers_y = math.ceil(eh / 10)
-        self.checker_img = tiny.resize((num_checkers_x * 2, num_checkers_y * 2), Image.Resampling.NEAREST)
-        self.checker_img = self.checker_img.crop((0, 0, ew, eh))
         
         # 初始化變形網格控制點
         self.grid_x = [[min(c * self.cell_size, ew) for c in range(self.cols + 1)] for r in range(self.rows + 1)]
@@ -646,19 +668,47 @@ class LiquifyEditor(tk.Toplevel):
         # 1. 於編輯解析度下進行液化變形
         self.warped_img = self.edit_img.transform((ew, eh), Image.MESH, mesh_data, Image.Resampling.BICUBIC)
         
-        # 2. 疊加棋盤格背景顯示透明度
-        preview = Image.alpha_composite(self.checker_img, self.warped_img)
-        
-        # 3. 根據 zoom_level 進行縮放顯示
+        # 2. 取得目前畫布大小
+        cw = self.canvas.winfo_width()
+        ch = self.canvas.winfo_height()
+        if cw < 10 or ch < 10:
+            cw, ch = 1150, 850
+            
+        # 3. 建立背景圖層
+        if self.bg_mode == "checkerboard":
+            cols = math.ceil(cw / 16)
+            rows = math.ceil(ch / 16)
+            small = Image.new("RGBA", (cols, rows))
+            pixels = []
+            c1 = (255, 255, 255, 255)
+            c2 = (223, 223, 223, 255)
+            for r in range(rows):
+                for c in range(cols):
+                    pixels.append(c1 if (c + r) % 2 == 0 else c2)
+            small.putdata(pixels)
+            bg_img = small.resize((cols * 16, rows * 16), Image.Resampling.NEAREST).crop((0, 0, cw, ch))
+        elif self.bg_mode == "white":
+            bg_img = Image.new("RGBA", (cw, ch), (255, 255, 255, 255))
+        else: # grey
+            bg_img = Image.new("RGBA", (cw, ch), (128, 128, 128, 255))
+            
+        # 4. 根據 zoom_level 進行縮放 warped_img
         disp_w = int(ew * self.zoom_level)
         disp_h = int(eh * self.zoom_level)
-        if self.zoom_level != 1.0:
-            preview = preview.resize((disp_w, disp_h), Image.Resampling.BILINEAR)
+        
+        if disp_w > 0 and disp_h > 0:
+            if self.zoom_level != 1.0:
+                warped_resized = self.warped_img.resize((disp_w, disp_h), Image.Resampling.BILINEAR)
+            else:
+                warped_resized = self.warped_img
+                
+            # 5. 疊加影像到背景上
+            bg_img.paste(warped_resized, (self.offset_x, self.offset_y), warped_resized)
             
-        self.tk_img = ImageTk.PhotoImage(preview)
+        self.tk_img = ImageTk.PhotoImage(bg_img)
         
         self.canvas.delete("image")
-        self.canvas.create_image(self.offset_x, self.offset_y, image=self.tk_img, anchor=tk.NW, tags="image")
+        self.canvas.create_image(0, 0, image=self.tk_img, anchor=tk.NW, tags="image")
         self.canvas.tag_lower("image")
 
     def to_img_coords(self, mx, my):
