@@ -2214,50 +2214,145 @@ class App:
         if self.editor_active:
             return
             
-        # 1. 釋放 Alt 與 Ctrl 鍵以避免按鍵模擬干擾
         import ctypes
-        user32 = ctypes.windll.user32
-        user32.keybd_event(0x11, 0, 2, 0)  # VK_CONTROL release
-        user32.keybd_event(0x12, 0, 2, 0)  # VK_MENU (ALT) release
         import time
+        from liquify_helper import (
+            find_sai2_hwnd, clear_clipboard, press_keys,
+            find_match, log_debug
+        )
+        import liquify_helper
+
+        log_debug("Companion main.py _trigger_liquify triggered!")
+        
+        # 1. 等待使用者放開 Ctrl 與 Alt 鍵，避開實體鍵盤衝突
+        log_debug("Waiting for physical Ctrl and Alt keys to be released...")
+        start_wait = time.time()
+        while True:
+            ctrl_down = ctypes.windll.user32.GetAsyncKeyState(0x11) & 0x8000
+            alt_down = ctypes.windll.user32.GetAsyncKeyState(0x12) & 0x8000
+            if not ctrl_down and not alt_down:
+                break
+            if time.time() - start_wait > 2.0:
+                log_debug("Timeout waiting for key release!")
+                break
+            time.sleep(0.05)
+            
+        log_debug("Keys released. Starting simulations...")
+        
+        # Reset globals in liquify_helper
+        liquify_helper.ACTIVE_OFFSET = None
+        liquify_helper.ACTIVE_CANVAS_SIZE = (0, 0)
+
+        # 2. 先釋放 Alt 與 Ctrl 鍵以避免後續按鍵模擬干擾
+        ctypes.windll.user32.keybd_event(0x11, 0, 2, 0)  # VK_CONTROL release
+        ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)  # VK_MENU (ALT) release
         time.sleep(0.05)
         
-        # 2. 模擬 Ctrl + C 複製選區
-        user32.keybd_event(0x11, 0, 0, 0)  # Press Ctrl
-        user32.keybd_event(0x43, 0, 0, 0)  # Press C
-        user32.keybd_event(0x43, 0, 2, 0)  # Release C
-        user32.keybd_event(0x11, 0, 2, 0)  # Release Ctrl
+        hwnd_sai2 = find_sai2_hwnd()
+        if hwnd_sai2:
+            log_debug(f"Found SAI2 HWND={hwnd_sai2}. SetForegroundWindow...")
+            ctypes.windll.user32.SetForegroundWindow(hwnd_sai2)
+            time.sleep(0.15)
+            
+        # 3. 複製選區 (Ctrl+C)
+        log_debug("Step 1: Copy selection...")
+        clear_clipboard()
+        press_keys([0x11, 0x43]) # Ctrl + C
+        time.sleep(0.25)
+        sel_img = read_image_from_clipboard()
+        if sel_img is None:
+            log_debug("Failed to read selection image from clipboard!")
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+            messagebox.showwarning("提示", "剪貼簿中沒有選區圖像！\n請先在 SAI2 中選擇並複製 (Ctrl+C)。")
+            return
+        log_debug(f"Selection acquired: {sel_img.width}x{sel_img.height}")
         
-        time.sleep(0.2) # 等待剪貼簿更新
+        # 4. 記錄目前剪貼簿序號，用於後續偵測新資料
+        kernel32 = ctypes.windll.kernel32
+        seq_before = ctypes.windll.user32.GetClipboardSequenceNumber()
+        log_debug(f"Clipboard sequence before copy merged: {seq_before}")
         
-        try:
-            img = read_image_from_clipboard()
-            if img is None:
-                import winsound
-                winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
-                messagebox.showwarning("提示", "剪貼簿中沒有圖像數據！\n請先在 SAI2 中選擇並複製 (Ctrl+C)。")
-                return
+        # 5. 全選整個畫布 (Ctrl+A) — 先確保 SAI2 仍在前景
+        log_debug("Step 2: Select All...")
+        if hwnd_sai2:
+            ctypes.windll.user32.SetForegroundWindow(hwnd_sai2)
+            time.sleep(0.2)
+        press_keys([0x11, 0x41]) # Ctrl + A
+        time.sleep(0.3)
+        
+        # 6. 複製全選後的畫布 (Ctrl+C) — 用普通 Ctrl+C 取代 Ctrl+Shift+C
+        log_debug("Step 3: Copy full canvas (Ctrl+C after Ctrl+A)...")
+        if hwnd_sai2:
+            ctypes.windll.user32.SetForegroundWindow(hwnd_sai2)
+            time.sleep(0.1)
+        press_keys([0x11, 0x43]) # Ctrl + C
+        
+        canvas_img = None
+        for attempt in range(8):
+            time.sleep(0.3)
+            seq_now = ctypes.windll.user32.GetClipboardSequenceNumber()
+            if seq_now != seq_before:
+                canvas_img = read_image_from_clipboard()
+                if canvas_img:
+                    log_debug(f"Canvas acquired on attempt {attempt+1}: {canvas_img.width}x{canvas_img.height} (seq {seq_before}->{seq_now})")
+                    break
+                else:
+                    log_debug(f"Attempt {attempt+1}: seq changed but read failed")
+            else:
+                log_debug(f"Attempt {attempt+1}: clipboard seq unchanged ({seq_now})")
+        
+        if canvas_img is None:
+            canvas_img = read_image_from_clipboard()
+            if canvas_img:
+                log_debug(f"Final fallback canvas: {canvas_img.width}x{canvas_img.height}")
+            else:
+                log_debug("All attempts to read canvas failed!")
+            
+        # 7. 復原以還原原始選區 (Ctrl+Z 撤銷 Ctrl+A 的全選)
+        log_debug("Step 4: Restore selection via Ctrl+Z...")
+        press_keys([0x11, 0x5A]) # Ctrl + Z
+        time.sleep(0.2)
+        
+        # 7. 比對計算偏移量並保存到 liquify_helper globals
+        if canvas_img and sel_img:
+            log_debug("Step 5: Matching selection inside canvas...")
+            offset = find_match(canvas_img, sel_img)
+            if offset:
+                liquify_helper.ACTIVE_OFFSET = offset
+                liquify_helper.ACTIVE_CANVAS_SIZE = canvas_img.size
+                log_debug(f"Match success! Offset: {offset}")
+            else:
+                log_debug("Match failed!")
                 
-            # 建立液化編輯視窗
-            LiquifyEditor(self, img, on_save_callback=self._on_liquify_save_success)
+        # 8. 啟動編輯器
+        log_debug("Launching LiquifyEditor...")
+        try:
+            LiquifyEditor(self, sel_img, on_save_callback=self._on_liquify_save_success)
         except Exception as e:
+            log_debug(f"Failed to launch editor: {e}")
             messagebox.showerror("錯誤", f"開啟液化工具失敗: {e}")
 
     def _on_liquify_save_success(self):
-        # 延遲一點點等待剪貼簿寫入完畢
-        import time
-        time.sleep(0.15)
-        
-        # 模擬 Ctrl + V 貼回原視窗
+        from liquify_helper import find_sai2_hwnd, press_keys, log_debug
         import ctypes
-        user32 = ctypes.windll.user32
-        user32.keybd_event(0x11, 0, 0, 0)  # Press Ctrl
-        user32.keybd_event(0x56, 0, 0, 0)  # Press V
-        user32.keybd_event(0x56, 0, 2, 0)  # Release V
-        user32.keybd_event(0x11, 0, 2, 0)  # Release Ctrl
+        import time
+        log_debug("Companion main.py _on_liquify_save_success triggered!")
+        time.sleep(0.2)
         
+        # 確保回到 SAI2 視窗
+        hwnd_sai2 = find_sai2_hwnd()
+        if hwnd_sai2:
+            log_debug(f"Activating SAI2 HWND={hwnd_sai2} for paste...")
+            ctypes.windll.user32.SetForegroundWindow(hwnd_sai2)
+            time.sleep(0.2)
+            
+        # 模擬 Ctrl + V
+        log_debug("Simulating Ctrl+V paste...")
+        press_keys([0x11, 0x56])
         import winsound
         winsound.MessageBeep(winsound.MB_OK)
+        log_debug("Workflow completed!")
 
     def _toggle_record_from_hotkey(self):
         enabled = not self.timelapse_recorder.enabled

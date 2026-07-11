@@ -18,6 +18,8 @@ CF_DIB = 8
 CF_DIBV5 = 17       # Windows 系統中的 DIBV5 格式 ID
 CF_HDROP = 15       # Windows 系統中的 HDROP 檔案格式 ID
 GMEM_MOVEABLE = 0x0002
+ACTIVE_OFFSET = None
+ACTIVE_CANVAS_SIZE = (0, 0)
 WM_HOTKEY = 0x0312
 
 user32 = ctypes.windll.user32
@@ -60,8 +62,31 @@ user32.RegisterClipboardFormatW.restype = ctypes.wintypes.UINT
 user32.IsClipboardFormatAvailable.argtypes = [ctypes.wintypes.UINT]
 user32.IsClipboardFormatAvailable.restype = ctypes.wintypes.BOOL
 
+user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+user32.GetAsyncKeyState.restype = ctypes.c_short
+
 # 註冊 PNG 剪貼簿格式以支援現代跨平台透明度
 PNG_FORMAT_ID = user32.RegisterClipboardFormatW("PNG")
+
+class BITMAPINFOHEADER(ctypes.Structure):
+    """
+    Win32 BITMAPINFOHEADER 結構，用於攜帶 24-bit/32-bit 標準 BMP 像素。
+    大小固定為 40 位元組。
+    """
+    _pack_ = 1
+    _fields_ = [
+        ("biSize", ctypes.wintypes.DWORD),
+        ("biWidth", ctypes.wintypes.LONG),
+        ("biHeight", ctypes.wintypes.LONG),
+        ("biPlanes", ctypes.wintypes.WORD),
+        ("biBitCount", ctypes.wintypes.WORD),
+        ("biCompression", ctypes.wintypes.DWORD),
+        ("biSizeImage", ctypes.wintypes.DWORD),
+        ("biXPelsPerMeter", ctypes.wintypes.LONG),
+        ("biYPelsPerMeter", ctypes.wintypes.LONG),
+        ("biClrUsed", ctypes.wintypes.DWORD),
+        ("biClrImportant", ctypes.wintypes.DWORD)
+    ]
 
 class BITMAPV5HEADER(ctypes.Structure):
     """
@@ -131,6 +156,17 @@ def copy_image_to_clipboard(pil_img):
     2. PNG (32-bit RGBA, 含透明度) -> 瀏覽器、Discord 等支援跨平台 PNG 的應用。
     3. CF_DIB (ID 8, 24-bit RGB, 墊白底作為相容備用) -> 不支援透明度的老舊程式。
     """
+    import time
+    global ACTIVE_OFFSET, ACTIVE_CANVAS_SIZE
+    if ACTIVE_OFFSET and ACTIVE_CANVAS_SIZE != (0, 0):
+        # 構造與大畫布大小一致的透明圖層，實現原地對齊
+        final_canvas = Image.new("RGBA", ACTIVE_CANVAS_SIZE, (0, 0, 0, 0))
+        final_canvas.paste(pil_img, ACTIVE_OFFSET)
+        pil_img = final_canvas
+        # 重設變數，避免干擾常規複製
+        ACTIVE_OFFSET = None
+        ACTIVE_CANVAS_SIZE = (0, 0)
+        
     has_alpha = pil_img.mode == "RGBA" or "A" in pil_img.getbands()
     
     # 1. 準備 PNG 數據
@@ -215,6 +251,7 @@ def read_image_from_clipboard():
     """
     從 Windows 剪貼簿讀取圖像，優先讀取 CF_DIBV5 (32-bit RGBA) 與 PNG 格式以保留透明度通道。
     """
+    import time
     opened = False
     for _ in range(10):
         if user32.OpenClipboard(None):
@@ -281,12 +318,12 @@ def load_settings():
                 return json.load(f)
     except:
         pass
-    return {"brush_size": 80, "brush_strength": 0.5}
+    return {"brush_size": 80, "brush_strength": 0.5, "bg_mode": "checkerboard"}
 
-def save_settings(size, strength):
+def save_settings(size, strength, bg_mode="checkerboard"):
     try:
         with open(SETTINGS_FILE, "w") as f:
-            json.dump({"brush_size": size, "brush_strength": strength}, f)
+            json.dump({"brush_size": size, "brush_strength": strength, "bg_mode": bg_mode}, f)
     except:
         pass
 class LiquifyEditor(tk.Toplevel):
@@ -312,7 +349,7 @@ class LiquifyEditor(tk.Toplevel):
         self.brush_size = settings.get("brush_size", 80)
         self.brush_strength = settings.get("brush_strength", 0.5)
         self.mode = "push"
-        self.bg_mode = "checkerboard"
+        self.bg_mode = settings.get("bg_mode", "checkerboard")
         
         # 歷史紀錄佇列 (Undo/Redo)
         self.undo_stack = []
@@ -440,7 +477,7 @@ class LiquifyEditor(tk.Toplevel):
         )
         lbl_bg_sec.pack(anchor=tk.W, pady=(0, 5))
         
-        self.bg_var = tk.StringVar(value="checkerboard")
+        self.bg_var = tk.StringVar(value=self.bg_mode)
         bg_modes = [
             ("🏁 棋盤方格", "checkerboard"),
             ("⚪ 純白背景", "white"),
@@ -874,7 +911,7 @@ class LiquifyEditor(tk.Toplevel):
 
     def save_and_close(self):
         # 儲存目前的筆刷大小與強度設定
-        save_settings(self.brush_size, self.brush_strength)
+        save_settings(self.brush_size, self.brush_strength, self.bg_mode)
         
         ow, oh = self.orig_img.size
         orig_mesh_data = []
@@ -912,10 +949,18 @@ class LiquifyEditor(tk.Toplevel):
         self.destroy()
         
     def destroy(self):
-        save_settings(self.brush_size, self.brush_strength)
+        save_settings(self.brush_size, self.brush_strength, self.bg_mode)
         self.parent.editor_active = False
         super().destroy()
 
+
+def log_debug(msg):
+    import time
+    try:
+        with open(r"C:\Users\cing\Desktop\SAI資源\0810\SAI2_DrawCompanion\companion_debug.log", "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except:
+        pass
 
 class HotkeyManager:
     """
@@ -1007,63 +1052,254 @@ class HotkeyManager:
             pass
         self.root.after(50, self.poll_hotkey_queue)
 
+def find_sai2_hwnd():
+    hwnd_out = [0]
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+    def _cb(hwnd, lparam):
+        buf_size = 512
+        buf = ctypes.create_unicode_buffer(buf_size)
+        user32.GetWindowTextW(hwnd, buf, buf_size)
+        title = buf.value.lower()
+        if "painttool sai" in title:
+            hwnd_out[0] = hwnd
+            return False
+        return True
+    cb_func = WNDENUMPROC(_cb)
+    user32.EnumWindows(cb_func, 0)
+    return hwnd_out[0]
+
+def clear_clipboard():
+    import time
+    opened = False
+    for _ in range(10):
+        if user32.OpenClipboard(None):
+            opened = True
+            break
+        time.sleep(0.02)
+    if opened:
+        user32.EmptyClipboard()
+        user32.CloseClipboard()
+
+def press_keys(keys):
+    import time
+    for k in keys:
+        user32.keybd_event(k, 0, 0, 0)
+        time.sleep(0.02)
+    time.sleep(0.05)
+    for k in reversed(keys):
+        user32.keybd_event(k, 0, 2, 0)
+        time.sleep(0.02)
+    time.sleep(0.15)
+
+def read_canvas_from_clipboard():
+    import time
+    opened = False
+    for _ in range(10):
+        if user32.OpenClipboard(None):
+            opened = True
+            break
+        time.sleep(0.05)
+    if not opened:
+        return None
+    img = None
+    try:
+        if user32.IsClipboardFormatAvailable(8): # CF_DIB
+            h_dib = user32.GetClipboardData(8)
+            if h_dib:
+                size = kernel32.GlobalSize(h_dib)
+                p_dib = kernel32.GlobalLock(h_dib)
+                if p_dib:
+                    try:
+                        class BITMAPINFOHEADER(ctypes.Structure):
+                            _pack_ = 1
+                            _fields_ = [
+                                ('biSize', ctypes.wintypes.DWORD),
+                                ('biWidth', ctypes.wintypes.LONG),
+                                ('biHeight', ctypes.wintypes.LONG),
+                                ('biPlanes', ctypes.wintypes.WORD),
+                                ('biBitCount', ctypes.wintypes.WORD),
+                                ('biCompression', ctypes.wintypes.DWORD),
+                                ('biSizeImage', ctypes.wintypes.DWORD),
+                                ('biXPelsPerMeter', ctypes.wintypes.LONG),
+                                ('biYPelsPerMeter', ctypes.wintypes.LONG),
+                                ('biClrUsed', ctypes.wintypes.DWORD),
+                                ('biClrImportant', ctypes.wintypes.DWORD)
+                            ]
+                        header = BITMAPINFOHEADER.from_address(p_dib)
+                        width = header.biWidth
+                        height = header.biHeight
+                        is_top_down = height < 0
+                        height = abs(height)
+                        pixel_bytes = ctypes.string_at(p_dib + 40, size - 40)
+                        row_size = width * 3
+                        padded_row_size = (row_size + 3) & ~3
+                        img = Image.frombytes("RGB", (width, height), pixel_bytes, "raw", "BGR", padded_row_size, 1 if is_top_down else -1)
+                    finally:
+                        kernel32.GlobalUnlock(h_dib)
+    finally:
+        user32.CloseClipboard()
+    return img
+
+def find_match(canvas_img, selection_img):
+    cw, ch = canvas_img.size
+    sw, sh = selection_img.size
+    canvas_rgba = canvas_img.convert("RGBA")
+    sel_rgba = selection_img.convert("RGBA")
+    
+    sel_data = sel_rgba.load()
+    key_pixels = []
+    for x in range(sw):
+        for y in range(sh):
+            r, g, b, a = sel_data[x, y]
+            if a > 200:
+                key_pixels.append((x, y, (r, g, b)))
+                if len(key_pixels) >= 15:
+                    break
+        if len(key_pixels) >= 15:
+            break
+    if not key_pixels:
+        return None
+        
+    canvas_data = canvas_rgba.load()
+    tolerance = 15
+    for cx in range(cw - sw + 1):
+        for cy in range(ch - sh + 1):
+            match = True
+            for sx, sy, (sr, sg, sb) in key_pixels:
+                cr, cg, cb, ca = canvas_data[cx + sx, cy + sy]
+                if abs(cr - sr) > tolerance or abs(cg - sg) > tolerance or abs(cb - sb) > tolerance:
+                    match = False
+                    break
+            if match:
+                return cx, cy
+    return None
+
     def trigger_workflow(self):
         """
         快捷鍵觸發時的自動化流程
         """
-        # 1. 先釋放 Alt 與 Ctrl 鍵以避免干擾後續按鍵模擬
+        log_debug("trigger_workflow triggered!")
+        
+        # 1. 等待使用者放開 Ctrl 與 Alt 鍵，避開實體鍵盤衝突
+        log_debug("Waiting for physical Ctrl and Alt keys to be released...")
+        start_wait = time.time()
+        while True:
+            ctrl_down = user32.GetAsyncKeyState(0x11) & 0x8000
+            alt_down = user32.GetAsyncKeyState(0x12) & 0x8000
+            if not ctrl_down and not alt_down:
+                break
+            if time.time() - start_wait > 2.0: # 最多等待 2 秒防卡死
+                log_debug("Timeout waiting for key release!")
+                break
+            time.sleep(0.05)
+            
+        log_debug("Keys released. Starting simulations...")
+        
+        global ACTIVE_OFFSET, ACTIVE_CANVAS_SIZE
+        ACTIVE_OFFSET = None
+        ACTIVE_CANVAS_SIZE = (0, 0)
+
+        # 2. 先釋放 Alt 與 Ctrl 鍵以避免干擾後續按鍵模擬
         user32.keybd_event(0x11, 0, 2, 0)  # VK_CONTROL
         user32.keybd_event(0x12, 0, 2, 0)  # VK_MENU (ALT)
         time.sleep(0.05)
         
-        # 2. 自動模擬 Ctrl + C 複製 SAI2 畫布/選區
-        user32.keybd_event(0x11, 0, 0, 0)  # 按下 Ctrl
-        user32.keybd_event(0x43, 0, 0, 0)  # 按下 C
-        user32.keybd_event(0x43, 0, 2, 0)  # 釋放 C
-        user32.keybd_event(0x11, 0, 2, 0)  # 釋放 Ctrl
+        # 活化 SAI2 視窗
+        hwnd_sai2 = find_sai2_hwnd()
+        if hwnd_sai2:
+            log_debug(f"Found SAI2 HWND={hwnd_sai2}. SetForegroundWindow...")
+            user32.SetForegroundWindow(hwnd_sai2)
+            time.sleep(0.15)
+
+        # 3. 自動模擬 Ctrl + C 複製選區
+        log_debug("Step 1: Copy selection...")
+        clear_clipboard()
+        press_keys([0x11, 0x43]) # Ctrl + C
+        time.sleep(0.25)
+        sel_img = read_image_from_clipboard()
+        if sel_img is None:
+            log_debug("Failed to read selection image from clipboard!")
+            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+            messagebox.showwarning("提示", "剪貼簿中沒有選區圖像！\n請先在 SAI2 中選取並複製 (Ctrl+C)。")
+            return
+        log_debug(f"Selection acquired: {sel_img.width}x{sel_img.height}")
+            
+        # 4. 模擬 Ctrl + A 全選整個畫布
+        log_debug("Step 2: Select All...")
+        clear_clipboard()
+        press_keys([0x11, 0x41]) # Ctrl + A
+        time.sleep(0.25)
         
-        # 3. 等待剪貼簿完成更新
+        # 5. 模擬 Ctrl + Shift + C 複製合併
+        log_debug("Step 3: Copy Merged...")
+        press_keys([0x11, 0x10, 0x43]) # Ctrl + Shift + C
+        time.sleep(0.4)
+        canvas_img = read_canvas_from_clipboard()
+        if canvas_img is None:
+            log_debug("Failed to read merged canvas image from clipboard!")
+        else:
+            log_debug(f"Canvas acquired: {canvas_img.width}x{canvas_img.height}")
+        
+        # 6. 模擬 Ctrl + Z 復原以還原原本選區
+        log_debug("Step 4: Restore selection via Ctrl+Z...")
+        press_keys([0x11, 0x5A]) # Ctrl + Z
         time.sleep(0.2)
         
-        # 4. 啟動液化編輯器
-        self.trigger_liquify()
+        # 7. 比對計算偏移量並保存
+        if canvas_img and sel_img:
+            log_debug("Step 5: Matching selection inside canvas...")
+            offset = find_match(canvas_img, sel_img)
+            if offset:
+                ACTIVE_OFFSET = offset
+                ACTIVE_CANVAS_SIZE = canvas_img.size
+                log_debug(f"Match success! Offset: {offset}")
+            else:
+                log_debug("Match failed!")
+                
+        # 8. 啟動編輯器
+        log_debug("Launching LiquifyEditor...")
+        try:
+            LiquifyEditor(self, sel_img, on_save_callback=self.on_save_success)
+        except Exception as e:
+            log_debug(f"Failed to launch editor: {e}")
+            messagebox.showerror("錯誤", f"開啟液化工具失敗: {e}")
 
     def trigger_liquify(self):
+        """
+        手動從剪貼簿啟動 (fallback)
+        """
+        global ACTIVE_OFFSET, ACTIVE_CANVAS_SIZE
+        ACTIVE_OFFSET = None
+        ACTIVE_CANVAS_SIZE = (0, 0)
         try:
             img = read_image_from_clipboard()
             if img is None:
                 winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
-                # 提示使用者目前剪貼簿沒有圖片
-                messagebox.showwarning("提示", "剪貼簿中沒有圖像數據！\n請先在 SAI2 中選擇並複製 (Ctrl+C)。")
+                messagebox.showwarning("提示", "剪貼簿中沒有圖像數據！")
                 return
-                
-            if isinstance(img, list):
-                if len(img) > 0 and os.path.exists(img[0]):
-                    img = Image.open(img[0])
-                else:
-                    winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
-                    return
-            
-            # 建立液化編輯視窗
             LiquifyEditor(self, img, on_save_callback=self.on_save_success)
         except Exception as e:
             messagebox.showerror("錯誤", f"開啟液化工具失敗: {e}")
 
     def on_save_success(self):
         """
-        Paste back to SAI2 after save success
+        存檔成功後貼回 SAI2
         """
-        # Wait a bit for clipboard update
-        time.sleep(0.15)
+        log_debug("LiquifyEditor save success callback triggered!")
+        time.sleep(0.2)
         
-        # Simulate Ctrl + V
-        user32.keybd_event(0x11, 0, 0, 0)  # Press Ctrl
-        user32.keybd_event(0x56, 0, 0, 0)  # Press V
-        user32.keybd_event(0x56, 0, 2, 0)  # Release V
-        user32.keybd_event(0x11, 0, 2, 0)  # Release Ctrl
-        
-        # Play beep sound
+        # 確保回到 SAI2
+        hwnd_sai2 = find_sai2_hwnd()
+        if hwnd_sai2:
+            log_debug(f"Activating SAI2 HWND={hwnd_sai2} for paste...")
+            user32.SetForegroundWindow(hwnd_sai2)
+            time.sleep(0.2)
+            
+        # 模擬 Ctrl + V
+        log_debug("Simulating Ctrl+V paste...")
+        press_keys([0x11, 0x56])
         winsound.MessageBeep(winsound.MB_OK)
+        log_debug("Workflow completed!")
 
     def on_exit(self):
         self.root.destroy()
