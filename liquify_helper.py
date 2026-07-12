@@ -759,6 +759,14 @@ class LiquifyEditor(tk.Toplevel):
 
     def toggle_pressure(self):
         self.use_pressure = self.pressure_var.get()
+        # 即時安裝/移除筆壓掛勾：關閉時完全解除視窗子類化，杜絕閃退風險
+        if self.use_pressure:
+            self._init_pen_pressure()
+        else:
+            self._release_pen_pressure()
+            self.pen_available = False
+            self.current_pressure = 1.0
+            self.update_status_label()
 
     def clear_freeze_mask(self):
         if not self.freeze_mask.getbbox():
@@ -1187,46 +1195,65 @@ class LiquifyEditor(tk.Toplevel):
         透過子類化 (subclass) 畫布視窗攔截 WM_POINTER 訊息以讀取繪圖板筆壓。
         Windows 8+ 的手寫筆輸入預設會先以 Pointer 訊息送達，未處理時系統才合成滑鼠訊息，
         因此攔截後轉交原本的視窗程序即可同時取得筆壓並保留 Tkinter 的滑鼠事件。
-        失敗時 (如 Windows 7) 靜默退回滑鼠模式 (筆壓固定 1.0)。
+
+        安全準則 (避免任何原生層當機/閃退)：
+          - 回呼內只做純 ctypes 讀取與屬性賦值，絕不呼叫任何 Tkinter API (避免訊息處理重入)
+          - 全程包在 try/except 內，任何例外都保證轉交原視窗程序
+          - 僅在「筆壓調整強度」啟用時才安裝；關閉選項即完全移除掛勾
+        失敗或 Windows 7 時靜默退回滑鼠模式 (筆壓固定 1.0)。
         """
+        if self._orig_wndproc:
+            return  # 已安裝
+        if not self.use_pressure:
+            return  # 未啟用筆壓 → 完全不掛勾，杜絕原生層風險
         try:
             self.update_idletasks()
             hwnd = self.canvas.winfo_id()
 
             LRESULT = ctypes.c_ssize_t
             WNDPROC = ctypes.WINFUNCTYPE(
-                LRESULT, ctypes.wintypes.HWND, ctypes.c_uint,
-                ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
+                LRESULT, ctypes.c_void_p, ctypes.c_uint,
+                ctypes.c_size_t, ctypes.c_ssize_t
             )
 
-            user32.GetPointerType.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
-            user32.GetPointerType.restype = ctypes.wintypes.BOOL
-            user32.GetPointerPenInfo.argtypes = [ctypes.c_uint32, ctypes.POINTER(POINTER_PEN_INFO)]
-            user32.GetPointerPenInfo.restype = ctypes.wintypes.BOOL
-            user32.CallWindowProcW.argtypes = [
-                ctypes.c_void_p, ctypes.wintypes.HWND, ctypes.c_uint,
-                ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM
+            GetPointerType = user32.GetPointerType
+            GetPointerType.argtypes = [ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
+            GetPointerType.restype = ctypes.wintypes.BOOL
+            GetPointerPenInfo = user32.GetPointerPenInfo
+            GetPointerPenInfo.argtypes = [ctypes.c_uint32, ctypes.POINTER(POINTER_PEN_INFO)]
+            GetPointerPenInfo.restype = ctypes.wintypes.BOOL
+            CallWindowProc = user32.CallWindowProcW
+            CallWindowProc.argtypes = [
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint,
+                ctypes.c_size_t, ctypes.c_ssize_t
             ]
-            user32.CallWindowProcW.restype = LRESULT
+            CallWindowProc.restype = LRESULT
+            DefWindowProc = user32.DefWindowProcW
+            DefWindowProc.argtypes = [
+                ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t
+            ]
+            DefWindowProc.restype = LRESULT
 
             def _wnd_proc(hwnd_, msg, wparam, lparam):
-                if msg in (WM_POINTERDOWN, WM_POINTERUPDATE):
-                    try:
+                try:
+                    if msg in (WM_POINTERDOWN, WM_POINTERUPDATE):
                         pointer_id = wparam & 0xFFFF
                         ptype = ctypes.c_uint32(0)
-                        if user32.GetPointerType(pointer_id, ctypes.byref(ptype)) and ptype.value == PT_PEN:
+                        if GetPointerType(pointer_id, ctypes.byref(ptype)) and ptype.value == PT_PEN:
                             pen_info = POINTER_PEN_INFO()
-                            if user32.GetPointerPenInfo(pointer_id, ctypes.byref(pen_info)):
-                                if not self.pen_available:
-                                    self.pen_available = True
-                                    self.after(0, self.update_status_label)
+                            if GetPointerPenInfo(pointer_id, ctypes.byref(pen_info)):
+                                # 只賦值純 Python 屬性，不呼叫任何 Tk API
+                                self.pen_available = True
                                 if pen_info.pressure > 0:
                                     self.current_pressure = max(0.05, min(1.0, pen_info.pressure / 1024.0))
-                    except Exception:
-                        pass
-                elif msg in (WM_POINTERUP, WM_POINTERLEAVE):
-                    self.current_pressure = 1.0
-                return user32.CallWindowProcW(self._orig_wndproc, hwnd_, msg, wparam, lparam)
+                    elif msg in (WM_POINTERUP, WM_POINTERLEAVE):
+                        self.current_pressure = 1.0
+                except Exception:
+                    pass
+                try:
+                    return CallWindowProc(self._orig_wndproc, hwnd_, msg, wparam, lparam)
+                except Exception:
+                    return DefWindowProc(hwnd_, msg, wparam, lparam)
 
             # 保留 callback 參考避免被 GC 回收
             self._pen_proc_ref = WNDPROC(_wnd_proc)
@@ -1243,9 +1270,28 @@ class LiquifyEditor(tk.Toplevel):
             self._orig_wndproc = set_wndproc(
                 hwnd, GWL_WNDPROC, ctypes.cast(self._pen_proc_ref, ctypes.c_void_p)
             )
+            if self._orig_wndproc:
+                # 以 UI 執行緒的輪詢更新狀態列 (取代在 wndproc 內呼叫 Tk)
+                self._poll_pen_status()
         except Exception:
             self._orig_wndproc = None
             self.pen_available = False
+
+    def _poll_pen_status(self):
+        """定期檢查是否偵測到手寫筆，更新狀態列文字 (只在偵測到的當下更新一次)"""
+        if not self._orig_wndproc:
+            return
+        if self.pen_available and not getattr(self, "_pen_status_shown", False):
+            self._pen_status_shown = True
+            try:
+                self.update_status_label()
+            except Exception:
+                pass
+        if not getattr(self, "_pen_status_shown", False):
+            try:
+                self.after(500, self._poll_pen_status)
+            except Exception:
+                pass
 
     def _release_pen_pressure(self):
         """視窗銷毀前還原原本的視窗程序"""

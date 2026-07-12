@@ -213,6 +213,8 @@ def _load_settings() -> dict:
 
     defaults = {
         'idle_timeout': 10.0,
+        'track_unsaved': False,
+        'start_in_mini': False,
         'always_on_top': False,
         'timelapse_enabled': False,
         'timelapse_multiplier_str': '5x (167ms)',
@@ -452,7 +454,9 @@ class App:
         data_path = self._settings.get('data_path', _DEFAULT_DATA)
         idle_to   = float(self._settings.get('idle_timeout', 10.0))
 
-        self.tracker = DrawTracker(data_path=data_path, idle_timeout=idle_to)
+        self.tracker = DrawTracker(
+            data_path=data_path, idle_timeout=idle_to,
+            track_unsaved=bool(self._settings.get('track_unsaved', False)))
 
         self._blink    = False
         self._on_top   = tk.BooleanVar(value=self._settings.get('always_on_top', False))
@@ -496,6 +500,9 @@ class App:
         self.timelapse_recorder.on_frame_captured = self._cb_tl_frame
         self.timelapse_recorder.on_status_msg = self._cb_tl_status
         self.timelapse_recorder.on_export_progress = self._cb_export_progress
+        # 檔名比對回呼：讓錄影引擎能驗證目標視窗是否屬於目前錄製的圖檔
+        # (視窗標題 → 檔名 key → 別名解析後的主圖檔 key)
+        self.timelapse_recorder.file_matcher = self._match_window_title_to_file
 
         self._build_ui()
         self._apply_topmost()
@@ -508,6 +515,17 @@ class App:
         self.tracker.start()
         self.timelapse_recorder.start()
         self._poll()
+
+        # 依設定於啟動時直接進入精簡懸浮模式 (安靜背景執行)
+        if self._settings.get('start_in_mini', False):
+            self.root.after(300, self._enter_mini_if_normal)
+
+    def _enter_mini_if_normal(self):
+        try:
+            if not self._is_mini:
+                self.toggle_mini_mode()
+        except Exception:
+            pass
 
     # ════════════════════════════════════════════════════════════════════════
     # UI 建構
@@ -693,6 +711,7 @@ class App:
         tk.Label(row_tl_ctrl, text=_tr('ui.tracker.target_range'), font=FB, fg=TEXTD, bg=CARD).pack(side='left', padx=(0, 4))
         self.target_display_map = {
             'canvas': _tr('timelapse.target.canvas'),
+            'canvas_float': _tr('timelapse.target.canvas_float', '僅錄製畫布（浮動視窗）'),
             'window': _tr('timelapse.target.window'),
             'screen': _tr('timelapse.target.screen')
         }
@@ -879,18 +898,28 @@ class App:
                 cur_tracked = self.tracker._cur_file
                 if cur_tracked is not None:
                     # 優先解析別名後再鎖定
-                    if hasattr(self.tracker, '_persist') and 'aliases' in self.tracker._persist:
-                        if cur_tracked in self.tracker._persist['aliases']:
-                            cur_tracked = self.tracker._persist['aliases'][cur_tracked]
-                    self.tracker.locked_file = cur_tracked
+                    self.tracker.locked_file = self.tracker.resolve_alias(cur_tracked)
         else:
             self.tracker.locked_file = None
 
         state = self.tracker.get_state()
-        
+
         # 同步縮時錄影檔案狀態
         cur_file = state.get('current_file')
-        self.timelapse_recorder.switch_file(cur_file)
+        # 錄製中且已有錄製項目時，不允許自動切換到其他檔案
+        if self.timelapse_recorder.enabled and self.timelapse_recorder.active_file is not None:
+            # 僅在 cur_file 為 None（所有檔案已關閉 / SAI 已結束）時才停止錄製
+            if cur_file is None:
+                self.timelapse_recorder.switch_file(None)
+        else:
+            self.timelapse_recorder.switch_file(cur_file)
+
+        # 精簡模式或視窗最小化時不產生預覽縮圖，降低背景負擔
+        try:
+            self.timelapse_recorder.needs_thumbnail = (
+                not self._is_mini and self.root.state() != 'iconic')
+        except Exception:
+            pass
 
         self._update_ui(state)
 
@@ -925,7 +954,7 @@ class App:
             lock_suffix = f" [{_tr('ui.tracker.lock_status_label', '🔒已鎖定')}]" if self.tracker.locked_file else ""
             if raw_file and raw_file != cur:
                 display_raw = self._get_display_name(raw_file)
-                self.var_cur_file.set(f'🖼  {display_cur}{lock_suffix} (別名: {display_raw})')
+                self.var_cur_file.set(f'🖼  {display_cur}{lock_suffix} (偵測: {display_raw})')
             else:
                 self.var_cur_file.set(f'🖼  {display_cur}{lock_suffix}')
         elif raw:  # 已偵測到但檔名解析失敗——顯示原始標題供除錯
@@ -1059,55 +1088,70 @@ class App:
             vals = [sort_key(x) for x in g_items]
             return max(vals) if self._sort_rev else min(vals)
 
+        sorted_groups = sorted(groups.keys(), key=group_sort_key, reverse=self._sort_rev)
+        group_items = {g: sorted(groups[g], key=sort_key, reverse=self._sort_rev) for g in sorted_groups}
+
+        # 結構簽章：群組順序與各組內檔案順序都沒變時，改為「就地更新數值」，
+        # 避免每秒整棵樹刪除重建造成的閃爍與 CPU 消耗
+        signature = tuple((g, tuple(f for f, _ in group_items[g])) for g in sorted_groups)
+        in_place = (signature == getattr(self, '_tree_signature', None))
+        self._tree_signature = signature
+
+        def _grp_values(grp_name, items):
+            total_open = sum(r.get('open_seconds', 0) for _, r in items)
+            total_draw = sum(r.get('draw_seconds', 0) for _, r in items)
+            total_sess = sum(r.get('sessions', 0) for _, r in items)
+            grp_eff    = min(int(total_draw / total_open * 100) if total_open > 0 else 0, 100)
+            emoji = self._group_emojis.get(grp_name, '📁')
+            return (
+                _tr('msg.group_info', emoji=emoji, name=grp_name, count=len(items)),
+                fmt_seconds(total_open), fmt_seconds(total_draw),
+                f'{grp_eff}%', total_sess, ''
+            )
+
+        def _file_values(fname, rec):
+            op  = rec.get('open_seconds', 0)
+            dr  = rec.get('draw_seconds', 0)
+            eff = min(int(dr / op * 100) if op > 0 else 0, 100)
+            ls  = rec.get('last_seen', '')[:10]
+            return (
+                self._get_display_name(fname), fmt_seconds(op), fmt_seconds(dr),
+                f'{eff}%', rec.get('sessions', 0), ls
+            )
+
+        if in_place:
+            # 就地更新：只改各列的顯示數值，展開/捲動/選取狀態全部原樣保留
+            try:
+                for grp_name in sorted_groups:
+                    items = group_items[grp_name]
+                    self.tree.item(f'__grp__{grp_name}', values=_grp_values(grp_name, items))
+                    for fname, rec in items:
+                        self.tree.item(fname, values=_file_values(fname, rec))
+                return
+            except Exception:
+                pass  # 樹狀態與簽章不同步 (罕見) → 落回完整重建
+
         # 清空並重建
         self.tree.delete(*self.tree.get_children())
         restore_iid = None
 
-        sorted_groups = sorted(groups.keys(), key=group_sort_key, reverse=self._sort_rev)
         for grp_name in sorted_groups:
-            items = sorted(groups[grp_name], key=sort_key, reverse=self._sort_rev)
+            items = group_items[grp_name]
             grp_iid = f'__grp__{grp_name}'
-
-            # 群組加總統計
-            total_open = sum(r.get('open_seconds', 0) for _, r in items)
-            total_draw = sum(r.get('draw_seconds', 0) for _, r in items)
-            total_sess = sum(r.get('sessions', 0) for _, r in items)
-            grp_eff    = int(total_draw / total_open * 100) if total_open > 0 else 0
-            grp_eff    = min(grp_eff, 100)
-
             is_open = self._group_open.get(grp_name, True)  # 預設展開
-            emoji = self._group_emojis.get(grp_name, '📁')
 
             # 插入群組列（parent 列）—群組名稱放入 file 欄顯示
             self.tree.insert(
                 '', 'end', iid=grp_iid,
                 text='',   # 空白，展開符號就在 #0
-                values=(
-                    _tr('msg.group_info', emoji=emoji, name=grp_name, count=len(items)),
-                    fmt_seconds(total_open),
-                    fmt_seconds(total_draw),
-                    f'{grp_eff}%',
-                    total_sess,
-                    ''
-                ),
+                values=_grp_values(grp_name, items),
                 open=is_open,
                 tags=('group',)
             )
 
             # 插入群組內的檔案列
             for fname, rec in items:
-                op  = rec.get('open_seconds', 0)
-                dr  = rec.get('draw_seconds', 0)
-                eff = int(dr / op * 100) if op > 0 else 0
-                eff = min(eff, 100)
-                ls  = rec.get('last_seen', '')[:10]
-                self.tree.insert(
-                    grp_iid, 'end', iid=fname,
-                    values=(
-                        self._get_display_name(fname), fmt_seconds(op), fmt_seconds(dr),
-                        f'{eff}%', rec.get('sessions', 0), ls
-                    )
-                )
+                self.tree.insert(grp_iid, 'end', iid=fname, values=_file_values(fname, rec))
                 if fname == sel_file:
                     restore_iid = fname
 
@@ -1163,11 +1207,7 @@ class App:
         fname = item
         # 若啟用錄影，雙擊打開檔案時，自動將鎖定圖檔切換為此圖檔（支援別名自動解析）
         if self.timelapse_recorder.enabled:
-            resolved_fname = fname
-            if hasattr(self.tracker, '_persist') and 'aliases' in self.tracker._persist:
-                if fname in self.tracker._persist['aliases']:
-                    resolved_fname = self.tracker._persist['aliases'][fname]
-            self.tracker.locked_file = resolved_fname
+            self.tracker.locked_file = self.tracker.resolve_alias(fname)
 
         self.var_status.set(_tr('msg.finding_path', file=fname))
         self.root.update_idletasks()
@@ -2003,11 +2043,19 @@ class App:
         self.tracker.idle_timeout = idle_to
         self.timelapse_recorder.idle_timeout = idle_to
 
+        # 更新「追蹤未存檔畫布」設定，關閉時順便清理既有的未存檔紀錄
+        track_unsaved = bool(new_settings.get('track_unsaved', False))
+        was_tracking_unsaved = self.tracker.track_unsaved
+        self.tracker.track_unsaved = track_unsaved
+        if was_tracking_unsaved and not track_unsaved:
+            self.tracker.purge_unsaved()
+
         # 更新資料路徑（需重啟追蹤器）
         new_path = new_settings.get('data_path', _DEFAULT_DATA)
         if new_path != self.tracker.data_path:
             self.tracker.stop()
-            self.tracker = DrawTracker(data_path=new_path, idle_timeout=idle_to)
+            self.tracker = DrawTracker(data_path=new_path, idle_timeout=idle_to,
+                                       track_unsaved=track_unsaved)
             self.tracker.start()
 
         # 更新縮時錄影設定
@@ -2449,9 +2497,14 @@ class App:
         _save_settings(self._settings)
 
     def _on_tl_target_change(self, _=None):
-        target_str = self.var_tl_target.get()
-        self.timelapse_recorder.target_mode = self._parse_target(target_str)
-        self._settings['timelapse_target_str'] = target_str
+        # 一律轉換為語言無關的正規 key 再儲存，避免切換語言後設定檔解析失敗
+        target_key = self._parse_target(self.var_tl_target.get())
+        old_mode = self.timelapse_recorder.target_mode
+        self.timelapse_recorder.target_mode = target_key
+        if old_mode == 'canvas_float' and target_key != 'canvas_float':
+            # 離開浮動視窗模式時關閉自動建立的隱藏浮動視窗
+            self.timelapse_recorder._close_float_window()
+        self._settings['timelapse_target_str'] = target_key
         _save_settings(self._settings)
 
     def _do_close(self, top=None):
@@ -2576,11 +2629,30 @@ class App:
         return 5
 
     def _parse_target(self, target_str: str) -> str:
-        if target_str == 'canvas' or '畫布' in target_str:
+        # 先嘗試顯示字串反查表 (語言無關)，再退回舊版的字串啟發式判斷
+        rev = getattr(self, 'target_display_rev', {})
+        if target_str in rev:
+            return rev[target_str]
+        if target_str in ('canvas', 'canvas_float', 'window', 'screen'):
+            return target_str
+        if '浮動' in target_str or 'float' in target_str.lower():
+            return 'canvas_float'
+        if '畫布' in target_str:
             return 'canvas'
-        elif target_str == 'window' or '視窗' in target_str or 'window' in target_str.lower():
+        if '視窗' in target_str or 'window' in target_str.lower():
             return 'window'
         return 'screen'
+
+    def _match_window_title_to_file(self, window_title: str) -> str | None:
+        """將 SAI 視窗標題解析為圖檔 key (含別名解析)，供錄影引擎驗證錄製目標。"""
+        try:
+            from tracker import extract_filename
+            fname = extract_filename(window_title)
+            if not fname:
+                return None
+            return self.tracker.resolve_alias(fname)
+        except Exception:
+            return None
 
     def _cb_tl_status(self, msg: str):
         self.root.after(0, lambda: self.var_tl_status.set(msg))
@@ -3094,16 +3166,25 @@ class SettingsDialog(tk.Toplevel):
         self.ent_idle = tk.Entry(f_general, textvariable=self.var_idle, font=FB, bg=CARD2, fg=TEXT, insertbackground=TEXT, relief='flat', width=8)
         self.ent_idle.grid(row=0, column=1, sticky='w', pady=4)
         
-        tk.Label(f_general, text=_tr('dialog.settings.data_path'), font=FB, fg=TEXT, bg=CARD).grid(row=1, column=0, columnspan=2, sticky='w', pady=(6, 2))
+        self.var_track_unsaved = tk.BooleanVar(value=bool(self._settings.get('track_unsaved', False)))
+        tk.Checkbutton(
+            f_general,
+            text=_tr('dialog.settings.track_unsaved', '追蹤未存檔的新畫布（參考圖用途建議關閉）'),
+            variable=self.var_track_unsaved,
+            font=FS, fg=TEXT, bg=CARD, selectcolor=CARD2,
+            activebackground=CARD, activeforeground=TEXT, anchor='w'
+        ).grid(row=1, column=0, columnspan=2, sticky='w', pady=(2, 0))
+
+        tk.Label(f_general, text=_tr('dialog.settings.data_path'), font=FB, fg=TEXT, bg=CARD).grid(row=2, column=0, columnspan=2, sticky='w', pady=(6, 2))
         path_row = tk.Frame(f_general, bg=CARD)
-        path_row.grid(row=2, column=0, columnspan=2, sticky='we')
+        path_row.grid(row=3, column=0, columnspan=2, sticky='we')
         self.var_path = tk.StringVar(value=self._settings.get('data_path', _DEFAULT_DATA))
         self.ent_path = tk.Entry(path_row, textvariable=self.var_path, font=FS, bg=CARD2, fg=TEXT, insertbackground=TEXT, relief='flat', width=20)
         self.ent_path.pack(side='left', fill='x', expand=True, padx=(0, 6))
         _btn(path_row, _tr('dialog.settings.btn_browse'), CARD2, ACCH, self._choose_path, font=FS, pady=2).pack(side='right')
 
         # ── 語系選擇 (左欄 - 一般設定內第 3 行) ──
-        tk.Label(f_general, text=_tr('dialog.settings.language'), font=FB, fg=TEXT, bg=CARD).grid(row=3, column=0, sticky='w', pady=6)
+        tk.Label(f_general, text=_tr('dialog.settings.language'), font=FB, fg=TEXT, bg=CARD).grid(row=4, column=0, sticky='w', pady=6)
         self.langs_dict = get_available_languages()
         lang_codes = list(self.langs_dict.keys())
         lang_names = [self.langs_dict[c] for c in lang_codes]
@@ -3113,7 +3194,16 @@ class SettingsDialog(tk.Toplevel):
         
         self.var_lang_name = tk.StringVar(value=current_lang_name)
         self.combo_lang = ttk.Combobox(f_general, textvariable=self.var_lang_name, state='readonly', width=12, font=FS, values=lang_names)
-        self.combo_lang.grid(row=3, column=1, sticky='w', pady=6)
+        self.combo_lang.grid(row=4, column=1, sticky='w', pady=6)
+
+        self.var_start_mini = tk.BooleanVar(value=bool(self._settings.get('start_in_mini', False)))
+        tk.Checkbutton(
+            f_general,
+            text=_tr('dialog.settings.start_in_mini', '啟動時直接進入精簡懸浮模式（安靜背景執行）'),
+            variable=self.var_start_mini,
+            font=FS, fg=TEXT, bg=CARD, selectcolor=CARD2,
+            activebackground=CARD, activeforeground=TEXT, anchor='w'
+        ).grid(row=5, column=0, columnspan=2, sticky='w', pady=(2, 0))
         
         # ── 3. 縮時錄影 (左欄) ──
         f_tl = tk.LabelFrame(left_col, text=_tr('dialog.settings.grp_timelapse'), font=FH, fg=ACCENT, bg=CARD, bd=1, relief='solid', padx=10, pady=8)
@@ -3332,6 +3422,8 @@ class SettingsDialog(tk.Toplevel):
                 
         self._settings['idle_timeout'] = idle
         self._settings['data_path']    = self.var_path.get()
+        self._settings['track_unsaved'] = bool(self.var_track_unsaved.get())
+        self._settings['start_in_mini'] = bool(self.var_start_mini.get())
         self._settings['timelapse_output_dir'] = out_dir
         self._settings['timelapse_fps'] = int(self.var_tl_fps.get())
         

@@ -181,16 +181,32 @@ def _scan_sai2() -> tuple[str | None, bool, str, bool]:
 
     # PaintTool SAI 正在執行中！
     is_running = True
-    
+
     # 檢查前景進程是否屬於 PaintTool SAI 的任一進程
     is_foreground = False
     if fg_pid != -1:
         is_foreground = any(pid == fg_pid for _, _, pid in sai_windows)
 
-    # 從所有 PaintTool SAI 視窗中找第一個能解析出檔名的
+    # 將視窗分為「主視窗」(無 owner) 與「浮動視窗」(owned window)。
+    # EnumWindows 依 Z 順序列舉，若參考圖的浮動視窗在最上層，舊邏輯會誤把
+    # 浮動視窗的檔名當成目前工作檔。主視窗標題永遠反映「作用中的畫布」，
+    # 因此一律優先採用主視窗的檔名。
+    GW_OWNER = 4
+    main_windows = []
+    floating_windows = []
+    for hwnd, title, pid in sai_windows:
+        try:
+            owner = win32gui.GetWindow(hwnd, GW_OWNER)
+        except Exception:
+            owner = 0
+        if owner:
+            floating_windows.append((hwnd, title, pid))
+        else:
+            main_windows.append((hwnd, title, pid))
+
     filename = None
     raw_title = ""
-    for hwnd, title, pid in sai_windows:
+    for hwnd, title, pid in main_windows + floating_windows:
         f = extract_filename(title)
         if f:
             filename = f
@@ -225,9 +241,13 @@ class DrawTracker:
     POLL     = 0.015  # 輪詢間隔（秒）：高頻輪詢以保證動筆時間的精確度 (與錄影引擎對齊)
     AUTOSAVE = 60.0   # 自動存檔間隔（秒）
 
-    def __init__(self, data_path: str, idle_timeout: float = 10.0):
+    def __init__(self, data_path: str, idle_timeout: float = 10.0, track_unsaved: bool = False):
         self.data_path    = data_path
         self.idle_timeout = idle_timeout
+        # 是否追蹤未存檔的新畫布 (新增版面N 等)。預設關閉：
+        # 未存檔畫布多為貼參考圖用途，且舊有的「未存檔→已存檔」改名合併邏輯
+        # 會在切換到任何已存檔案時誤把參考畫布的時間合併進去。
+        self.track_unsaved = track_unsaved
 
         self._lock    = threading.Lock()
         self._running = False
@@ -397,7 +417,11 @@ class DrawTracker:
 
                 # ── 解析別名與鎖定處理 ──
                 raw_detected_file = filename
-                
+
+                # 0. 未存檔的新畫布 (無副檔名) 依設定決定是否追蹤
+                if filename and not self.track_unsaved and not is_saved_filename(filename):
+                    filename = None
+
                 # 1. 優先透過 aliases 將別名解析為對應的主圖檔
                 if filename and 'aliases' in self._persist:
                     if filename in self._persist['aliases']:
@@ -405,11 +429,13 @@ class DrawTracker:
                 
                 # 2. 如果設定了鎖定，強制將 filename 覆寫為鎖定圖檔
                 if self.locked_file is not None:
-                    # 只有在 SAI 仍在執行，且偵測到的 filename 不是 None 時才套用鎖定
-                    # （若 filename 為 None，代表所有圖檔皆已關閉，此時解鎖）
-                    if sai_running and filename is not None:
+                    if sai_running:
+                        # 只要 SAI 仍在執行，就保持鎖定不變。
+                        # filename 為 None 可能只是開檔/載入過程中視窗標題
+                        # 短暫不含檔名的瞬間狀態，不應因此解除鎖定。
                         filename = self.locked_file
                     else:
+                        # 只有 SAI 完全關閉時才解除鎖定
                         self.locked_file = None
 
                 with self._lock:
@@ -480,7 +506,14 @@ class DrawTracker:
                 # 避免背景執行緒因為任何未預期例外而中斷
                 pass
 
-            time.sleep(self.POLL)
+            # 自適應輪詢：前景作畫時維持 15ms 高精度；
+            # SAI 在背景 → 100ms；SAI 未執行 → 300ms，將閒置 CPU 降到接近零
+            if not self._sai2_running:
+                time.sleep(0.3)
+            elif not self._sai2_active:
+                time.sleep(0.1)
+            else:
+                time.sleep(self.POLL)
 
     def _switch_file(self, new_file: str | None, now: float):
         """處理檔案切換（在 lock 內呼叫）。"""
@@ -576,7 +609,15 @@ class DrawTracker:
             self._session_draw_flushed   = 0.0
 
     def _update_state(self, now: float):
-        """更新 UI 快照（在 lock 內呼叫）。"""
+        """更新 UI 快照（在 lock 內呼叫）。
+
+        重建整份檔案快照的成本與檔案數成正比，UI 每秒才輪詢一次，
+        因此以 0.25 秒節流，避免 15ms 迴圈中每次都重建。
+        """
+        if now - getattr(self, '_last_state_build', 0.0) < 0.25:
+            return
+        self._last_state_build = now
+
         f = self._cur_file
         if f:
             session_open_s = self._current_session_open(now)
@@ -685,13 +726,67 @@ class DrawTracker:
             self.locked_file             = None
         self.save()
 
+    def resolve_alias(self, name: str | None) -> str | None:
+        """將別名解析為主圖檔名稱 (執行緒安全，支援多層鏈防護)。"""
+        if not name:
+            return name
+        with self._lock:
+            return self._resolve_alias_locked(name)
+
+    def _resolve_alias_locked(self, name: str) -> str:
+        """在 lock 內解析別名，最多追蹤 10 層並偵測循環。"""
+        aliases = self._persist.get('aliases', {})
+        seen = {name}
+        cur = name
+        for _ in range(10):
+            nxt = aliases.get(cur)
+            if nxt is None or nxt in seen:
+                break
+            seen.add(nxt)
+            cur = nxt
+        return cur
+
+    def purge_unsaved(self):
+        """移除所有未存檔圖檔的紀錄與別名 (供關閉「追蹤未存檔畫布」設定時清理)。"""
+        with self._lock:
+            files = self._persist.get('files', {})
+            for fname in [k for k in files if not is_saved_filename(k)]:
+                files.pop(fname, None)
+            aliases = self._persist.get('aliases', {})
+            for k in [k for k, v in aliases.items()
+                      if not is_saved_filename(k) or v not in files]:
+                aliases.pop(k, None)
+            if self._cur_file and not is_saved_filename(self._cur_file):
+                self._switch_file(None, time.monotonic())
+        self.save()
+
     def add_alias(self, alias_name: str, target_name: str):
-        """新增別名，並合併現有的計時紀錄。"""
+        """新增別名，並合併現有的計時紀錄。
+
+        防護措施：
+          - 目標本身是別名時，攤平為最終主圖檔 (避免 A→B、B→C 的斷鏈)
+          - 拒絕自我別名與循環 (目標解析後等於別名自身)
+          - 既有指向 alias_name 的別名全部改指向新目標 (維持單層結構)
+        """
         with self._lock:
             if 'aliases' not in self._persist:
                 self._persist['aliases'] = {}
-            self._persist['aliases'][alias_name] = target_name
-            
+            aliases = self._persist['aliases']
+
+            # 攤平目標：若 target 本身是別名，改指向其最終主圖檔
+            target_name = self._resolve_alias_locked(target_name)
+
+            # 拒絕自我別名 / 循環
+            if target_name == alias_name:
+                return
+
+            # 將所有指向 alias_name 的既有別名改指向新目標，維持單層結構
+            for k, v in list(aliases.items()):
+                if v == alias_name:
+                    aliases[k] = target_name
+
+            aliases[alias_name] = target_name
+
             # 合併別名的計時紀錄至主圖檔
             if alias_name in self._persist['files']:
                 alias_rec = self._persist['files'].pop(alias_name)
