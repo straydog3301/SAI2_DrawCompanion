@@ -1,4 +1,4 @@
-# SAI2 DrawCompanion 🎨 (v1.5.0)
+# SAI2 DrawCompanion 🎨 (v1.5.1)
 
 `SAI2 DrawCompanion` (繪圖助手) 是一款專門為 **PaintTool SAI Ver.2** 開發的開源輔助工具。它能自動在背景追蹤您的繪圖時間、提供多維度統計圖表，並具備智慧型縮時錄影功能、液化變形工具與速寫練習參考視窗。
 

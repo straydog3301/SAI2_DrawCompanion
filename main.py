@@ -142,14 +142,14 @@ def _win32_set_topmost(win, on: bool):
 # ─── 速寫練習：類型 → 圖庫搜尋關鍵字 ──────────────────────────────────────
 # (機器碼, 顯示名稱, 搜尋關鍵字)
 SKETCH_CATEGORIES = [
-    ('portrait',  '人像 / 臉部',  'portrait face'),
-    ('pose',      '姿勢 / 全身',  'full body pose person standing'),
-    ('hands',     '手部',         'hands gesture'),
-    ('feet',      '足部',         'feet barefoot'),
-    ('landscape', '風景',         'landscape scenery nature'),
-    ('animal',    '動物',         'animal wildlife'),
-    ('still',     '靜物',         'still life object'),
-    ('architecture', '建築 / 場景', 'architecture street'),
+    ('portrait',  '人像 / 臉部',  'portrait'),
+    ('pose',      '姿勢 / 全身',  'model pose'),
+    ('hands',     '手部',         'hands'),
+    ('feet',      '足部',         'feet'),
+    ('landscape', '風景',         'landscape'),
+    ('animal',    '動物',         'animals'),
+    ('still',     '靜物',         'still life'),
+    ('architecture', '建築 / 場景', 'architecture'),
     ('custom',    '自訂關鍵字',    ''),
 ]
 
@@ -483,7 +483,7 @@ def _card(parent, **kw) -> tk.Frame:
 
 
 # ─── 主應用程式 ───────────────────────────────────────────────────────────
-VERSION = '1.5.0'
+VERSION = '1.5.1'
 
 
 class App:
@@ -3989,38 +3989,67 @@ class SketchPracticeWindow(tk.Toplevel):
     def _fetch_web_image(self, mode, key, query):
         import urllib.request
         import urllib.parse
+        import urllib.error
         import io
+
+        # 帶正常瀏覽器 UA：Pexels 前端 Cloudflare 會對 python-urllib 預設 UA 回 403
+        ua = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+              'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+        def _get_json(url, headers):
+            hdrs = dict(headers)
+            hdrs.setdefault('User-Agent', ua)
+            req = urllib.request.Request(url, headers=hdrs)
+            try:
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    return json.loads(r.read().decode('utf-8'))
+            except urllib.error.HTTPError as e:
+                body = ''
+                try:
+                    body = e.read().decode('utf-8', 'ignore')[:200]
+                except Exception:
+                    pass
+                hint = ''
+                if e.code in (401, 403):
+                    hint = '（請確認 API 金鑰正確；Unsplash 用 Access Key，非 Secret Key）'
+                raise RuntimeError(f'HTTP {e.code} {e.reason}{hint}｜{body}')
+
         if mode == 'unsplash':
             params = urllib.parse.urlencode({
                 'query': query or 'portrait',
                 'orientation': 'portrait',
                 'content_filter': 'high',
             })
-            req = urllib.request.Request(
-                f'https://api.unsplash.com/photos/random?{params}',
-                headers={'Authorization': f'Client-ID {key}', 'Accept-Version': 'v1'})
-            with urllib.request.urlopen(req, timeout=15) as r:
-                data = json.loads(r.read().decode('utf-8'))
+            data = _get_json(f'https://api.unsplash.com/photos/random?{params}',
+                             {'Authorization': f'Client-ID {key}', 'Accept-Version': 'v1'})
             if isinstance(data, list):
                 data = data[0]
             img_url = data['urls']['regular']
         else:  # pexels
-            params = urllib.parse.urlencode({
-                'query': query or 'portrait',
-                'per_page': 80,
-                'page': random.randint(1, 10),
-            })
-            req = urllib.request.Request(
-                f'https://api.pexels.com/v1/search?{params}',
-                headers={'Authorization': key})
-            with urllib.request.urlopen(req, timeout=15) as r:
-                data = json.loads(r.read().decode('utf-8'))
-            photos = data.get('photos', [])
+            q = query or 'portrait'
+            per_page = 80
+            hdr = {'Authorization': key}
+            # 先抓第 1 頁取得 total_results，避免隨機翻頁超出結果數而拿到空陣列
+            first = _get_json(
+                'https://api.pexels.com/v1/search?' + urllib.parse.urlencode(
+                    {'query': q, 'per_page': per_page, 'page': 1}), hdr)
+            total = int(first.get('total_results', 0) or 0)
+            photos = first.get('photos', []) or []
+            if total > per_page:
+                import math
+                max_page = min(50, math.ceil(total / per_page))  # 控制在合理頁數內
+                page = random.randint(1, max_page)
+                if page != 1:
+                    data = _get_json(
+                        'https://api.pexels.com/v1/search?' + urllib.parse.urlencode(
+                            {'query': q, 'per_page': per_page, 'page': page}), hdr)
+                    photos = data.get('photos', []) or photos  # 空頁時退回第 1 頁結果
             if not photos:
-                raise RuntimeError('此關鍵字無搜尋結果')
+                raise RuntimeError('此關鍵字無搜尋結果，換個關鍵字試試（建議用英文）')
             img_url = random.choice(photos)['src']['large']
 
-        with urllib.request.urlopen(img_url, timeout=20) as r:
+        img_req = urllib.request.Request(img_url, headers={'User-Agent': ua})
+        with urllib.request.urlopen(img_req, timeout=20) as r:
             raw = r.read()
         img = Image.open(io.BytesIO(raw))
         img.load()
