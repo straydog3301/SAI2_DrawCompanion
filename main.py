@@ -8,6 +8,8 @@ import os
 import sys
 import subprocess
 import json
+import random
+import threading
 import traceback
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
@@ -121,6 +123,50 @@ _DEFAULT_DATA = os.path.join(_APP_DIR, 'sai2_draw_time.json')
 _SETTINGS_PATH = os.path.join(_APP_DIR, 'sai2_timer_settings.json')
 
 
+def _win32_set_topmost(win, on: bool):
+    """用 Win32 SetWindowPos 直接鎖定/解除任一 Tk 視窗的 z-order。
+    比 Tk 的 -topmost 可靠：override-redirect 視窗或被其他置頂視窗
+    （SAI2 全螢幕、UAC…）奪走 topmost 後仍能可靠重申。"""
+    try:
+        import ctypes
+        hwnd = ctypes.windll.user32.GetParent(win.winfo_id()) or win.winfo_id()
+        HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+        # SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+        SWP = 0x0001 | 0x0002 | 0x0010
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, HWND_TOPMOST if on else HWND_NOTOPMOST, 0, 0, 0, 0, SWP)
+    except Exception:
+        pass
+
+
+# ─── 速寫練習：類型 → 圖庫搜尋關鍵字 ──────────────────────────────────────
+# (機器碼, 顯示名稱, 搜尋關鍵字)
+SKETCH_CATEGORIES = [
+    ('portrait',  '人像 / 臉部',  'portrait face'),
+    ('pose',      '姿勢 / 全身',  'full body pose person standing'),
+    ('hands',     '手部',         'hands gesture'),
+    ('feet',      '足部',         'feet barefoot'),
+    ('landscape', '風景',         'landscape scenery nature'),
+    ('animal',    '動物',         'animal wildlife'),
+    ('still',     '靜物',         'still life object'),
+    ('architecture', '建築 / 場景', 'architecture street'),
+    ('custom',    '自訂關鍵字',    ''),
+]
+
+# (顯示名稱, 秒數)  0 = 不限時
+SKETCH_INTERVALS = [
+    ('30 秒', 30), ('60 秒', 60), ('90 秒', 90),
+    ('2 分', 120), ('5 分', 300), ('10 分', 600), ('不限時', 0),
+]
+
+SKETCH_IMG_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
+
+SKETCH_SOURCES = [('本機資料夾', 'local'), ('Unsplash', 'unsplash'), ('Pexels', 'pexels')]
+
+# 精簡模式透明底所用的色鍵（罕見洋紅，避免與照片像素撞色而破洞）
+MINI_CHROMA = '#ff00fe'
+
+
 def _eff_color(pct: int) -> str:
     if pct >= 60:
         return GREEN
@@ -228,7 +274,25 @@ def _load_settings() -> dict:
         'hotkey_record_key': 'F10',
         'hotkey_record_ctrl': False,
         'hotkey_record_alt': False,
-        'hotkey_record_shift': False
+        'hotkey_record_shift': False,
+        # ── 速寫練習全域快捷鍵（預設 Ctrl+Alt+K）──
+        'hotkey_sketch_key': 'K',
+        'hotkey_sketch_ctrl': True,
+        'hotkey_sketch_alt': True,
+        'hotkey_sketch_shift': False,
+        # ── 速寫練習 ──
+        'sketch_source_mode': 'local',       # local / unsplash / pexels
+        'sketch_local_dir': '',
+        'sketch_local_category': '',          # 本機來源時所選的二級子目錄名稱（''=全部）
+        'sketch_category': 'pose',
+        'sketch_custom_query': '',
+        'sketch_interval': 60,               # 秒；0 = 不限時
+        'sketch_grayscale': False,
+        'sketch_topmost': True,
+        'sketch_link_mini': True,             # 主視窗進/出精簡時，速寫視窗一起連動
+
+        'sketch_unsplash_key': '',           # 使用者自行鍵入，存於本機設定檔（已被 .gitignore 排除）
+        'sketch_pexels_key': ''
     }
     for k, v in defaults.items():
         if k not in d:
@@ -419,7 +483,7 @@ def _card(parent, **kw) -> tk.Frame:
 
 
 # ─── 主應用程式 ───────────────────────────────────────────────────────────
-VERSION = '1.4.0'
+VERSION = '1.5.0'
 
 
 class App:
@@ -833,6 +897,8 @@ class App:
              self._reset_all, font=FS).pack(side='left', padx=(0, 4))
         _btn(ctrl, '✨ ' + (_tr('ui.tracker.btn_liquify') if get_current_language() != 'zh_tw' else '啟動液化'),
              CARD2, ACCENT, self._trigger_liquify, font=FS).pack(side='left', padx=(0, 4))
+        _btn(ctrl, '🎨 ' + (_tr('ui.tracker.btn_sketch', '速寫練習')),
+             CARD2, ACCENT, self._open_sketch, font=FS).pack(side='left', padx=(0, 4))
         _btn(ctrl, _tr('ui.tracker.btn_settings'), CARD2, ACCH,
              self._open_settings, font=FS).pack(side='right')
         _btn(ctrl, _tr('ui.tracker.btn_save'), CARD2, ACCH,
@@ -933,6 +999,14 @@ class App:
                 self._start_close_countdown()
                 return
             self._sai2_was_alive = alive
+
+        # 置頂自我修復：迷你模式或勾選置頂時，每輪重申一次 z-order，
+        # 避免被 SAI2 全螢幕 / SetForegroundWindow / override-redirect 重繪奪走後永久失效
+        try:
+            if getattr(self, '_is_mini', False) or self._on_top.get():
+                self._force_topmost_win32(True)
+        except Exception:
+            pass
 
         self.root.after(1000, self._poll)
 
@@ -2027,6 +2101,16 @@ class App:
     def _open_settings(self):
         SettingsDialog(self.root, self._settings, self._apply_settings)
 
+    def _open_sketch(self):
+        """開啟速寫練習參考視窗（單例，重複點擊只帶回前景）。"""
+        win = getattr(self, '_sketch_win', None)
+        if win is not None and win.winfo_exists():
+            win.deiconify()
+            win.lift()
+            _win32_set_topmost(win, win.var_top.get())
+            return
+        self._sketch_win = SketchPracticeWindow(self.root, self)
+
     def _apply_settings(self, new_settings: dict):
         self._settings = new_settings
         _save_settings(new_settings)
@@ -2071,10 +2155,14 @@ class App:
 
         self.var_status.set(_tr('dialog.settings.updated'))
 
+    def _force_topmost_win32(self, on: bool):
+        _win32_set_topmost(self.root, on)
+
     def _apply_topmost(self):
         # 精簡模式下強制開啟置頂，常規模式則遵循按鈕狀態
         on_top = True if getattr(self, '_is_mini', False) else self._on_top.get()
         self.root.wm_attributes('-topmost', on_top)
+        self._force_topmost_win32(on_top)
         self._settings['always_on_top'] = self._on_top.get()
         _save_settings(self._settings)
 
@@ -2143,9 +2231,19 @@ class App:
             
             # 開啟縮圖生成
             self.timelapse_recorder.needs_thumbnail = True
-            
-        # 重新套用置頂設定
-        self._apply_topmost()
+
+        # 重新套用置頂設定（延後一拍，等 override-redirect 的原生框架重繪完成後再鎖 z-order）
+        self.root.after_idle(self._apply_topmost)
+
+        # 連動速寫視窗精簡模式（若開啟且設定允許）
+        if self._settings.get('sketch_link_mini', True):
+            win = getattr(self, '_sketch_win', None)
+            if win is not None and win.winfo_exists():
+                try:
+                    if self._is_mini != win._sketch_mini:
+                        win.toggle_sketch_mini()
+                except Exception:
+                    pass
 
     def _setup_system_hotkey(self):
         """設定系統層級（全域）快速鍵"""
@@ -2189,7 +2287,8 @@ class App:
         MINI_HOTKEY_ID = 1234
         RECORD_HOTKEY_ID = 5678
         LIQUIFY_HOTKEY_ID = 9012
-        
+        SKETCH_HOTKEY_ID = 3456
+
         # 註冊 Ctrl+Alt+T (精簡模式)
         ctypes.windll.user32.RegisterHotKey(None, MINI_HOTKEY_ID, 0x0003, 0x54)
         
@@ -2232,7 +2331,23 @@ class App:
                 liq_registered = True
             else:
                 self.root.after(0, lambda: self.var_status.set(f"⚠️ 液化快捷鍵 {liq_key} 註冊失敗"))
-        
+
+        # 解析並註冊速寫練習熱鍵 (預設 Ctrl + Alt + K)
+        sk_key = self._settings.get('hotkey_sketch_key', 'K')
+        sk_vk = self._parse_key_to_vk(sk_key)
+        sk_mods = 0
+        if self._settings.get('hotkey_sketch_alt', True):    sk_mods |= 0x0001
+        if self._settings.get('hotkey_sketch_ctrl', True):   sk_mods |= 0x0002
+        if self._settings.get('hotkey_sketch_shift', False): sk_mods |= 0x0004
+
+        sketch_registered = False
+        if sk_vk > 0:
+            res = ctypes.windll.user32.RegisterHotKey(None, SKETCH_HOTKEY_ID, sk_mods, sk_vk)
+            if res:
+                sketch_registered = True
+            else:
+                self.root.after(0, lambda: self.var_status.set(f"⚠️ 速寫快捷鍵 {sk_key} 註冊失敗"))
+
         self._hotkey_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
         
         try:
@@ -2245,6 +2360,8 @@ class App:
                         self.root.after(0, self._toggle_record_from_hotkey)
                     elif msg.wParam == LIQUIFY_HOTKEY_ID:
                         self.root.after(0, self._trigger_liquify)
+                    elif msg.wParam == SKETCH_HOTKEY_ID:
+                        self.root.after(0, self._open_sketch)
                 elif msg.message == 0x0012: # WM_QUIT
                     break
                 ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
@@ -2257,6 +2374,8 @@ class App:
                 ctypes.windll.user32.UnregisterHotKey(None, RECORD_HOTKEY_ID)
             if liq_registered:
                 ctypes.windll.user32.UnregisterHotKey(None, LIQUIFY_HOTKEY_ID)
+            if sketch_registered:
+                ctypes.windll.user32.UnregisterHotKey(None, SKETCH_HOTKEY_ID)
 
     def _trigger_liquify(self):
         if self.editor_active:
@@ -3098,39 +3217,33 @@ class SettingsDialog(tk.Toplevel):
         super().__init__(parent)
         self.title(_tr('dialog.settings.title'))
         self.configure(bg=CARD)
-        self.resizable(False, False)
+        self.resizable(True, True)   # 允許縮放，內容再多也能拉大
         self.grab_set()
         self._callback = callback
         self._settings = dict(settings)
-        
-        self.geometry('650x560')
-        self.update_idletasks()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        x = (sw - 650) // 2
-        y = (sh - 560) // 2
-        self.geometry(f'650x560+{x}+{y}')
+
         # 根據螢幕解析度動態計算設定對話框大小
+        self.update_idletasks()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        
-        # 計算適合當前解析度的對話框大小
+
         if sw >= 3840:  # 4K
-            dialog_width = 780  # 650 * 1.2
-            dialog_height = 600  # 500 * 1.2
+            dialog_width = 820
+            dialog_height = 760
         elif sw >= 2560:  # 2K
-            dialog_width = 700  # 650 * 1.075
-            dialog_height = 540  # 500 * 1.08
+            dialog_width = 740
+            dialog_height = 700
         else:  # 較低解析度
-            dialog_width = 650
-            dialog_height = 500
-        
-        self.geometry(f'{dialog_width}x{dialog_height}')
-        self.update_idletasks()
-        
+            dialog_width = 680
+            dialog_height = 640
+
+        # 高度不超過螢幕可用範圍（保留工作列空間），避免對話框比螢幕還高
+        dialog_height = min(dialog_height, int(sh * 0.9))
+
         x = (sw - dialog_width) // 2
-        y = (sh - dialog_height) // 2
+        y = max(0, (sh - dialog_height) // 2)
         self.geometry(f'{dialog_width}x{dialog_height}+{x}+{y}')
+        self.minsize(560, 420)
         _apply_titlebar_theme(self)
 
 
@@ -3150,11 +3263,31 @@ class SettingsDialog(tk.Toplevel):
         _btn(btn_row, _tr('dialog.settings.btn_apply'), ACCENT, ACCH, self._apply, font=FB, width=12).pack(side='left', padx=(button_padx, 10))
         _btn(btn_row, _tr('dialog.settings.btn_cancel'), CARD2, BORDER, self.destroy, font=FB, width=12).pack(side='left', padx=10)
 
-        # ── 主佈局左右兩欄 ──
-        left_col = tk.Frame(self, bg=CARD)
+        # ── 可捲動主體（避免內容超出低解析度螢幕而無法填寫）──
+        body_wrap = tk.Frame(self, bg=CARD)
+        body_wrap.pack(side='top', fill='both', expand=True)
+
+        canvas = tk.Canvas(body_wrap, bg=CARD, highlightthickness=0)
+        vsb = ttk.Scrollbar(body_wrap, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+
+        inner = tk.Frame(canvas, bg=CARD)
+        inner_id = canvas.create_window((0, 0), window=inner, anchor='nw')
+
+        def _sync_scrollregion(_=None):
+            canvas.configure(scrollregion=canvas.bbox('all'))
+        inner.bind('<Configure>', _sync_scrollregion)
+        # 讓內部框架永遠與 canvas 同寬（左右欄才能正常撐開）
+        canvas.bind('<Configure>', lambda e: canvas.itemconfig(inner_id, width=e.width))
+        # 滑鼠滾輪捲動（綁在 Toplevel，子元件的滾輪事件會冒泡上來；modal 對話框關閉即失效）
+        self.bind('<MouseWheel>', lambda e: canvas.yview_scroll(int(-e.delta / 120), 'units'))
+
+        left_col = tk.Frame(inner, bg=CARD)
         left_col.pack(side='left', fill='both', expand=True, padx=(14, 7), pady=10)
-        
-        right_col = tk.Frame(self, bg=CARD)
+
+        right_col = tk.Frame(inner, bg=CARD)
         right_col.pack(side='right', fill='both', expand=True, padx=(7, 14), pady=10)
         
         # ── 1. 一般設定 (左欄) ──
@@ -3237,7 +3370,39 @@ class SettingsDialog(tk.Toplevel):
         self.var_q_name = tk.StringVar(value=current_q_name)
         self.combo_quality = ttk.Combobox(f_tl, textvariable=self.var_q_name, state='readonly', width=18, font=FS, values=list(self.quality_map.keys()))
         self.combo_quality.grid(row=3, column=1, sticky='w', pady=6)
-        
+
+        # ── 速寫練習 (左欄) ──
+        f_sketch = tk.LabelFrame(left_col, text='速寫練習', font=FH, fg=ACCENT, bg=CARD, bd=1, relief='solid', padx=10, pady=8)
+        f_sketch.pack(fill='x', pady=(10, 0))
+        f_sketch.columnconfigure(0, weight=1)
+
+        tk.Label(f_sketch, text='本機參考圖預設資料夾（其下二級子目錄會作為分類）', font=FB, fg=TEXT, bg=CARD,
+                 wraplength=280, justify='left').grid(row=0, column=0, sticky='w', pady=(2, 2))
+        sk_row = tk.Frame(f_sketch, bg=CARD)
+        sk_row.grid(row=1, column=0, sticky='we', pady=(0, 6))
+        self.var_sketch_dir = tk.StringVar(value=self._settings.get('sketch_local_dir', ''))
+        tk.Entry(sk_row, textvariable=self.var_sketch_dir, font=FS, bg=CARD2, fg=TEXT,
+                 insertbackground=TEXT, relief='flat', width=20).pack(side='left', fill='x', expand=True, padx=(0, 6))
+        _btn(sk_row, _tr('dialog.settings.btn_browse'), CARD2, ACCH, self._choose_sketch_dir, font=FS, pady=2).pack(side='right')
+
+        tk.Label(f_sketch, text='Unsplash Access Key', font=FB, fg=TEXT, bg=CARD).grid(row=2, column=0, sticky='w', pady=(2, 2))
+        self.var_unsplash = tk.StringVar(value=self._settings.get('sketch_unsplash_key', ''))
+        tk.Entry(f_sketch, textvariable=self.var_unsplash, font=FS, bg=CARD2, fg=TEXT,
+                 insertbackground=TEXT, relief='flat', width=32).grid(row=3, column=0, sticky='we', pady=(0, 4))
+
+        tk.Label(f_sketch, text='Pexels API Key', font=FB, fg=TEXT, bg=CARD).grid(row=4, column=0, sticky='w', pady=(2, 2))
+        self.var_pexels = tk.StringVar(value=self._settings.get('sketch_pexels_key', ''))
+        tk.Entry(f_sketch, textvariable=self.var_pexels, font=FS, bg=CARD2, fg=TEXT,
+                 insertbackground=TEXT, relief='flat', width=32).grid(row=5, column=0, sticky='we', pady=(0, 2))
+
+        self.var_sketch_link = tk.BooleanVar(value=bool(self._settings.get('sketch_link_mini', True)))
+        tk.Checkbutton(f_sketch, text='主視窗進入精簡模式時，速寫視窗一起精簡', variable=self.var_sketch_link,
+                       font=FS, fg=TEXT, bg=CARD, selectcolor=CARD2, activebackground=CARD,
+                       activeforeground=TEXT, anchor='w').grid(row=6, column=0, sticky='w', pady=(4, 0))
+
+        tk.Label(f_sketch, text='金鑰與路徑僅存於本機設定檔，不會上傳或進入 git', font=FS, fg=TEXTD, bg=CARD,
+                 wraplength=280, justify='left').grid(row=7, column=0, sticky='w', pady=(2, 0))
+
         # ── 2. 主題配色 (右欄) ──
         f_theme = tk.LabelFrame(right_col, text=_tr('dialog.settings.grp_theme'), font=FH, fg=ACCENT, bg=CARD, bd=1, relief='solid', padx=10, pady=8)
         f_theme.pack(fill='x', pady=(0, 10))
@@ -3354,7 +3519,26 @@ class SettingsDialog(tk.Toplevel):
         self.var_liq_key = tk.StringVar(value=self._settings.get('hotkey_liquify_key', 'L'))
         self.combo_liq_key = ttk.Combobox(f_liq_hotkey, textvariable=self.var_liq_key, state='readonly', width=10, font=FS, values=keys)
         self.combo_liq_key.grid(row=1, column=1, sticky='w', pady=4)
-        
+
+        # ── 6. 速寫練習全域快速鍵 (右欄) ──
+        f_sk_hotkey = tk.LabelFrame(right_col, text='速寫練習全域快速鍵', font=FH, fg=ACCENT, bg=CARD, bd=1, relief='solid', padx=10, pady=8)
+        f_sk_hotkey.pack(fill='x', pady=(10, 0))
+
+        sk_mods_frame = tk.Frame(f_sk_hotkey, bg=CARD)
+        sk_mods_frame.grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
+
+        self.var_sk_ctrl = tk.BooleanVar(value=self._settings.get('hotkey_sketch_ctrl', True))
+        tk.Checkbutton(sk_mods_frame, text='Ctrl', variable=self.var_sk_ctrl, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT, cursor='hand2').pack(side='left', padx=(0, 8))
+        self.var_sk_alt = tk.BooleanVar(value=self._settings.get('hotkey_sketch_alt', True))
+        tk.Checkbutton(sk_mods_frame, text='Alt', variable=self.var_sk_alt, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT, cursor='hand2').pack(side='left', padx=(0, 8))
+        self.var_sk_shift = tk.BooleanVar(value=self._settings.get('hotkey_sketch_shift', False))
+        tk.Checkbutton(sk_mods_frame, text='Shift', variable=self.var_sk_shift, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT, cursor='hand2').pack(side='left', padx=(0, 8))
+
+        tk.Label(f_sk_hotkey, text=_tr('dialog.settings.hotkey_key'), font=FB, fg=TEXT, bg=CARD).grid(row=1, column=0, sticky='w', pady=4)
+        self.var_sk_key = tk.StringVar(value=self._settings.get('hotkey_sketch_key', 'K'))
+        self.combo_sk_key = ttk.Combobox(f_sk_hotkey, textvariable=self.var_sk_key, state='readonly', width=10, font=FS, values=keys)
+        self.combo_sk_key.grid(row=1, column=1, sticky='w', pady=4)
+
         self._on_preset_change()
         self.wait_window()
 
@@ -3370,6 +3554,11 @@ class SettingsDialog(tk.Toplevel):
         p = filedialog.askdirectory(title=_tr('dialog.settings.video_dir'))
         if p:
             self.var_tl_out.set(os.path.normpath(p))
+
+    def _choose_sketch_dir(self):
+        p = filedialog.askdirectory(title='選擇速寫參考圖預設資料夾', parent=self)
+        if p:
+            self.var_sketch_dir.set(os.path.normpath(p))
 
     def _on_preset_change(self, _=None):
         preset_display = self.var_preset.get()
@@ -3444,6 +3633,11 @@ class SettingsDialog(tk.Toplevel):
         self._settings['hotkey_liquify_alt'] = self.var_liq_alt.get()
         self._settings['hotkey_liquify_shift'] = self.var_liq_shift.get()
         self._settings['hotkey_liquify_key'] = self.var_liq_key.get()
+
+        self._settings['hotkey_sketch_ctrl'] = self.var_sk_ctrl.get()
+        self._settings['hotkey_sketch_alt'] = self.var_sk_alt.get()
+        self._settings['hotkey_sketch_shift'] = self.var_sk_shift.get()
+        self._settings['hotkey_sketch_key'] = self.var_sk_key.get()
         
         # Save Language code
         selected_lang_name = self.var_lang_name.get()
@@ -3458,12 +3652,681 @@ class SettingsDialog(tk.Toplevel):
         selected_q_name = self.var_q_name.get()
         q_code = self.quality_map.get(selected_q_name, 'standard')
         self._settings['timelapse_quality'] = q_code
-        
+
+        # Save 速寫練習設定
+        self._settings['sketch_unsplash_key'] = self.var_unsplash.get().strip()
+        self._settings['sketch_pexels_key'] = self.var_pexels.get().strip()
+        self._settings['sketch_local_dir'] = self.var_sketch_dir.get().strip()
+        self._settings['sketch_link_mini'] = bool(self.var_sketch_link.get())
+
         callback = self._callback
         settings = self._settings
         self.destroy()
         callback(settings)
 
+
+
+class SketchPracticeWindow(tk.Toplevel):
+    """速寫 / gesture 練習參考視窗。
+    來源：本機資料夾隨機、Unsplash、Pexels（後兩者需在設定填入 API 金鑰）。
+    功能：類型選擇（人像/姿勢/手部/風景…）、姿勢倒數計時、自動翻頁、灰階練習、置頂。
+    """
+
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self.title('🎨 速寫練習 (Gesture Practice)')
+        self.configure(bg=BG)
+        self.minsize(380, 420)
+
+        # 狀態
+        self._history = []          # 已載入的 PIL.Image（供上一張/下一張）
+        self._hist_idx = -1
+        self._queue = []            # 本機洗牌佇列（檔案路徑）
+        self._queue_root = None     # 目前佇列對應的掃描根目錄（來源/分類/預設目錄變動時重建）
+        self._cur_pil = None        # 目前顯示的原圖（供縮放）
+        self._cur_photo = None      # ImageTk 參照（避免被 GC）
+        self._remaining = 0
+        self._paused = False
+        self._loading = False
+        self._destroyed = False
+        self._timer_job = None
+        self._resize_job = None
+        self._last_size = (0, 0)
+        self._sketch_mini = False    # 精簡模式（只留圖像+計時）
+        self._normal_geom = None     # 進精簡前的視窗幾何
+        self._drag_x = 0
+        self._drag_y = 0
+
+        # 反查表
+        self._src_label_to_key = {l: k for l, k in SKETCH_SOURCES}
+        self._cat_label_to_key = {l: k for k, l, q in SKETCH_CATEGORIES}
+        self._int_label_to_secs = {l: s for l, s in SKETCH_INTERVALS}
+
+        self._build_ui()
+
+        # 置中
+        w, h = 720, 680
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(f'{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}')
+
+        self.protocol('WM_DELETE_WINDOW', self._on_close)
+        self.bind('<Configure>', self._on_resize)
+        self.bind('<space>', self.toggle_pause)
+        self.bind('<Right>', self.next_image)
+        self.bind('<Left>', self.prev_image)
+        self.bind('<Escape>', self._exit_mini_if_active)
+        self.bind('<Control-Key-m>', lambda _e: self.toggle_sketch_mini())
+
+        self.after(200, lambda: _apply_titlebar_theme(self))
+        self.after(250, self._toggle_topmost)
+        self.after(300, self._topmost_heal)
+        self.after(400, self.next_image)   # 載入首張
+
+    # ── 設定存取（透過 app 保持與設定彈窗一致）──────────────────────────
+    def _get(self, k, default=None):
+        return self.app._settings.get(k, default)
+
+    def _set(self, k, v):
+        self.app._settings[k] = v
+
+    def _persist(self):
+        _save_settings(self.app._settings)
+
+    # ── UI ────────────────────────────────────────────────────────────
+    def _build_ui(self):
+        # 初始值
+        src_label = next((l for l, k in SKETCH_SOURCES if k == self._get('sketch_source_mode', 'local')), '本機資料夾')
+        cat_label = next((l for k, l, q in SKETCH_CATEGORIES if k == self._get('sketch_category', 'pose')), '姿勢 / 全身')
+        int_label = next((l for l, s in SKETCH_INTERVALS if s == self._get('sketch_interval', 60)), '60 秒')
+
+        # ── 頂部控制列 ──
+        top = tk.Frame(self, bg=CARD, padx=8, pady=6)
+        top.pack(fill='x')
+        self.top_bar = top
+
+        # 精簡模式切換（放最右）
+        self.btn_mini = _btn(top, '🗕 精簡', CARD2, ACCH, self.toggle_sketch_mini, font=FS)
+        self.btn_mini.pack(side='right')
+
+        tk.Label(top, text='來源', font=FS, fg=TEXTD, bg=CARD).pack(side='left', padx=(0, 3))
+        self.var_source = tk.StringVar(value=src_label)
+        cb_src = ttk.Combobox(top, textvariable=self.var_source, state='readonly', width=10, font=FS,
+                              values=[l for l, k in SKETCH_SOURCES])
+        cb_src.pack(side='left', padx=(0, 8))
+        cb_src.bind('<<ComboboxSelected>>', self._on_source_change)
+
+        tk.Label(top, text='類型', font=FS, fg=TEXTD, bg=CARD).pack(side='left', padx=(0, 3))
+        self.var_cat = tk.StringVar(value=cat_label)
+        self.cb_cat = ttk.Combobox(top, textvariable=self.var_cat, state='readonly', width=13, font=FS,
+                                   values=[l for k, l, q in SKETCH_CATEGORIES])
+        self.cb_cat.pack(side='left', padx=(0, 8))
+        self.cb_cat.bind('<<ComboboxSelected>>', self._on_cat_change)
+
+        self.var_custom = tk.StringVar(value=self._get('sketch_custom_query', ''))
+        self.ent_custom = tk.Entry(top, textvariable=self.var_custom, font=FS, bg=CARD2, fg=TEXT,
+                                   insertbackground=TEXT, relief='flat', width=12)
+        self.ent_custom.pack(side='left', padx=(0, 8))
+
+        tk.Label(top, text='間隔', font=FS, fg=TEXTD, bg=CARD).pack(side='left', padx=(0, 3))
+        self.var_interval = tk.StringVar(value=int_label)
+        cb_int = ttk.Combobox(top, textvariable=self.var_interval, state='readonly', width=7, font=FS,
+                              values=[l for l, s in SKETCH_INTERVALS])
+        cb_int.pack(side='left', padx=(0, 8))
+        cb_int.bind('<<ComboboxSelected>>', self._on_interval_change)
+
+        self.var_gray = tk.BooleanVar(value=bool(self._get('sketch_grayscale', False)))
+        tk.Checkbutton(top, text='灰階', variable=self.var_gray, font=FS, fg=TEXT, bg=CARD,
+                       selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT,
+                       cursor='hand2', command=self._on_gray_change).pack(side='left', padx=(0, 6))
+
+        self.var_top = tk.BooleanVar(value=bool(self._get('sketch_topmost', True)))
+        tk.Checkbutton(top, text='置頂', variable=self.var_top, font=FS, fg=TEXT, bg=CARD,
+                       selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT,
+                       cursor='hand2', command=self._toggle_topmost).pack(side='left')
+
+        # ── 影像顯示區 ──
+        self.img_holder = tk.Frame(self, bg='#161616')
+        self.img_holder.pack(fill='both', expand=True, padx=8, pady=6)
+        # 關閉幾何傳播：holder 尺寸只由版面決定，不隨內部圖片大小變動，
+        # 否則切換灰階/翻頁時 holder 會被較大的圖撐大，形成正回饋不斷放大並把底部 UI 擠出畫面
+        self.img_holder.pack_propagate(False)
+        self.img_label = tk.Label(self.img_holder, bg='#161616', fg=TEXTD,
+                                  text='載入中…', font=FB)
+        self.img_label.pack(fill='both', expand=True)
+
+        # 計時 overlay（浮在圖片右上角，精簡模式下唯一常駐的資訊）
+        self.var_count = tk.StringVar(value='--')
+        self.lbl_count = tk.Label(self.img_holder, textvariable=self.var_count,
+                                  font=FBIG, fg='#ffffff', bg='#101010', padx=8, pady=2)
+        self.lbl_count.place(relx=1.0, x=-6, y=6, anchor='ne')
+
+        # 精簡模式滑入圖像時才浮現的懸浮控制列（底部置中）
+        self.hover_ctrl = tk.Frame(self.img_holder, bg='#101010')
+        self._hover_btn(self.hover_ctrl, '⏮', self.prev_image)
+        self.btn_hover_pause = self._hover_btn(self.hover_ctrl, '⏸', self.toggle_pause)
+        self._hover_btn(self.hover_ctrl, '⏭', self.next_image)
+        self._hover_btn(self.hover_ctrl, '🗖', self.toggle_sketch_mini)  # 還原
+        self._hover_hide_job = None
+
+        # 雙擊圖片切換精簡模式；精簡模式下可拖曳圖片移動無邊框視窗
+        self.img_label.bind('<Double-Button-1>', lambda _e: self.toggle_sketch_mini())
+        # 滑入/滑出圖像 → 顯示/隱藏懸浮控制列（僅精簡模式生效）
+        for w in (self.img_holder, self.img_label):
+            w.bind('<Enter>', self._hover_enter)
+            w.bind('<Leave>', self._hover_leave)
+
+        # ── 底部控制列 ──
+        bottom = tk.Frame(self, bg=CARD, padx=8, pady=6)
+        bottom.pack(fill='x')
+        self.bottom_bar = bottom
+
+        _btn(bottom, '⏮ 上一張', CARD2, ACCH, self.prev_image, font=FS).pack(side='left', padx=(0, 4))
+        self.btn_pause = _btn(bottom, '⏸ 暫停', CARD2, ACCH, self.toggle_pause, font=FS)
+        self.btn_pause.pack(side='left', padx=(0, 4))
+        _btn(bottom, '⏭ 下一張', CARD2, ACCENT, self.next_image, font=FS).pack(side='left', padx=(0, 4))
+        _btn(bottom, '📁 資料夾', CARD2, ACCH, self._choose_folder, font=FS).pack(side='left', padx=(0, 4))
+        tk.Label(bottom, text='（雙擊圖片 / Esc 切換精簡模式）', font=FS, fg=TEXTD, bg=CARD).pack(side='right')
+
+        # ── 狀態列 ──
+        self.var_status = tk.StringVar(value='準備中…')
+        self.status_bar = tk.Label(self, textvariable=self.var_status, font=FS, fg=TEXTD, bg=CARD,
+                                   anchor='w', padx=10, pady=4)
+        self.status_bar.pack(fill='x', side='bottom')
+
+        # 依目前來源填入分類清單（本機→二級子目錄；網路→固定關鍵字類型）
+        self._refresh_category_values()
+
+    # ── 下拉/選項存取 ────────────────────────────────────────────────
+    def _source_key(self):
+        return self._src_label_to_key.get(self.var_source.get(), 'local')
+
+    def _cat_key(self):
+        return self._cat_label_to_key.get(self.var_cat.get(), 'pose')
+
+    def _interval_secs(self):
+        return self._int_label_to_secs.get(self.var_interval.get(), 60)
+
+    def _current_query(self):
+        key = self._cat_key()
+        if key == 'custom':
+            return self.var_custom.get().strip() or 'portrait'
+        for k, l, q in SKETCH_CATEGORIES:
+            if k == key:
+                return q
+        return 'portrait'
+
+    def _set_status(self, msg):
+        try:
+            self.var_status.set(msg)
+        except Exception:
+            pass
+
+    # ── 影像載入 ──────────────────────────────────────────────────────
+    def next_image(self, *_):
+        if self._hist_idx < len(self._history) - 1:
+            self._hist_idx += 1
+            self._show_pil(self._history[self._hist_idx])
+            self._start_timer()
+        else:
+            self._load_new()
+
+    def prev_image(self, *_):
+        if self._hist_idx > 0:
+            self._hist_idx -= 1
+            self._show_pil(self._history[self._hist_idx])
+            self._start_timer()
+        else:
+            self._set_status('已經是第一張了')
+
+    def _load_new(self):
+        mode = self._source_key()
+        if mode == 'local':
+            self._load_local()
+        else:
+            self._load_web(mode)
+
+    def _push_history(self, pil):
+        # 若曾往回看，捨棄後面的分支再接上新圖
+        if self._hist_idx < len(self._history) - 1:
+            self._history = self._history[:self._hist_idx + 1]
+        self._history.append(pil)
+        MAX = 15
+        if len(self._history) > MAX:
+            self._history = self._history[len(self._history) - MAX:]
+        self._hist_idx = len(self._history) - 1
+
+    def _scan_dir(self, d):
+        out = []
+        for root_, _dirs, files in os.walk(d):
+            for f in files:
+                if f.lower().endswith(SKETCH_IMG_EXTS):
+                    out.append(os.path.join(root_, f))
+        return out
+
+    def _local_subdirs(self):
+        """回傳本機根目錄下的二級子目錄名稱（作為分類）。"""
+        d = self._get('sketch_local_dir', '')
+        if not d or not os.path.isdir(d):
+            return []
+        try:
+            return sorted(name for name in os.listdir(d)
+                          if os.path.isdir(os.path.join(d, name)))
+        except Exception:
+            return []
+
+    def _local_scan_root(self):
+        """依「本機分類」決定實際掃描的根目錄：選了子目錄就只掃該子目錄，否則掃全部。"""
+        d = self._get('sketch_local_dir', '')
+        sub = self._get('sketch_local_category', '')
+        if sub and os.path.isdir(os.path.join(d, sub)):
+            return os.path.join(d, sub)
+        return d
+
+    def _load_local(self):
+        d = self._get('sketch_local_dir', '')
+        if not d or not os.path.isdir(d):
+            self._set_status('尚未設定本機資料夾，請點「📁 資料夾」選擇（或到設定填預設目錄）')
+            return
+        scan_root = self._local_scan_root()
+        # 掃描根目錄變動（切換分類 / 換了預設目錄）時重建洗牌佇列
+        if not self._queue or self._queue_root != scan_root:
+            self._queue = self._scan_dir(scan_root)
+            self._queue_root = scan_root
+            random.shuffle(self._queue)
+        if not self._queue:
+            self._set_status('此資料夾（分類）內找不到圖片檔')
+            return
+        path = self._queue.pop()
+        try:
+            img = Image.open(path)
+            img.load()
+            self._push_history(img)
+            self._show_pil(img)
+            sub = self._get('sketch_local_category', '')
+            tag = f'[{sub}] ' if sub else ''
+            self._set_status(f'📁 {tag}{os.path.basename(path)}  （剩 {len(self._queue)} 張未抽）')
+            self._start_timer()
+        except Exception as e:
+            self._set_status(f'讀取失敗：{e}')
+
+    def _load_web(self, mode):
+        if self._loading:
+            return
+        key = self._get(f'sketch_{mode}_key', '').strip()
+        if not key:
+            self._set_status(f'尚未設定 {mode.capitalize()} API 金鑰（設定 → 速寫練習 API）')
+            return
+        query = self._current_query()
+        self._loading = True
+        self._set_status(f'從 {mode.capitalize()} 抓圖中…（{query}）')
+
+        def worker():
+            img, err = None, None
+            try:
+                img = self._fetch_web_image(mode, key, query)
+            except Exception as e:
+                err = str(e)
+
+            def done():
+                self._loading = False
+                if self._destroyed:
+                    return
+                if img is None:
+                    self._set_status(f'抓圖失敗：{err}')
+                else:
+                    self._push_history(img)
+                    self._show_pil(img)
+                    self._set_status(f'🌐 {mode.capitalize()} · {query}')
+                    self._start_timer()
+            try:
+                self.after(0, done)
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _fetch_web_image(self, mode, key, query):
+        import urllib.request
+        import urllib.parse
+        import io
+        if mode == 'unsplash':
+            params = urllib.parse.urlencode({
+                'query': query or 'portrait',
+                'orientation': 'portrait',
+                'content_filter': 'high',
+            })
+            req = urllib.request.Request(
+                f'https://api.unsplash.com/photos/random?{params}',
+                headers={'Authorization': f'Client-ID {key}', 'Accept-Version': 'v1'})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = json.loads(r.read().decode('utf-8'))
+            if isinstance(data, list):
+                data = data[0]
+            img_url = data['urls']['regular']
+        else:  # pexels
+            params = urllib.parse.urlencode({
+                'query': query or 'portrait',
+                'per_page': 80,
+                'page': random.randint(1, 10),
+            })
+            req = urllib.request.Request(
+                f'https://api.pexels.com/v1/search?{params}',
+                headers={'Authorization': key})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = json.loads(r.read().decode('utf-8'))
+            photos = data.get('photos', [])
+            if not photos:
+                raise RuntimeError('此關鍵字無搜尋結果')
+            img_url = random.choice(photos)['src']['large']
+
+        with urllib.request.urlopen(img_url, timeout=20) as r:
+            raw = r.read()
+        img = Image.open(io.BytesIO(raw))
+        img.load()
+        return img
+
+    # ── 顯示 / 縮放 ──────────────────────────────────────────────────
+    def _show_pil(self, pil):
+        self._cur_pil = pil
+        self._render()
+
+    def _render(self):
+        self._resize_job = None
+        if not self._cur_pil or self._destroyed:
+            return
+        aw = self.img_holder.winfo_width()
+        ah = self.img_holder.winfo_height()
+        if aw < 20 or ah < 20:
+            self.after(60, self._render)
+            return
+        iw, ih = self._cur_pil.size
+        scale = min(aw / iw, ah / ih)
+        nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
+        try:
+            resized = self._cur_pil.resize((nw, nh), Image.LANCZOS)
+            if self.var_gray.get():
+                resized = resized.convert('L').convert('RGB')
+            self._cur_photo = ImageTk.PhotoImage(resized)
+            self.img_label.config(image=self._cur_photo, text='')
+        except Exception as e:
+            self.img_label.config(image='', text=f'顯示失敗：{e}')
+
+    def _on_resize(self, e):
+        if e.widget is not self:
+            return
+        size = (self.winfo_width(), self.winfo_height())
+        if size == self._last_size:
+            return
+        self._last_size = size
+        if self._resize_job:
+            try:
+                self.after_cancel(self._resize_job)
+            except Exception:
+                pass
+        self._resize_job = self.after(120, self._render)
+
+    # ── 計時 ──────────────────────────────────────────────────────────
+    def _start_timer(self):
+        if self._timer_job:
+            try:
+                self.after_cancel(self._timer_job)
+            except Exception:
+                pass
+            self._timer_job = None
+        secs = self._interval_secs()
+        if secs <= 0:
+            self.var_count.set('∞')
+            return
+        self._remaining = secs
+        self.var_count.set(str(self._remaining))
+        if not self._paused:
+            self._timer_job = self.after(1000, self._tick)
+
+    def _tick(self):
+        self._timer_job = None
+        if self._paused or self._destroyed:
+            return
+        self._remaining -= 1
+        if self._remaining <= 0:
+            self.var_count.set('0')
+            self.next_image()
+            return
+        self.var_count.set(str(self._remaining))
+        self._timer_job = self.after(1000, self._tick)
+
+    def toggle_pause(self, *_):
+        self._paused = not self._paused
+        if self._paused:
+            self.btn_pause.config(text='▶ 繼續')
+            self.btn_hover_pause.config(text='▶')
+            if self._timer_job:
+                try:
+                    self.after_cancel(self._timer_job)
+                except Exception:
+                    pass
+                self._timer_job = None
+        else:
+            self.btn_pause.config(text='⏸ 暫停')
+            self.btn_hover_pause.config(text='⏸')
+            if self._interval_secs() > 0 and self._remaining > 0:
+                self._timer_job = self.after(1000, self._tick)
+
+    # ── 事件 ──────────────────────────────────────────────────────────
+    def _refresh_category_values(self):
+        """依目前來源重新填入分類下拉：
+        - 本機：以根目錄下的二級子目錄名稱作為分類（外加「全部（隨機）」）
+        - 網路：固定的關鍵字類型（人像/姿勢/手部…）"""
+        if self._source_key() == 'local':
+            subs = self._local_subdirs()
+            vals = ['📁 全部（隨機）'] + subs
+            self.cb_cat['values'] = vals
+            last = self._get('sketch_local_category', '')
+            self.var_cat.set(last if last in subs else vals[0])
+            self.ent_custom.config(state='disabled')
+        else:
+            vals = [l for k, l, q in SKETCH_CATEGORIES]
+            self.cb_cat['values'] = vals
+            cur = next((l for k, l, q in SKETCH_CATEGORIES
+                        if k == self._get('sketch_category', 'pose')), vals[0])
+            self.var_cat.set(cur)
+            self.ent_custom.config(state='normal' if self._cat_key() == 'custom' else 'disabled')
+
+    def _on_source_change(self, *_):
+        self._set('sketch_source_mode', self._source_key())
+        self._persist()
+        self._queue = []
+        self._queue_root = None
+        self._refresh_category_values()
+        self.next_image()
+
+    def _on_cat_change(self, *_):
+        if self._source_key() == 'local':
+            sel = self.var_cat.get()
+            sub = '' if sel.startswith('📁 全部') else sel
+            self._set('sketch_local_category', sub)
+            self._persist()
+            self._queue = []
+            self._queue_root = None
+            self.next_image()
+        else:
+            is_custom = self._cat_key() == 'custom'
+            self.ent_custom.config(state='normal' if is_custom else 'disabled')
+            self._set('sketch_category', self._cat_key())
+            self._persist()
+
+    def _on_interval_change(self, *_):
+        self._set('sketch_interval', self._interval_secs())
+        self._persist()
+        self._start_timer()
+
+    def _on_gray_change(self):
+        self._set('sketch_grayscale', bool(self.var_gray.get()))
+        self._persist()
+        self._render()
+
+    def _choose_folder(self, *_):
+        d = filedialog.askdirectory(title='選擇速寫參考圖資料夾', parent=self)
+        if not d:
+            return
+        self._set('sketch_local_dir', os.path.normpath(d))
+        self._set('sketch_local_category', '')   # 換根目錄→重設分類為全部
+        self._queue = []
+        self._queue_root = None
+        self.var_source.set('本機資料夾')
+        self._set('sketch_source_mode', 'local')
+        self._persist()
+        self._refresh_category_values()
+        self.next_image()
+
+    def _toggle_topmost(self, *_):
+        on = bool(self.var_top.get())
+        try:
+            self.wm_attributes('-topmost', on)
+        except Exception:
+            pass
+        _win32_set_topmost(self, on)
+        self._set('sketch_topmost', on)
+        self._persist()
+
+    def _topmost_heal(self):
+        if self._destroyed:
+            return
+        if self.var_top.get() or self._sketch_mini:
+            _win32_set_topmost(self, True)
+        self.after(1500, self._topmost_heal)
+
+    # ── 精簡模式（只保留圖像 + 計時，其餘 UI 隱藏）──────────────────────
+    def toggle_sketch_mini(self, *_):
+        self._sketch_mini = not self._sketch_mini
+        if self._sketch_mini:
+            self._normal_geom = self.geometry()
+            # 隱藏所有 chrome，只留 img_holder（內含圖片與計時 overlay）
+            self.top_bar.pack_forget()
+            self.bottom_bar.pack_forget()
+            self.status_bar.pack_forget()
+            self.overrideredirect(True)                 # 無邊框
+            self.img_holder.pack_configure(padx=0, pady=0)
+            # 透明底：圖片外的留白區套色鍵 → 變透明可看穿到 SAI2
+            self.configure(bg=MINI_CHROMA)
+            self.img_holder.config(bg=MINI_CHROMA)
+            self.img_label.config(bg=MINI_CHROMA)
+            try:
+                self.wm_attributes('-transparentcolor', MINI_CHROMA)
+            except Exception:
+                pass
+            # 無邊框視窗改由拖曳圖片移動
+            self.img_label.bind('<Button-1>', self._mini_drag_start)
+            self.img_label.bind('<B1-Motion>', self._mini_drag_move)
+            self.img_label.config(cursor='fleur')
+            self.lbl_count.config(font=FEFF)            # 計時放大更醒目
+        else:
+            self._hide_hover()
+            self.img_label.unbind('<Button-1>')
+            self.img_label.unbind('<B1-Motion>')
+            self.img_label.config(cursor='')
+            self.lbl_count.config(font=FBIG)
+            # 取消透明底並還原深色底
+            try:
+                self.wm_attributes('-transparentcolor', '')
+            except Exception:
+                pass
+            self.configure(bg=BG)
+            self.img_holder.config(bg='#161616')
+            self.img_label.config(bg='#161616')
+            self.overrideredirect(False)                # 還原邊框
+            # 依原始順序重新排版
+            self.img_holder.pack_forget()
+            self.top_bar.pack(fill='x')
+            self.img_holder.pack(fill='both', expand=True, padx=8, pady=6)
+            self.bottom_bar.pack(fill='x')
+            self.status_bar.pack(fill='x', side='bottom')
+            if self._normal_geom:
+                self.geometry(self._normal_geom)
+        # 重新套用置頂（延後，避開 override-redirect 的非同步重繪 race）
+        self.after_idle(self._reassert_topmost)
+        self.after(120, self._render)
+
+    def _reassert_topmost(self):
+        on = bool(self.var_top.get()) or self._sketch_mini
+        try:
+            self.wm_attributes('-topmost', on)
+        except Exception:
+            pass
+        _win32_set_topmost(self, on)
+
+    def _exit_mini_if_active(self, *_):
+        if self._sketch_mini:
+            self.toggle_sketch_mini()
+
+    def _mini_drag_start(self, e):
+        self._drag_x, self._drag_y = e.x, e.y
+
+    def _mini_drag_move(self, e):
+        x = self.winfo_x() + (e.x - self._drag_x)
+        y = self.winfo_y() + (e.y - self._drag_y)
+        self.geometry(f'+{x}+{y}')
+
+    # ── 精簡模式懸浮控制列（滑入圖像才浮現）──────────────────────────
+    def _hover_btn(self, parent, text, cmd):
+        b = tk.Button(parent, text=text, font=('Microsoft JhengHei', 14), bg='#101010', fg='#ffffff',
+                      activebackground=ACCENT, activeforeground='#ffffff', relief='flat',
+                      cursor='hand2', bd=0, padx=10, pady=2, command=cmd)
+        b.pack(side='left', padx=2, pady=2)
+        b.bind('<Enter>', self._hover_enter)
+        b.bind('<Leave>', self._hover_leave)
+        return b
+
+    def _hover_enter(self, _e=None):
+        if not self._sketch_mini:
+            return
+        if self._hover_hide_job:
+            try:
+                self.after_cancel(self._hover_hide_job)
+            except Exception:
+                pass
+            self._hover_hide_job = None
+        self._show_hover()
+
+    def _hover_leave(self, _e=None):
+        if not self._sketch_mini:
+            return
+        if self._hover_hide_job:
+            try:
+                self.after_cancel(self._hover_hide_job)
+            except Exception:
+                pass
+        self._hover_hide_job = self.after(250, self._hide_hover)
+
+    def _show_hover(self):
+        self.hover_ctrl.place(relx=0.5, rely=1.0, y=-10, anchor='s')
+        self.hover_ctrl.lift()
+
+    def _hide_hover(self):
+        self._hover_hide_job = None
+        try:
+            self.hover_ctrl.place_forget()
+        except Exception:
+            pass
+
+    def _on_close(self):
+        self._destroyed = True
+        if self._timer_job:
+            try:
+                self.after_cancel(self._timer_job)
+            except Exception:
+                pass
+        try:
+            self._set('sketch_custom_query', self.var_custom.get().strip())
+            self._persist()
+        except Exception:
+            pass
+        try:
+            if getattr(self.app, '_sketch_win', None) is self:
+                self.app._sketch_win = None
+        except Exception:
+            pass
+        self.destroy()
 
 
 def main():
