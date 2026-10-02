@@ -483,7 +483,7 @@ def _card(parent, **kw) -> tk.Frame:
 
 
 # ─── 主應用程式 ───────────────────────────────────────────────────────────
-VERSION = '1.5.1'
+VERSION = '1.5.2'
 
 
 class App:
@@ -895,9 +895,9 @@ class App:
              self._delete_selected, font=FS).pack(side='left', padx=(0, 4))
         _btn(ctrl, _tr('ui.tracker.btn_reset'), CARD2, '#b91c1c',
              self._reset_all, font=FS).pack(side='left', padx=(0, 4))
-        _btn(ctrl, '✨ ' + (_tr('ui.tracker.btn_liquify') if get_current_language() != 'zh_tw' else '啟動液化'),
+        _btn(ctrl, _tr('ui.tracker.btn_liquify', '✨ 液化'),
              CARD2, ACCENT, self._trigger_liquify, font=FS).pack(side='left', padx=(0, 4))
-        _btn(ctrl, '🎨 ' + (_tr('ui.tracker.btn_sketch', '速寫練習')),
+        _btn(ctrl, _tr('ui.tracker.btn_sketch', '🎨 速寫'),
              CARD2, ACCENT, self._open_sketch, font=FS).pack(side='left', padx=(0, 4))
         _btn(ctrl, _tr('ui.tracker.btn_settings'), CARD2, ACCH,
              self._open_settings, font=FS).pack(side='right')
@@ -2158,6 +2158,22 @@ class App:
     def _force_topmost_win32(self, on: bool):
         _win32_set_topmost(self.root, on)
 
+    def _on_foreground_changed(self):
+        """任一視窗取得前景焦點（含切回 SAI2）時呼叫：立即重申主視窗與速寫視窗的置頂，
+        補足 1 秒輪詢空檔，避免置頂視窗被其他程式搶到前面。"""
+        try:
+            if getattr(self, '_is_mini', False) or self._on_top.get():
+                self._force_topmost_win32(True)
+        except Exception:
+            pass
+        win = getattr(self, '_sketch_win', None)
+        if win is not None:
+            try:
+                if win.winfo_exists() and (win.var_top.get() or win._sketch_mini):
+                    _win32_set_topmost(win, True)
+            except Exception:
+                pass
+
     def _apply_topmost(self):
         # 精簡模式下強制開啟置頂，常規模式則遵循按鈕狀態
         on_top = True if getattr(self, '_is_mini', False) else self._on_top.get()
@@ -2348,8 +2364,29 @@ class App:
             else:
                 self.root.after(0, lambda: self.var_status.set(f"⚠️ 速寫快捷鍵 {sk_key} 註冊失敗"))
 
+        # 前景視窗變更 hook：任一視窗（尤其切回 SAI2）取得焦點時立即重申置頂，
+        # 補足 1 秒輪詢的空檔，避免置頂視窗偶發被壓到背後
+        WINEVENTPROC = ctypes.WINFUNCTYPE(
+            None, wintypes.HANDLE, wintypes.DWORD, wintypes.HWND,
+            wintypes.LONG, wintypes.LONG, wintypes.DWORD, wintypes.DWORD)
+
+        def _on_foreground(hHook, event, hwnd, idObj, idChild, idThread, dwmsTime):
+            try:
+                self.root.after(0, self._on_foreground_changed)
+            except Exception:
+                pass
+
+        self._winevent_cb = WINEVENTPROC(_on_foreground)  # 保留參照避免被 GC
+        win_event_hook = 0
+        try:
+            # EVENT_SYSTEM_FOREGROUND = 0x0003, WINEVENT_OUTOFCONTEXT = 0x0000
+            win_event_hook = ctypes.windll.user32.SetWinEventHook(
+                0x0003, 0x0003, 0, self._winevent_cb, 0, 0, 0x0000)
+        except Exception:
+            win_event_hook = 0
+
         self._hotkey_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
-        
+
         try:
             msg = wintypes.MSG()
             while self._hotkey_running and ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
@@ -2376,6 +2413,11 @@ class App:
                 ctypes.windll.user32.UnregisterHotKey(None, LIQUIFY_HOTKEY_ID)
             if sketch_registered:
                 ctypes.windll.user32.UnregisterHotKey(None, SKETCH_HOTKEY_ID)
+            if win_event_hook:
+                try:
+                    ctypes.windll.user32.UnhookWinEvent(win_event_hook)
+                except Exception:
+                    pass
 
     def _trigger_liquify(self):
         if self.editor_active:
