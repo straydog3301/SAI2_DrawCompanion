@@ -19,6 +19,7 @@ from tracker import DrawTracker, fmt_seconds
 from timelapse import TimelapseRecorder, find_ffmpeg, file_key_to_subdir
 from i18n import _tr, set_language, get_current_language, get_available_languages
 from liquify_helper import LiquifyEditor, read_image_from_clipboard
+from brush_studio import BrushStudioWindow, PendingBrushQueue
 
 # ─── 啟動參數 ─────────────────────────────────────────────────────────────
 # --auto-close：由 watcher.pyw 傳入，SAI2 關閉時自動儲存並關閉計時器
@@ -280,6 +281,11 @@ def _load_settings() -> dict:
         'hotkey_sketch_ctrl': True,
         'hotkey_sketch_alt': True,
         'hotkey_sketch_shift': False,
+        # ── 筆刷工坊全域快捷鍵（預設 Ctrl+Alt+B）──
+        'hotkey_brush_key': 'B',
+        'hotkey_brush_ctrl': True,
+        'hotkey_brush_alt': True,
+        'hotkey_brush_shift': False,
         # ── 速寫練習 ──
         'sketch_source_mode': 'local',       # local / unsplash / pexels
         'sketch_local_dir': '',
@@ -483,7 +489,7 @@ def _card(parent, **kw) -> tk.Frame:
 
 
 # ─── 主應用程式 ───────────────────────────────────────────────────────────
-VERSION = '1.5.2'
+VERSION = '1.6.0'
 
 
 class App:
@@ -899,6 +905,8 @@ class App:
              CARD2, ACCENT, self._trigger_liquify, font=FS).pack(side='left', padx=(0, 4))
         _btn(ctrl, _tr('ui.tracker.btn_sketch', '🎨 速寫'),
              CARD2, ACCENT, self._open_sketch, font=FS).pack(side='left', padx=(0, 4))
+        _btn(ctrl, _tr('ui.tracker.btn_brush_studio', '🖌️ 筆刷'),
+             CARD2, ACCENT, self._open_brush_studio, font=FS).pack(side='left', padx=(0, 4))
         _btn(ctrl, _tr('ui.tracker.btn_settings'), CARD2, ACCH,
              self._open_settings, font=FS).pack(side='right')
         _btn(ctrl, _tr('ui.tracker.btn_save'), CARD2, ACCH,
@@ -989,9 +997,19 @@ class App:
 
         self._update_ui(state)
 
-        # ── SAI2 進程監控（--auto-close 模式）────────────────────────────
+        # ── SAI2 進程監控與待處理筆刷自動寫入 ─────────────────────────
+        alive = state.get('sai2_running', False)
+        if getattr(self, '_sai2_prev_running', False) and not alive:
+            try:
+                processed = PendingBrushQueue.process_all_if_closed()
+                if processed:
+                    names_str = ', '.join(processed)
+                    self.var_status.set(f"✅ 已在 SAI2 關閉後安全儲存自製筆刷：{names_str}")
+            except Exception as e:
+                print(f"[PendingBrushQueue] Process error: {e}")
+        self._sai2_prev_running = alive
+
         if self._auto_close:
-            alive = state.get('sai2_running', False)
             if self._sai2_was_alive and not alive:
                 # SAI2 剛剛關閉 → 進入自動關閉流程
                 self._closing = True
@@ -2111,6 +2129,30 @@ class App:
             return
         self._sketch_win = SketchPracticeWindow(self.root, self)
 
+    def _open_brush_studio(self):
+        """開啟筆刷製作工作台（單例，重複點擊只帶回前景）。"""
+        win = getattr(self, '_brush_studio_win', None)
+        if win is not None:
+            try:
+                if win.winfo_exists():
+                    win.deiconify()
+                    win.lift()
+                    win.focus_force()
+                    return
+            except Exception:
+                pass
+            self._brush_studio_win = None
+
+        def _on_created(brush_name):
+            self.var_status.set(f"🖌️ 筆刷 [{brush_name}] 已成功建立！")
+
+        self._brush_studio_win = BrushStudioWindow(self.root, on_brush_created_callback=_on_created)
+        
+        def _on_destroy(e):
+            if e.widget == self._brush_studio_win:
+                self._brush_studio_win = None
+        self._brush_studio_win.bind('<Destroy>', _on_destroy)
+
     def _apply_settings(self, new_settings: dict):
         self._settings = new_settings
         _save_settings(new_settings)
@@ -2304,6 +2346,7 @@ class App:
         RECORD_HOTKEY_ID = 5678
         LIQUIFY_HOTKEY_ID = 9012
         SKETCH_HOTKEY_ID = 3456
+        BRUSH_HOTKEY_ID = 4567
 
         # 註冊 Ctrl+Alt+T (精簡模式)
         ctypes.windll.user32.RegisterHotKey(None, MINI_HOTKEY_ID, 0x0003, 0x54)
@@ -2364,6 +2407,22 @@ class App:
             else:
                 self.root.after(0, lambda: self.var_status.set(f"⚠️ 速寫快捷鍵 {sk_key} 註冊失敗"))
 
+        # 解析並註冊筆刷工坊熱鍵 (預設 Ctrl + Alt + B)
+        br_key = self._settings.get('hotkey_brush_key', 'B')
+        br_vk = self._parse_key_to_vk(br_key)
+        br_mods = 0
+        if self._settings.get('hotkey_brush_alt', True):    br_mods |= 0x0001
+        if self._settings.get('hotkey_brush_ctrl', True):   br_mods |= 0x0002
+        if self._settings.get('hotkey_brush_shift', False): br_mods |= 0x0004
+
+        brush_registered = False
+        if br_vk > 0:
+            res = ctypes.windll.user32.RegisterHotKey(None, BRUSH_HOTKEY_ID, br_mods, br_vk)
+            if res:
+                brush_registered = True
+            else:
+                self.root.after(0, lambda: self.var_status.set(f"⚠️ 筆刷快捷鍵 {br_key} 註冊失敗"))
+
         # 前景視窗變更 hook：任一視窗（尤其切回 SAI2）取得焦點時立即重申置頂，
         # 補足 1 秒輪詢的空檔，避免置頂視窗偶發被壓到背後
         WINEVENTPROC = ctypes.WINFUNCTYPE(
@@ -2399,6 +2458,8 @@ class App:
                         self.root.after(0, self._trigger_liquify)
                     elif msg.wParam == SKETCH_HOTKEY_ID:
                         self.root.after(0, self._open_sketch)
+                    elif msg.wParam == BRUSH_HOTKEY_ID:
+                        self.root.after(0, self._open_brush_studio)
                 elif msg.message == 0x0012: # WM_QUIT
                     break
                 ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
@@ -2413,6 +2474,8 @@ class App:
                 ctypes.windll.user32.UnregisterHotKey(None, LIQUIFY_HOTKEY_ID)
             if sketch_registered:
                 ctypes.windll.user32.UnregisterHotKey(None, SKETCH_HOTKEY_ID)
+            if brush_registered:
+                ctypes.windll.user32.UnregisterHotKey(None, BRUSH_HOTKEY_ID)
             if win_event_hook:
                 try:
                     ctypes.windll.user32.UnhookWinEvent(win_event_hook)
@@ -3581,6 +3644,25 @@ class SettingsDialog(tk.Toplevel):
         self.combo_sk_key = ttk.Combobox(f_sk_hotkey, textvariable=self.var_sk_key, state='readonly', width=10, font=FS, values=keys)
         self.combo_sk_key.grid(row=1, column=1, sticky='w', pady=4)
 
+        # ── 7. 筆刷工坊全域快速鍵 (右欄) ──
+        f_br_hotkey = tk.LabelFrame(right_col, text=_tr('dialog.settings.grp_brush_hotkey') if get_current_language() != 'zh_tw' else '筆刷工坊全域快速鍵', font=FH, fg=ACCENT, bg=CARD, bd=1, relief='solid', padx=10, pady=8)
+        f_br_hotkey.pack(fill='x', pady=(10, 0))
+
+        br_mods_frame = tk.Frame(f_br_hotkey, bg=CARD)
+        br_mods_frame.grid(row=0, column=0, columnspan=2, sticky='w', pady=2)
+
+        self.var_br_ctrl = tk.BooleanVar(value=self._settings.get('hotkey_brush_ctrl', True))
+        tk.Checkbutton(br_mods_frame, text='Ctrl', variable=self.var_br_ctrl, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT, cursor='hand2').pack(side='left', padx=(0, 8))
+        self.var_br_alt = tk.BooleanVar(value=self._settings.get('hotkey_brush_alt', True))
+        tk.Checkbutton(br_mods_frame, text='Alt', variable=self.var_br_alt, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT, cursor='hand2').pack(side='left', padx=(0, 8))
+        self.var_br_shift = tk.BooleanVar(value=self._settings.get('hotkey_brush_shift', False))
+        tk.Checkbutton(br_mods_frame, text='Shift', variable=self.var_br_shift, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT, cursor='hand2').pack(side='left', padx=(0, 8))
+
+        tk.Label(f_br_hotkey, text=_tr('dialog.settings.hotkey_key'), font=FB, fg=TEXT, bg=CARD).grid(row=1, column=0, sticky='w', pady=4)
+        self.var_br_key = tk.StringVar(value=self._settings.get('hotkey_brush_key', 'B'))
+        self.combo_br_key = ttk.Combobox(f_br_hotkey, textvariable=self.var_br_key, state='readonly', width=10, font=FS, values=keys)
+        self.combo_br_key.grid(row=1, column=1, sticky='w', pady=4)
+
         self._on_preset_change()
         self.wait_window()
 
@@ -3680,6 +3762,11 @@ class SettingsDialog(tk.Toplevel):
         self._settings['hotkey_sketch_alt'] = self.var_sk_alt.get()
         self._settings['hotkey_sketch_shift'] = self.var_sk_shift.get()
         self._settings['hotkey_sketch_key'] = self.var_sk_key.get()
+
+        self._settings['hotkey_brush_ctrl'] = self.var_br_ctrl.get()
+        self._settings['hotkey_brush_alt'] = self.var_br_alt.get()
+        self._settings['hotkey_brush_shift'] = self.var_br_shift.get()
+        self._settings['hotkey_brush_key'] = self.var_br_key.get()
         
         # Save Language code
         selected_lang_name = self.var_lang_name.get()

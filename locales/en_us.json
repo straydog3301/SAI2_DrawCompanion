@@ -215,5 +215,22 @@
   "tracker.csv.header.sessions": "Session Count",
   "tracker.csv.header.last_use": "Last Used",
   "ui.tracker.btn_liquify": "✨ Liquify",
-  "dialog.settings.grp_liq_hotkey": "Global Liquify Hotkey"
+  "dialog.settings.grp_liq_hotkey": "Global Liquify Hotkey",
+  "ui.tracker.btn_brush_studio": "🖌️ Brush",
+  "ui.brush_studio.title": "🖌️ SAI2 Brush Studio",
+  "ui.brush_studio.hdr_title": "🖌️ SAI2 Brush Studio",
+  "ui.brush_studio.hdr_desc": "Convert clipboard/selection to SAI2 scatter or stamp brushes in one click",
+  "ui.brush_studio.sec_pattern": "1. Pattern & Transparency",
+  "ui.brush_studio.btn_clip": "📋 From Clipboard",
+  "ui.brush_studio.btn_file": "📁 Open Image",
+  "ui.brush_studio.lbl_mode": "Conversion Mode:",
+  "ui.brush_studio.chk_crop": "Autocrop Extra Margins",
+  "ui.brush_studio.sec_brush_props": "2. Brush Type & Properties",
+  "ui.brush_studio.lbl_name": "Brush Name:",
+  "ui.brush_studio.lbl_type": "Brush Type:",
+  "ui.brush_studio.lbl_group": "Add to SAI2 Tab (Group):",
+  "ui.brush_studio.sec_scratchpad": "3. Live Test Scratchpad",
+  "ui.brush_studio.btn_create": "🚀 Create & Add to SAI2",
+  "ui.brush_studio.btn_mat_only": "💾 Save Material Only",
+  "dialog.settings.grp_brush_hotkey": "Brush Studio Global Hotkey"
 }

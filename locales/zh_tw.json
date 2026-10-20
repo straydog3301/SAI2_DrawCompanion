@@ -215,5 +215,22 @@
   "tracker.csv.header.sessions": "工作階段次數",
   "tracker.csv.header.last_use": "最後使用",
   "ui.tracker.btn_liquify": "✨ 液化",
-  "dialog.settings.grp_liq_hotkey": "液化全域快速鍵"
+  "dialog.settings.grp_liq_hotkey": "液化全域快速鍵",
+  "ui.tracker.btn_brush_studio": "🖌️ 筆刷",
+  "ui.brush_studio.title": "🖌️ SAI2 筆刷製作工坊 (Brush Studio)",
+  "ui.brush_studio.hdr_title": "🖌️ SAI2 筆刷自製工作台",
+  "ui.brush_studio.hdr_desc": "從剪貼簿/選區一鍵將圖像轉為 SAI2 散布或印章筆刷",
+  "ui.brush_studio.sec_pattern": "1. 圖案來源與去背",
+  "ui.brush_studio.btn_clip": "📋 剪貼簿抓取",
+  "ui.brush_studio.btn_file": "📁 開啟圖片",
+  "ui.brush_studio.lbl_mode": "轉筆刷模式：",
+  "ui.brush_studio.chk_crop": "自動裁切多餘邊界",
+  "ui.brush_studio.sec_brush_props": "2. 筆刷類型與參數",
+  "ui.brush_studio.lbl_name": "筆刷名稱：",
+  "ui.brush_studio.lbl_type": "筆刷類型：",
+  "ui.brush_studio.lbl_group": "加入 SAI2 分頁 (群組)：",
+  "ui.brush_studio.sec_scratchpad": "3. 即時手感試畫區",
+  "ui.brush_studio.btn_create": "🚀 一鍵建立並加入 SAI2",
+  "ui.brush_studio.btn_mat_only": "💾 僅儲存素材到素材庫",
+  "dialog.settings.grp_brush_hotkey": "筆刷工坊全域快速鍵"
 }

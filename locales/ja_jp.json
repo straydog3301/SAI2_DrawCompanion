@@ -215,5 +215,22 @@
   "tracker.csv.header.sessions": "計測回数",
   "tracker.csv.header.last_use": "最終使用",
   "ui.tracker.btn_liquify": "✨ 液化",
-  "dialog.settings.grp_liq_hotkey": "液化ショートカット"
+  "dialog.settings.grp_liq_hotkey": "液化ショートカット",
+  "ui.tracker.btn_brush_studio": "🖌️ ブラシ",
+  "ui.brush_studio.title": "🖌️ SAI2 ブラシスタジオ (Brush Studio)",
+  "ui.brush_studio.hdr_title": "🖌️ SAI2 ブラシ自作スタジオ",
+  "ui.brush_studio.hdr_desc": "クリップボードや選択範囲からワンクリックでSAI2の散布/スタンプブラシを作成",
+  "ui.brush_studio.sec_pattern": "1. パターンと透過設定",
+  "ui.brush_studio.btn_clip": "📋 クリップボード読込",
+  "ui.brush_studio.btn_file": "📁 画像を開く",
+  "ui.brush_studio.lbl_mode": "ブラシ変換モード：",
+  "ui.brush_studio.chk_crop": "余白を自動トリミング",
+  "ui.brush_studio.sec_brush_props": "2. ブラシの種類とパラメータ",
+  "ui.brush_studio.lbl_name": "ブラシ名：",
+  "ui.brush_studio.lbl_type": "ブラシ種類：",
+  "ui.brush_studio.lbl_group": "追加先SAI2タブ (グループ)：",
+  "ui.brush_studio.sec_scratchpad": "3. リアルタイム試し描き",
+  "ui.brush_studio.btn_create": "🚀 作成してSAI2に追加",
+  "ui.brush_studio.btn_mat_only": "💾 素材のみ保存",
+  "dialog.settings.grp_brush_hotkey": "ブラシスタジオ全域ホットキー"
 }

@@ -1,7 +1,7 @@
 @echo off
 chcp 950 >nul
 echo ============================================
-echo  SAI2 繪圖助手 - 編譯 EXE (v1.5.2)
+echo  SAI2 繪圖助手 - 編譯 EXE (v1.6.0)
 echo ============================================
 echo.
 
@@ -41,6 +41,7 @@ pyinstaller ^
     --hidden-import "win32con" ^
     --hidden-import "pywintypes" ^
     --hidden-import "PIL._tkinter_finder" ^
+    --hidden-import "brush_studio" ^
     main.py
 
 if errorlevel 1 (
