@@ -10,6 +10,7 @@ import subprocess
 import json
 import random
 import threading
+import time
 import traceback
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
@@ -999,15 +1000,7 @@ class App:
 
         # ── SAI2 進程監控與待處理筆刷自動寫入 ─────────────────────────
         alive = state.get('sai2_running', False)
-        if getattr(self, '_sai2_prev_running', False) and not alive:
-            try:
-                processed = PendingBrushQueue.process_all_if_closed()
-                if processed:
-                    names_str = ', '.join(processed)
-                    self.var_status.set(f"✅ 已在 SAI2 關閉後安全儲存自製筆刷：{names_str}")
-            except Exception as e:
-                print(f"[PendingBrushQueue] Process error: {e}")
-        self._sai2_prev_running = alive
+        self._check_pending_brushes(alive)
 
         if self._auto_close:
             if self._sai2_was_alive and not alive:
@@ -1027,6 +1020,55 @@ class App:
             pass
 
         self.root.after(1000, self._poll)
+
+    # 待寫入筆刷佇列：SAI2 關閉後需等待一段「沉澱時間」讓 SAI2 先把自身快取寫回磁碟，
+    # 再寫入我們的工具，避免被 SAI2 覆蓋；失敗或 SAI2 行程尚未結束時會定期重試。
+    PENDING_BRUSH_SETTLE_SEC = 5.0
+    PENDING_BRUSH_RETRY_SEC = 15.0
+
+    def _check_pending_brushes(self, sai2_alive: bool):
+        now = time.time()
+        if sai2_alive:
+            self._sai2_closed_since = None
+            return
+        if getattr(self, '_sai2_closed_since', None) is None:
+            # 首次偵測到 SAI2 未運行（含程式剛啟動時），開始計算沉澱時間
+            self._sai2_closed_since = now
+        if now - self._sai2_closed_since < self.PENDING_BRUSH_SETTLE_SEC:
+            return
+        if now < getattr(self, '_pending_brush_next_try', 0.0):
+            return
+        self._pending_brush_next_try = now + self.PENDING_BRUSH_RETRY_SEC
+        self._process_pending_brushes()
+
+    def _process_pending_brushes(self) -> list:
+        try:
+            if not PendingBrushQueue.has_tasks():
+                return []
+            processed = PendingBrushQueue.process_all_if_closed()
+            if processed:
+                names_str = ', '.join(processed)
+                self.var_status.set(f"✅ 已在 SAI2 關閉後安全儲存自製筆刷：{names_str}")
+            return processed
+        except Exception as e:
+            print(f"[PendingBrushQueue] Process error: {e}")
+            return []
+
+    def _flush_pending_brushes_on_exit(self):
+        """程式結束前最後一次嘗試寫入佇列（例如 --auto-close 模式在 SAI2 關閉後自動退出）。
+        SAI2 仍在運行則跳過；佇列已持久化，下次啟動會再處理。"""
+        try:
+            if not PendingBrushQueue.has_tasks():
+                return
+            closed_since = getattr(self, '_sai2_closed_since', None)
+            if closed_since is None:
+                return  # 最後一次輪詢時 SAI2 仍在運行
+            remain = self.PENDING_BRUSH_SETTLE_SEC - (time.time() - closed_since)
+            if remain > 0:
+                time.sleep(min(remain, self.PENDING_BRUSH_SETTLE_SEC))
+            self._process_pending_brushes()
+        except Exception as e:
+            print(f"[PendingBrushQueue] Exit flush error: {e}")
 
     def _update_ui(self, state: dict):
         sai2    = state['sai2_active']
@@ -1372,7 +1414,9 @@ class App:
                         f'✅ 已開啟：{os.path.basename(path)}'
                     ))
             except Exception as e:
-                self.root.after(0, lambda: self.var_status.set(_tr('msg.open_failed', err=e)))
+                # 以預設參數綁定例外物件：except 區塊結束後 Python 會刪除 e，
+                # 延遲執行的 lambda 若直接引用 e 會拋出 NameError
+                self.root.after(0, lambda err=e: self.var_status.set(_tr('msg.open_failed', err=err)))
 
         import threading
         threading.Thread(target=_do_open, daemon=True).start()
@@ -2308,18 +2352,36 @@ class App:
         import threading
         
         self._stop_hotkey_thread()
-        
+
         self._hotkey_running = True
-        self._hotkey_thread = threading.Thread(target=self._hotkey_loop, daemon=True)
+        self._hotkey_ready = threading.Event()
+        self._hotkey_thread = threading.Thread(
+            target=self._hotkey_loop, args=(self._hotkey_ready,), daemon=True)
         self._hotkey_thread.start()
 
     def _stop_hotkey_thread(self):
+        """停止熱鍵執行緒並等待其結束。
+        必須等舊執行緒 UnregisterHotKey / UnhookWinEvent 完成後才能啟動新執行緒，
+        否則新執行緒的 RegisterHotKey 會因熱鍵仍被佔用而失敗，
+        且舊的 WinEvent hook 仍可能呼叫已失效的 callback 導致閃退。"""
+        import ctypes
         self._hotkey_running = False
-        if hasattr(self, '_hotkey_thread_id') and self._hotkey_thread_id:
-            import ctypes
-            # 發送 WM_QUIT (0x0012) 訊息到熱鍵執行緒來喚醒 GetMessageW
-            ctypes.windll.user32.PostThreadMessageW(self._hotkey_thread_id, 0x0012, 0, 0)
+        t = getattr(self, '_hotkey_thread', None)
+        if t is None or not t.is_alive():
             self._hotkey_thread_id = None
+            return
+        # 執行緒剛啟動時可能尚未建立訊息佇列 / 回報 thread id，先等待就緒，
+        # 否則 WM_QUIT 送不出去，舊執行緒會永遠卡在 GetMessageW 並持續佔用熱鍵
+        ready = getattr(self, '_hotkey_ready', None)
+        if ready is not None:
+            ready.wait(timeout=1.0)
+        tid = getattr(self, '_hotkey_thread_id', None)
+        if tid:
+            # 發送 WM_QUIT (0x0012) 訊息到熱鍵執行緒來喚醒 GetMessageW
+            ctypes.windll.user32.PostThreadMessageW(tid, 0x0012, 0, 0)
+        if t is not threading.current_thread():
+            t.join(timeout=1.5)
+        self._hotkey_thread_id = None
 
     def _parse_key_to_vk(self, key_str: str) -> int:
         key_str = key_str.upper()
@@ -2338,10 +2400,18 @@ class App:
             return 0x20
         return 0
 
-    def _hotkey_loop(self):
+    def _hotkey_loop(self, ready=None):
         import ctypes
         from ctypes import wintypes
-        
+
+        # 先呼叫 PeekMessageW 強制建立本執行緒的訊息佇列，再回報 thread id，
+        # 確保 _stop_hotkey_thread 送出的 WM_QUIT 一定收得到
+        _peek_msg = wintypes.MSG()
+        ctypes.windll.user32.PeekMessageW(ctypes.byref(_peek_msg), None, 0x0400, 0x0400, 0)  # PM_NOREMOVE
+        self._hotkey_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+        if ready is not None:
+            ready.set()
+
         MINI_HOTKEY_ID = 1234
         RECORD_HOTKEY_ID = 5678
         LIQUIFY_HOTKEY_ID = 9012
@@ -2435,16 +2505,28 @@ class App:
             except Exception:
                 pass
 
-        self._winevent_cb = WINEVENTPROC(_on_foreground)  # 保留參照避免被 GC
-        win_event_hook = 0
+        # callback 必須以「本執行緒的區域變數」持有：其生命週期與本函式（含 finally 的
+        # UnhookWinEvent）一致。若存在 self 上，重啟執行緒時新執行緒會覆寫參照，
+        # 舊 hook 尚未解除時 callback 就被 GC，事件觸發即 Access Violation 閃退。
+        winevent_cb = WINEVENTPROC(_on_foreground)
+
+        # 使用獨立的 WinDLL 實例設定 argtypes/restype（不影響全域 windll.user32），
+        # 避免 64-bit 下 HWINEVENTHOOK 被預設的 c_int 回傳型別截斷
+        _u32 = ctypes.WinDLL('user32')
+        _u32.SetWinEventHook.restype = wintypes.HANDLE
+        _u32.SetWinEventHook.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.HMODULE,
+                                         WINEVENTPROC, wintypes.DWORD, wintypes.DWORD,
+                                         wintypes.DWORD]
+        _u32.UnhookWinEvent.restype = wintypes.BOOL
+        _u32.UnhookWinEvent.argtypes = [wintypes.HANDLE]
+
+        win_event_hook = None
         try:
             # EVENT_SYSTEM_FOREGROUND = 0x0003, WINEVENT_OUTOFCONTEXT = 0x0000
-            win_event_hook = ctypes.windll.user32.SetWinEventHook(
-                0x0003, 0x0003, 0, self._winevent_cb, 0, 0, 0x0000)
+            win_event_hook = _u32.SetWinEventHook(
+                0x0003, 0x0003, None, winevent_cb, 0, 0, 0x0000)
         except Exception:
-            win_event_hook = 0
-
-        self._hotkey_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+            win_event_hook = None
 
         try:
             msg = wintypes.MSG()
@@ -2478,9 +2560,10 @@ class App:
                 ctypes.windll.user32.UnregisterHotKey(None, BRUSH_HOTKEY_ID)
             if win_event_hook:
                 try:
-                    ctypes.windll.user32.UnhookWinEvent(win_event_hook)
+                    _u32.UnhookWinEvent(win_event_hook)
                 except Exception:
                     pass
+            del winevent_cb  # 確保 hook 解除後才釋放 callback
 
     def _trigger_liquify(self):
         if self.editor_active:
@@ -2744,6 +2827,7 @@ class App:
         self._closing = True
         self.tracker.stop()
         self.timelapse_recorder.stop()
+        self._flush_pending_brushes_on_exit()
         
         # 檢查是否有縮時背景編碼程序在執行
         active_threads = [t for t in self.timelapse_recorder.export_threads if t.is_alive()]

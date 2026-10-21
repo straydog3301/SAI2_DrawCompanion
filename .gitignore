@@ -23,6 +23,8 @@ sai2_draw_time.json
 sai2_timer_settings.json
 brush_studio_settings.json
 sai2_pending_brushes.json
+sai2_pending_assets/
+sai2_settings_backup/
 watcher_out.log
 pythonw_error.log
 

@@ -13,7 +13,9 @@ import glob
 import time
 import json
 import math
+import uuid
 import random
+import shutil
 import ctypes
 import ctypes.wintypes
 import tkinter as tk
@@ -46,7 +48,18 @@ FT_SMALL = ('Microsoft JhengHei', 8)
 
 # ─── 參數持久化記憶管理 ────────────────────────────────────────────────────────
 
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'brush_studio_settings.json')
+# 取得程式運行所在的實際目錄（相容 PyInstaller 打包，與 main.py 的 _APP_DIR 規則一致）
+# 注意：onefile 打包時 __file__ 指向暫存的 _MEIxxxx 目錄，程式結束即被刪除，不能用來存放資料
+if getattr(sys, 'frozen', False):
+    _exe_dir = os.path.dirname(sys.executable)
+    if os.path.basename(_exe_dir).lower() == 'dist':
+        _APP_DIR = os.path.dirname(_exe_dir)
+    else:
+        _APP_DIR = _exe_dir
+else:
+    _APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+SETTINGS_FILE = os.path.join(_APP_DIR, 'brush_studio_settings.json')
 
 class BrushStudioSettings:
     """負責儲存與還原筆刷工坊的各項調動數值，記憶使用者最後設定"""
@@ -136,6 +149,105 @@ def read_clipboard_safely() -> Image.Image | None:
     return None
 
 
+# ─── SAI2 設定檔安全讀寫 ──────────────────────────────────────────────────────
+# 所有會「改寫」SAI2 settings 內既有檔案的操作都必須經過這裡：
+#   1. 以嚴格 UTF-8 解碼，無法解碼即中止改寫（避免 errors='ignore' 默默刪除位元組）
+#   2. 每個檔案在本次執行中第一次被改寫前，先備份到 sai2_settings_backup/<時間>/
+#   3. 以暫存檔 + os.replace 原子寫入，避免寫到一半中斷造成檔案損毀
+
+BACKUP_ROOT = os.path.join(_APP_DIR, 'sai2_settings_backup')
+_BACKUP_SESSION = time.strftime('%Y%m%d_%H%M%S')
+_backed_up_files: set[str] = set()
+
+
+class SAI2FileEncodingError(Exception):
+    """SAI2 設定檔不是有效的 UTF-8，為避免資料遺失而拒絕改寫"""
+
+
+def _read_sai2_text(path: str) -> str:
+    with open(path, 'rb') as f:
+        raw = f.read()
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError as e:
+        raise SAI2FileEncodingError(
+            f"{path} 不是有效的 UTF-8 編碼，為避免資料遺失已停止改寫此檔案") from e
+
+
+def _backup_relpath(path: str) -> str:
+    """回傳相對於 SAI2 settings 目錄的路徑（找不到 settings 時僅用檔名）"""
+    parts = os.path.normpath(os.path.abspath(path)).split(os.sep)
+    lower = [p.lower() for p in parts]
+    if 'settings' in lower:
+        idx = len(lower) - 1 - lower[::-1].index('settings')
+        if idx + 1 < len(parts):
+            return os.path.join(*parts[idx + 1:])
+    return os.path.basename(path)
+
+
+def _backup_sai2_file(path: str):
+    """在本次執行中第一次改寫某檔案前備份它；備份失敗會拋出例外以中止寫入"""
+    key = os.path.normcase(os.path.abspath(path))
+    if key in _backed_up_files or not os.path.isfile(path):
+        return
+    dst = os.path.join(BACKUP_ROOT, _BACKUP_SESSION, _backup_relpath(path))
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.copy2(path, dst)
+    _backed_up_files.add(key)
+
+
+def _write_sai2_file(path: str, data: bytes):
+    """備份後以原子方式寫入 SAI2 設定檔"""
+    _backup_sai2_file(path)
+    tmp = path + '.companion_tmp'
+    with open(tmp, 'wb') as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+# ─── 素材 / 工具名稱驗證 ──────────────────────────────────────────────────────
+
+_INVALID_NAME_CHARS = '\\/:*?"<>|,'   # Windows 檔名禁用字元 + SAI2 素材標籤分隔字元 ','
+_RESERVED_NAMES = {'CON', 'PRN', 'AUX', 'NUL',
+                   *(f'COM{i}' for i in range(1, 10)), *(f'LPT{i}' for i in range(1, 10))}
+MAX_NAME_LEN = 64
+
+
+def validate_asset_name(name: str) -> str | None:
+    """檢查素材/工具名稱是否可安全作為檔名與 SAI2 設定值；合法回傳 None，否則回傳錯誤訊息"""
+    if not name or not name.strip():
+        return "請輸入名稱！"
+    if name != name.strip():
+        return "名稱前後不能有空白。"
+    if len(name) > MAX_NAME_LEN:
+        return f"名稱過長（最多 {MAX_NAME_LEN} 個字元）。"
+    for ch in name:
+        if ord(ch) < 32 or ch == '\x7f':
+            return "名稱不能包含換行或控制字元。"
+        if ch in _INVALID_NAME_CHARS:
+            return f"名稱不能包含特殊字元：{ch}"
+    if name.endswith('.'):
+        return "名稱結尾不能是「.」。"
+    if name in ('.', '..') or name.split('.')[0].upper() in _RESERVED_NAMES:
+        return f"「{name}」是 Windows 保留名稱，請換一個名稱。"
+    return None
+
+
+def _require_valid_name(name: str):
+    err = validate_asset_name(name)
+    if err:
+        raise ValueError(err)
+
+
+def _safe_child_path(base_dir: str, filename: str) -> str:
+    """組合路徑並確認結果仍位於 base_dir 之內（防止路徑穿越）"""
+    base = os.path.abspath(base_dir)
+    path = os.path.abspath(os.path.join(base, filename))
+    if os.path.dirname(path) != base:
+        raise ValueError(f"不合法的檔案名稱：{filename}")
+    return path
+
+
 # ─── SAI2 目錄與素材/工具管理 ──────────────────────────────────────────────────
 
 class SAI2SettingsManager:
@@ -149,7 +261,7 @@ class SAI2SettingsManager:
 
         for cand in [
             r"C:\Users\cing\Documents\SYSTEMAX Software Development\SAIv2\settings",
-            os.path.join(os.path.dirname(__file__), '..', 'settings'),
+            os.path.join(_APP_DIR, '..', 'settings'),
         ]:
             if os.path.isdir(cand):
                 return os.path.abspath(cand)
@@ -250,6 +362,7 @@ class SAI2SettingsManager:
             settings_dir = cls.get_settings_dir()
         if not settings_dir:
             raise FileNotFoundError("無法找到 SAI2 設定資料夾 (settings)")
+        _require_valid_name(name)
 
         if brush_type == 'scatter':
             mat_dir = os.path.join(settings_dir, 'scatter')
@@ -257,10 +370,11 @@ class SAI2SettingsManager:
             mat_dir = os.path.join(settings_dir, 'brushfom', 'brshape')
         os.makedirs(mat_dir, exist_ok=True)
 
-        bmp_path = os.path.join(mat_dir, f"{name}.bmp")
-        ini_path = os.path.join(mat_dir, f"{name}.ini")
+        bmp_path = _safe_child_path(mat_dir, f"{name}.bmp")
+        ini_path = _safe_child_path(mat_dir, f"{name}.ini")
 
         gray_img = pil_img.convert('L')
+        _backup_sai2_file(bmp_path)
         gray_img.save(bmp_path, format='BMP')
 
         p = params or {}
@@ -315,8 +429,8 @@ class SAI2SettingsManager:
 	Scattering = {scattering}
 	HighQualitySampling = 1
 """
-        with open(ini_path, 'w', encoding='utf-8') as f:
-            f.write(ini_content)
+        # 維持既有行為：.ini 以 Windows 文字模式 (CRLF) 寫出
+        _write_sai2_file(ini_path, ini_content.replace('\n', '\r\n').encode('utf-8'))
 
         p = params or {}
         asset_grp_id = p.get('asset_group_id', 0)
@@ -332,13 +446,15 @@ class SAI2SettingsManager:
             settings_dir = cls.get_settings_dir()
         if not settings_dir:
             raise FileNotFoundError("無法找到 SAI2 設定資料夾 (settings)")
+        _require_valid_name(name)
 
         target_dir = os.path.join(settings_dir, tex_type)
         os.makedirs(target_dir, exist_ok=True)
 
-        bmp_path = os.path.join(target_dir, f"{name}.bmp")
+        bmp_path = _safe_child_path(target_dir, f"{name}.bmp")
 
         gray_img = pil_img.convert('L')
+        _backup_sai2_file(bmp_path)
         gray_img.save(bmp_path, format='BMP')
 
         cls._register_texture_in_saiaset(settings_dir, tex_type, name, asset_group_id, asset_group_name)
@@ -401,7 +517,8 @@ class SAI2SettingsManager:
         try:
             with open(set_path, 'rb') as f:
                 orig_bytes = f.read()
-            text = orig_bytes.decode('utf-8', errors='ignore')
+            # 嚴格解碼：無法解碼即放棄修復，避免改寫時遺失位元組
+            text = _read_sai2_text(set_path)
             header_lines, group_ids, item_lines = cls._parse_saiaset_content(text)
 
             # 掃描磁碟上實際存在的 _N.saiagrp 分類檔
@@ -430,25 +547,23 @@ class SAI2SettingsManager:
                         group_ids.append(dg)
 
             # 移除已經存在於任何 _N.saiagrp 內的重複項目（避免 SAI2 報 Asitem Key conflicted）
+            # 先完整讀取所有分類檔（任何一個無法解碼就整個放棄修復），再進行寫入
             categorized_items: set[str] = set()
+            grp_fixes: list[tuple[str, bytes]] = []
             for dg in disk_gids:
                 gpath = os.path.join(folder_path, f'_{dg}.saiagrp')
-                if os.path.isfile(gpath):
-                    try:
-                        with open(gpath, 'rb') as gf:
-                            g_raw = gf.read()
-                        g_text = g_raw.decode('utf-8', errors='ignore')
-                        g_lines = [gl.strip() for gl in g_text.splitlines() if gl.strip()]
-                        for gl in g_lines:
-                            if ',' in gl and not gl.startswith('name='):
-                                categorized_items.add(gl)
-                        # 若 _N.saiagrp 含有 \r 也一併修復為純 LF
-                        if b'\r' in g_raw:
-                            clean_g = ('\n'.join(g_lines) + '\n').encode('utf-8')
-                            with open(gpath, 'wb') as gf_out:
-                                gf_out.write(clean_g)
-                    except Exception:
-                        pass
+                if not os.path.isfile(gpath):
+                    continue
+                with open(gpath, 'rb') as gf:
+                    g_raw = gf.read()
+                g_text = _read_sai2_text(gpath)
+                g_lines = [gl.strip() for gl in g_text.splitlines() if gl.strip()]
+                for gl in g_lines:
+                    if ',' in gl and not gl.startswith('name='):
+                        categorized_items.add(gl)
+                # 若 _N.saiagrp 含有 \r 也一併修復為純 LF
+                if b'\r' in g_raw:
+                    grp_fixes.append((gpath, ('\n'.join(g_lines) + '\n').encode('utf-8')))
 
             item_lines = [it for it in item_lines if it not in categorized_items]
 
@@ -461,18 +576,26 @@ class SAI2SettingsManager:
             out_lines.append('.')
             out_lines.append('--EOF--')
 
+            changed = False
+            for gpath, clean_g in grp_fixes:
+                _write_sai2_file(gpath, clean_g)
+                changed = True
+
             new_bytes = ('\n'.join(out_lines) + '\n').encode('utf-8')
             if new_bytes != orig_bytes:
-                with open(set_path, 'wb') as f:
-                    f.write(new_bytes)
-                return True
+                _write_sai2_file(set_path, new_bytes)
+                changed = True
+            return changed
         except Exception as e:
             print(f"[SAI2SettingsManager] Repair saiaset warning ({folder_path}): {e}")
         return False
 
     @classmethod
     def repair_all_saiaset_files(cls, settings_dir: str | None = None):
-        """自動巡檢並修復 scatter, brushfom, brushtex, papertex 下的 _0.saiaset"""
+        """自動巡檢並修復 scatter, brushfom, brushtex, papertex 下的 _0.saiaset。
+        SAI2 運行中一律跳過（SAI2 關閉時會以記憶體內容覆寫，且同時改寫有衝突風險）。"""
+        if cls.is_sai2_running():
+            return
         if not settings_dir:
             settings_dir = cls.get_settings_dir()
         if not settings_dir or not os.path.isdir(settings_dir):
@@ -493,6 +616,7 @@ class SAI2SettingsManager:
             'scatter': 'scatter',
             'brshape': 'brushfom',
             'blotmap': 'brushfom',
+            'brush': 'brushfom',      # UI「印章/形狀 (Shape)」模式的值為 'brush'
             'brushtex': 'brushtex',
             'papertex': 'papertex',
         }
@@ -501,7 +625,9 @@ class SAI2SettingsManager:
         if not os.path.isdir(folder):
             return groups
 
-        cls._repair_saiaset_in_folder(folder)
+        # 僅讀取分類清單；SAI2 運行中不做任何修復寫入（_parse_saiaset_content 本身可容錯解析）
+        if not cls.is_sai2_running():
+            cls._repair_saiaset_in_folder(folder)
         set_path = os.path.join(folder, '_0.saiaset')
         if not os.path.isfile(set_path):
             return groups
@@ -537,25 +663,22 @@ class SAI2SettingsManager:
         os.makedirs(folder_path, exist_ok=True)
         cls._repair_saiaset_in_folder(folder_path)
         set_path = os.path.join(folder_path, '_0.saiaset')
+        # 分類名稱寫入 name=U: 單行欄位，移除換行等控制字元避免破壞檔案格式
+        asset_group_name = ''.join(ch for ch in (asset_group_name or '') if ord(ch) >= 32).strip()
 
         # 先從所有現有 _N.saiagrp 移除同名舊 tag（避免切換分類時發生 Asitem Key conflicted）
+        # 嚴格解碼：任何分類檔無法解碼即拋出例外中止註冊，不做有損改寫
         for fname in os.listdir(folder_path):
             if fname.startswith('_') and fname.endswith('.saiagrp'):
                 gpath = os.path.join(folder_path, fname)
-                try:
-                    with open(gpath, 'rb') as gf:
-                        g_lines = [gl.strip() for gl in gf.read().decode('utf-8', errors='ignore').splitlines() if gl.strip()]
-                    if tag in g_lines:
-                        g_lines = [gl for gl in g_lines if gl != tag]
-                        with open(gpath, 'wb') as gf_out:
-                            gf_out.write(('\n'.join(g_lines) + '\n').encode('utf-8'))
-                except Exception:
-                    pass
+                g_lines = [gl.strip() for gl in _read_sai2_text(gpath).splitlines() if gl.strip()]
+                if tag in g_lines:
+                    g_lines = [gl for gl in g_lines if gl != tag]
+                    _write_sai2_file(gpath, ('\n'.join(g_lines) + '\n').encode('utf-8'))
 
         # 讀取或初始化 _0.saiaset
         if os.path.isfile(set_path):
-            with open(set_path, 'rb') as f:
-                header_lines, group_ids, item_lines = cls._parse_saiaset_content(f.read().decode('utf-8', errors='ignore'))
+            header_lines, group_ids, item_lines = cls._parse_saiaset_content(_read_sai2_text(set_path))
         else:
             header_lines, group_ids, item_lines = [], [], []
 
@@ -565,8 +688,7 @@ class SAI2SettingsManager:
         if asset_group_id > 0:
             gpath = os.path.join(folder_path, f'_{asset_group_id}.saiagrp')
             if os.path.isfile(gpath):
-                with open(gpath, 'rb') as gf:
-                    raw_glines = [gl.strip() for gl in gf.read().decode('utf-8', errors='ignore').splitlines() if gl.strip()]
+                raw_glines = [gl.strip() for gl in _read_sai2_text(gpath).splitlines() if gl.strip()]
                 g_hdr: list[str] = []
                 g_items: list[str] = []
                 dots = 0
@@ -586,13 +708,11 @@ class SAI2SettingsManager:
                 if not g_hdr:
                     g_hdr = [f"name=U:{asset_group_name or f'分類 {asset_group_id}'}"]
                 g_out = g_hdr + ['.'] + g_items + ['.', '--EOF--']
-                with open(gpath, 'wb') as gf_out:
-                    gf_out.write(('\n'.join(g_out) + '\n').encode('utf-8'))
+                _write_sai2_file(gpath, ('\n'.join(g_out) + '\n').encode('utf-8'))
             else:
                 gname = asset_group_name or f"分類 {asset_group_id}"
                 g_out = [f"name=U:{gname}", '.', tag, '.', '--EOF--']
-                with open(gpath, 'wb') as gf_out:
-                    gf_out.write(('\n'.join(g_out) + '\n').encode('utf-8'))
+                _write_sai2_file(gpath, ('\n'.join(g_out) + '\n').encode('utf-8'))
             if asset_group_id not in group_ids:
                 group_ids.append(asset_group_id)
         else:
@@ -609,34 +729,29 @@ class SAI2SettingsManager:
         out_lines.extend(item_lines)
         out_lines.append('.')
         out_lines.append('--EOF--')
-        with open(set_path, 'wb') as f:
-            f.write(('\n'.join(out_lines) + '\n').encode('utf-8'))
+        _write_sai2_file(set_path, ('\n'.join(out_lines) + '\n').encode('utf-8'))
 
         return asset_group_id
 
+    # 註冊失敗時直接拋出例外，讓呼叫端（UI / 佇列）得知失敗，
+    # 避免「圖檔已寫入但未註冊」卻顯示成功的情況
     @classmethod
     def _register_material_in_saiaset(cls, settings_dir: str, brush_type: str, mat_name: str,
                                       asset_group_id: int = 0, asset_group_name: str = ''):
-        try:
-            if brush_type == 'scatter':
-                folder = os.path.join(settings_dir, 'scatter')
-                tag = f"scat,{mat_name}"
-            else:
-                folder = os.path.join(settings_dir, 'brushfom')
-                tag = f"bshp,{mat_name}"
-            cls._register_asset_in_folder(folder, tag, asset_group_id, asset_group_name)
-        except Exception as e:
-            print(f"[SAI2SettingsManager] Register material warning: {e}")
+        if brush_type == 'scatter':
+            folder = os.path.join(settings_dir, 'scatter')
+            tag = f"scat,{mat_name}"
+        else:
+            folder = os.path.join(settings_dir, 'brushfom')
+            tag = f"bshp,{mat_name}"
+        cls._register_asset_in_folder(folder, tag, asset_group_id, asset_group_name)
 
     @classmethod
     def _register_texture_in_saiaset(cls, settings_dir: str, tex_type: str, tex_name: str,
                                      asset_group_id: int = 0, asset_group_name: str = ''):
-        try:
-            folder = os.path.join(settings_dir, tex_type)
-            tag = f"btex,{tex_name}" if tex_type == 'brushtex' else f"ptex,{tex_name}"
-            cls._register_asset_in_folder(folder, tag, asset_group_id, asset_group_name)
-        except Exception as e:
-            print(f"[SAI2SettingsManager] Register texture warning: {e}")
+        folder = os.path.join(settings_dir, tex_type)
+        tag = f"btex,{tex_name}" if tex_type == 'brushtex' else f"ptex,{tex_name}"
+        cls._register_asset_in_folder(folder, tag, asset_group_id, asset_group_name)
 
     @classmethod
     def write_tool(cls, tool_name: str, brush_type: str, material_name: str,
@@ -646,6 +761,8 @@ class SAI2SettingsManager:
             settings_dir = cls.get_settings_dir()
         if not settings_dir:
             raise FileNotFoundError("無法找到 SAI2 設定資料夾 (settings)")
+        _require_valid_name(tool_name)
+        _require_valid_name(material_name)
 
         custool_dir = os.path.join(settings_dir, 'custool', 'nrm')
         os.makedirs(custool_dir, exist_ok=True)
@@ -875,8 +992,7 @@ showf_tex=I:0
 .
 --EOF--
 """
-        with open(dat_path, 'w', encoding='utf-8', newline='\n') as f:
-            f.write(dat_content)
+        _write_sai2_file(dat_path, dat_content.encode('utf-8'))
 
         cls._add_tool_to_group(custool_dir, target_group_id, tool_id)
         return tool_id
@@ -886,13 +1002,12 @@ showf_tex=I:0
         grp_file = os.path.join(custool_dir, f'_{grp_id}.saitgrp')
         if not os.path.isfile(grp_file):
             content = f"vsbpos=I:0\nname=U:自製筆刷\ncsrbid0=I:0\ncsrbid1=I:0\ncsrbid2=I:0\nvkc=I:0\nprvbid0=I:0\nprvbid1=I:0\nprvbid2=I:0\n.\n0={tool_id}\n.\n--EOF--\n"
-            with open(grp_file, 'w', encoding='utf-8', newline='\n') as f:
-                f.write(content)
+            _write_sai2_file(grp_file, content.encode('utf-8'))
             cls._register_group_in_saitset(custool_dir, grp_id)
             return
 
-        with open(grp_file, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
+        # 嚴格解碼（無法解碼即拋出例外中止），並統一為 LF 以維持原本文字模式讀取的行為
+        lines = _read_sai2_text(grp_file).replace('\r\n', '\n').splitlines(keepends=True)
 
         in_item_section = False
         items = []
@@ -931,8 +1046,7 @@ showf_tex=I:0
             new_content += f"{idx}={tid}\n"
         new_content += "".join(post_lines)
 
-        with open(grp_file, 'w', encoding='utf-8', newline='\n') as f:
-            f.write(new_content)
+        _write_sai2_file(grp_file, new_content.encode('utf-8'))
 
     @classmethod
     def _register_group_in_saitset(cls, custool_dir: str, grp_id: int):
@@ -940,8 +1054,7 @@ showf_tex=I:0
         if not os.path.isfile(set_file):
             return
         try:
-            with open(set_file, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
+            lines = _read_sai2_text(set_file).replace('\r\n', '\n').splitlines(keepends=True)
 
             in_list = False
             g_items = []
@@ -978,8 +1091,7 @@ showf_tex=I:0
                 out += f"{gi}={gval}\n"
             out += "".join(post)
 
-            with open(set_file, 'w', encoding='utf-8', newline='\n') as f:
-                f.write(out)
+            _write_sai2_file(set_file, out.encode('utf-8'))
         except Exception as e:
             print(f"[SAI2SettingsManager] Register group warning: {e}")
 
@@ -1171,26 +1283,55 @@ class BrushImageProcessor:
 
 # ─── 待套用筆刷背景佇列 ────────────────────────────────────────────────────────
 
-PENDING_QUEUE_FILE = os.path.join(os.path.dirname(__file__), 'sai2_pending_brushes.json')
+PENDING_QUEUE_FILE = os.path.join(_APP_DIR, 'sai2_pending_brushes.json')
+PENDING_ASSET_DIR = os.path.join(_APP_DIR, 'sai2_pending_assets')
 
 class PendingBrushQueue:
-    """管理在 SAI2 運行時排隊、待 SAI2 關閉時自動寫入的筆刷佇列"""
+    """
+    管理在 SAI2 運行時排隊、待 SAI2 關閉時自動寫入的佇列。
+
+    任務格式：
+        {
+          'tool_name', 'brush_type', 'material_name', 'target_group_id', 'params',
+          'create_tool': bool,            # 是否建立工具（舊版任務無此欄位，視為 True）
+          'asset': {                      # 選填：素材本身也延後寫入（舊版任務無此欄位）
+              'kind': 'material' | 'texture',
+              'type': 'scatter' | 'brush' | 'brushtex' | 'papertex',
+              'image': <暫存 PNG 路徑>,
+              'asset_group_id', 'asset_group_name',
+              'done': bool,               # 素材已寫入（工具寫入失敗重試時不重複處理）
+          },
+        }
+    """
 
     @classmethod
     def load_tasks(cls) -> list[dict]:
-        if os.path.isfile(PENDING_QUEUE_FILE):
+        if not os.path.isfile(PENDING_QUEUE_FILE):
+            return []
+        try:
+            with open(PENDING_QUEUE_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            # 檔案毀損時保留原檔供人工救援，避免下次 save_tasks 直接覆蓋掉
+            print(f"[PendingBrushQueue] Load error: {e}")
             try:
-                with open(PENDING_QUEUE_FILE, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                os.replace(PENDING_QUEUE_FILE, PENDING_QUEUE_FILE + f'.corrupt_{int(time.time())}')
             except Exception:
-                return []
-        return []
+                pass
+            return []
 
     @classmethod
     def save_tasks(cls, tasks: list[dict]):
         try:
-            with open(PENDING_QUEUE_FILE, 'w', encoding='utf-8') as f:
+            if not tasks:
+                if os.path.isfile(PENDING_QUEUE_FILE):
+                    os.remove(PENDING_QUEUE_FILE)
+                return
+            tmp = PENDING_QUEUE_FILE + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(tasks, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, PENDING_QUEUE_FILE)
         except Exception as e:
             print(f"[PendingBrushQueue] Save error: {e}")
 
@@ -1201,30 +1342,92 @@ class PendingBrushQueue:
         cls.save_tasks(tasks)
 
     @classmethod
+    def add_deploy_task(cls, name: str, mode: str, image: Image.Image | None,
+                        params: dict, target_group_id: int, create_tool: bool,
+                        tool_type: str):
+        """
+        將「素材 + (選擇性) 工具」整組排入佇列。素材圖檔先存到 sai2_pending_assets/，
+        待 SAI2 關閉後才寫入 SAI2 settings 並註冊，SAI2 運行期間完全不碰其設定檔。
+        """
+        _require_valid_name(name)
+        if image is None:
+            raise ValueError("沒有可儲存的圖像")
+        os.makedirs(PENDING_ASSET_DIR, exist_ok=True)
+        img_path = os.path.join(PENDING_ASSET_DIR, f"{uuid.uuid4().hex}.png")
+        image.save(img_path, format='PNG')
+        cls.add_task({
+            'tool_name': name,
+            'brush_type': tool_type,
+            'material_name': name,
+            'target_group_id': target_group_id,
+            'params': params,
+            'create_tool': bool(create_tool),
+            'asset': {
+                'kind': 'texture' if mode in ('brushtex', 'papertex') else 'material',
+                'type': mode,
+                'image': img_path,
+                'asset_group_id': params.get('asset_group_id', 0),
+                'asset_group_name': params.get('asset_group_name', ''),
+                'done': False,
+            },
+            'created_at': time.time(),
+        })
+
+    @classmethod
+    def has_tasks(cls) -> bool:
+        return bool(cls.load_tasks())
+
+    @classmethod
+    def _run_task(cls, t: dict):
+        name = t['tool_name']
+        params = t.get('params', {}) or {}
+        asset = t.get('asset')
+        if asset and not asset.get('done'):
+            with Image.open(asset['image']) as img:
+                img.load()
+                if asset['kind'] == 'texture':
+                    SAI2SettingsManager.write_texture(
+                        t['material_name'], img, asset['type'],
+                        asset_group_id=asset.get('asset_group_id', 0),
+                        asset_group_name=asset.get('asset_group_name', ''))
+                else:
+                    SAI2SettingsManager.write_material(
+                        t['material_name'], img, asset['type'], params)
+            asset['done'] = True   # 即使後續工具寫入失敗，重試時也不重複寫素材
+        if t.get('create_tool', True):
+            SAI2SettingsManager.write_tool(
+                name, t['brush_type'], t['material_name'], t['target_group_id'], params)
+        if asset:
+            try:
+                os.remove(asset['image'])
+            except Exception:
+                pass
+
+    @classmethod
     def process_all_if_closed(cls) -> list[str]:
+        """
+        若 SAI2 已完全結束，將佇列中所有素材 / 筆刷寫入 SAI2 設定。
+        呼叫端應在 SAI2 關閉後等待數秒再呼叫（讓 SAI2 先把自身快取寫回磁碟），
+        失敗的任務會留在佇列中，供下次重試。
+        """
+        tasks = cls.load_tasks()
+        if not tasks:
+            return []
+
         if SAI2SettingsManager.is_sai2_running():
             return []
 
         SAI2SettingsManager.repair_all_saiaset_files()
 
-        tasks = cls.load_tasks()
-        if not tasks:
-            return []
-
         succeeded = []
         remaining = []
         for t in tasks:
             try:
-                tool_name = t['tool_name']
-                brush_type = t['brush_type']
-                material_name = t['material_name']
-                grp_id = t['target_group_id']
-                params = t.get('params', {})
-                SAI2SettingsManager.write_tool(tool_name, brush_type, material_name, grp_id, params)
-                succeeded.append(tool_name)
+                cls._run_task(t)
+                succeeded.append(t['tool_name'])
             except Exception as e:
                 print(f"[PendingBrushQueue] Process failed for {t.get('tool_name')}: {e}")
-                remaining.append(t)
+                remaining.append(t)   # 含已更新的 asset['done'] 狀態
 
         cls.save_tasks(remaining)
         return succeeded
@@ -2042,158 +2245,156 @@ class BrushStudioWindow(tk.Toplevel):
             'asset_group_name': ag_name,
         }
 
-    def _on_click_save_material_only(self):
-        self._save_current_settings()
+    # ── 寫入流程 ──────────────────────────────────────────────────────────
+
+    def _validated_name(self) -> str | None:
+        """讀取並驗證名稱（兩個寫入按鈕共用）；不合法時顯示錯誤並回傳 None"""
         name = self.var_brush_name.get().strip()
-        if not name:
-            messagebox.showerror("錯誤", "請輸入名稱！")
+        err = validate_asset_name(name)
+        if err:
+            messagebox.showerror("名稱不合法", err, parent=self)
+            return None
+        return name
+
+    def _asset_exists(self, name: str, mode: str) -> bool:
+        if not self._settings_dir:
+            return False
+        if mode == 'scatter':
+            folder = os.path.join(self._settings_dir, 'scatter')
+        elif mode in ('brushtex', 'papertex'):
+            folder = os.path.join(self._settings_dir, mode)
+        else:
+            folder = os.path.join(self._settings_dir, 'brushfom', 'brshape')
+        return os.path.isfile(os.path.join(folder, f"{name}.bmp"))
+
+    def _ask_write_strategy(self, what: str) -> str | None:
+        """
+        決定寫入方式：
+          'direct' — SAI2 未運行，直接寫入
+          'queue'  — SAI2 運行中，排入佇列，待 SAI2 關閉後才寫入（不碰任何 SAI2 設定檔）
+          'force'  — SAI2 運行中，使用者選擇立刻強制寫入
+          None     — 使用者取消
+        """
+        if not SAI2SettingsManager.is_sai2_running():
+            return 'direct'
+        choice = messagebox.askyesnocancel(
+            "SAI2 正在運行中",
+            f"PaintTool SAI2 正在運行中。\n\n"
+            f"SAI2 關閉時會以記憶體中的內容覆寫自己的設定檔，若現在寫入{what}，"
+            f"素材清單或工具面板的變更可能會被覆蓋而消失。\n\n"
+            f"• 【是 (Yes)】：排入背景佇列，待您關閉 SAI2 後自動安全寫入 (推薦)\n"
+            f"• 【否 (No)】：立刻強制寫入 (之後需重新啟動 SAI2)\n"
+            f"• 【取消 (Cancel)】：不寫入任何檔案",
+            parent=self,
+        )
+        if choice is True:
+            return 'queue'
+        if choice is False:
+            return 'force'
+        return None
+
+    def _finish_success(self, name: str, close: bool):
+        if not close:
+            return  # 「僅儲存素材」維持原行為：不關閉視窗，方便連續製作
+        if self.on_brush_created_callback:
+            self.on_brush_created_callback(name)
+        self.destroy()
+
+    def _write_asset_now(self, name: str, mode: str, params: dict) -> str:
+        """立即寫入素材 / 紋理並註冊，回傳 BMP 路徑"""
+        if mode in ('brushtex', 'papertex'):
+            return SAI2SettingsManager.write_texture(
+                name, self._processed_texture, mode, self._settings_dir,
+                asset_group_id=params.get('asset_group_id', 0),
+                asset_group_name=params.get('asset_group_name', ''))
+        bmp_p, _ = SAI2SettingsManager.write_material(
+            name, self._processed_stamp, mode, params, self._settings_dir)
+        return bmp_p
+
+    def _run_write(self, create_tool_requested: bool):
+        self._save_current_settings()
+        name = self._validated_name()
+        if name is None:
             return
 
         m = self.var_main_mode.get()
-        ag_id, ag_name = self._get_asset_group_info()
+        is_texture = m in ('brushtex', 'papertex')
+        image = self._processed_texture if is_texture else self._processed_stamp
+        if image is None:
+            messagebox.showerror("錯誤", "尚未產生可儲存的圖像。", parent=self)
+            return
+
+        # 紙張材質沒有對應工具；筆刷紋理依勾選決定是否建立質感筆刷
+        create_tool = create_tool_requested and m != 'papertex'
+        if m == 'brushtex':
+            create_tool = create_tool and self.var_create_texture_brush.get()
+        tool_type = 'texture_brush' if m == 'brushtex' else m
+
+        if self._asset_exists(name, m) and not messagebox.askyesno(
+                "名稱已存在",
+                f"素材「{name}」已存在，繼續將會覆蓋原檔案（原檔會先備份）。\n\n確定要覆蓋嗎？",
+                icon='warning', parent=self):
+            return
+
+        params = self._gather_params()
+        grp_id = self._get_target_group_id()
+        what = "素材與工具" if create_tool else "素材"
+
+        strategy = self._ask_write_strategy(what)
+        if strategy is None:
+            return
+
         try:
-            if m in ('brushtex', 'papertex'):
-                bmp_p = SAI2SettingsManager.write_texture(
-                    name, self._processed_texture, m, self._settings_dir,
-                    asset_group_id=ag_id, asset_group_name=ag_name
-                )
-                type_desc = "筆刷紋理 (brushtex)" if m == 'brushtex' else "紙張材質 (papertex)"
+            if strategy == 'queue':
+                PendingBrushQueue.add_deploy_task(
+                    name, m, image, params, grp_id, create_tool, tool_type)
                 messagebox.showinfo(
-                    "儲存成功",
-                    f"{type_desc} [{name}] 已成功儲存！\n\n路徑：\n{bmp_p}\n\n已自動註冊至 SAI2 素材清單中。"
-                )
-            else:
-                bmp_p, _ = SAI2SettingsManager.write_material(
-                    name, self._processed_stamp, m, self._gather_params(), self._settings_dir
-                )
-                messagebox.showinfo(
-                    "儲存成功",
-                    f"筆刷素材 [{name}] 已成功儲存至素材庫！\n\n路徑：\n{bmp_p}"
-                )
+                    "已排入自動儲存佇列",
+                    f"已將 [{name}] 的{what}加入佇列！\n"
+                    f"SAI2 運行期間不會修改其任何設定檔；DrawCompanion 會在您關閉 SAI2 後自動寫入。\n"
+                    f"下次開啟 SAI2 即可看見。",
+                    parent=self)
+                self._finish_success(name, close=create_tool_requested)
+                return
+
+            bmp_p = self._write_asset_now(name, m, params)
+            tid = None
+            if create_tool:
+                tid = SAI2SettingsManager.write_tool(
+                    name, tool_type, name, grp_id, params, self._settings_dir)
         except Exception as e:
-            messagebox.showerror("儲存失敗", f"發生錯誤：{e}")
+            messagebox.showerror("寫入失敗", f"發生錯誤：{e}", parent=self)
+            return
+
+        restart_hint = "\n\n⚠️ SAI2 目前仍在運行，請重新啟動 SAI2 後才會看見變更。" if strategy == 'force' else ""
+        if m == 'papertex':
+            messagebox.showinfo(
+                "紙張材質建立成功 🎉",
+                f"畫布/紙張材質 [{name}] 已成功加入 SAI2！\n\n"
+                f"• 存放位置：{bmp_p}\n\n"
+                f"於 PaintTool SAI2 的圖層效果「紙張材質」下拉選單中即可選用。{restart_hint}",
+                parent=self)
+        elif tid is None:
+            type_desc = {"brushtex": "筆刷紋理 (brushtex)", "scatter": "散布筆刷素材",
+                         "brush": "筆刷形狀素材"}.get(m, "素材")
+            messagebox.showinfo(
+                "儲存成功",
+                f"{type_desc} [{name}] 已成功儲存並註冊至 SAI2 素材清單！\n\n"
+                f"路徑：\n{bmp_p}{restart_hint}",
+                parent=self)
+        else:
+            messagebox.showinfo(
+                "建立成功 🎉",
+                f"工具 [{name}] 已成功建立！\n\n"
+                f"• 工具編號：{tid}\n"
+                f"• 目標分頁：{self.var_target_group.get()}\n"
+                f"• 工具類型：{tool_type}\n\n"
+                f"啟動 PaintTool SAI2 即可在工具面板中看見此工具。{restart_hint}",
+                parent=self)
+        self._finish_success(name, close=create_tool_requested)
+
+    def _on_click_save_material_only(self):
+        self._run_write(create_tool_requested=False)
 
     def _on_click_deploy(self):
-        self._save_current_settings()
-        name = self.var_brush_name.get().strip()
-        if not name:
-            messagebox.showerror("錯誤", "請輸入名稱！")
-            return
-
-        for ch in r'\/:*?"<>|':
-            if ch in name:
-                messagebox.showerror("錯誤", f"名稱不能包含特殊字元：{ch}")
-                return
-
-        m = self.var_main_mode.get()
-        grp_id = self._get_target_group_id()
-        params = self._gather_params()
-        ag_id = params.get('asset_group_id', 0)
-        ag_name = params.get('asset_group_name', '')
-
-        try:
-            if m == 'papertex':
-                bmp_p = SAI2SettingsManager.write_texture(
-                    name, self._processed_texture, 'papertex', self._settings_dir,
-                    asset_group_id=ag_id, asset_group_name=ag_name
-                )
-                messagebox.showinfo(
-                    "紙張材質建立成功 🎉",
-                    f"畫布/紙張材質 [{name}] 已成功加入 SAI2！\n\n"
-                    f"• 存放位置：settings\\papertex\\{name}.bmp\n\n"
-                    f"現在於 PaintTool SAI2 的圖層效果「紙張材質」下拉選單中即可直接選用！"
-                )
-                if self.on_brush_created_callback:
-                    self.on_brush_created_callback(name)
-                self.destroy()
-                return
-
-            if m == 'brushtex':
-                bmp_p = SAI2SettingsManager.write_texture(
-                    name, self._processed_texture, 'brushtex', self._settings_dir,
-                    asset_group_id=ag_id, asset_group_name=ag_name
-                )
-                if not self.var_create_texture_brush.get():
-                    messagebox.showinfo(
-                        "筆刷紋理建立成功 🎉",
-                        f"筆刷紋理 [{name}] 已成功存入 settings\\brushtex！\n\n"
-                        f"您可以在 SAI2 任何筆刷的「紋理」下拉選單中直接選用此紋理。"
-                    )
-                    if self.on_brush_created_callback:
-                        self.on_brush_created_callback(name)
-                    self.destroy()
-                    return
-
-                actual_tool_type = 'texture_brush'
-            else:
-                bmp_p, _ = SAI2SettingsManager.write_material(
-                    name, self._processed_stamp, m, params, self._settings_dir
-                )
-                actual_tool_type = m
-
-            if SAI2SettingsManager.is_sai2_running():
-                choice = messagebox.askyesnocancel(
-                    "SAI2 正在運行中",
-                    f"【素材已建立成功】！\n\n"
-                    f"由於 PaintTool SAI2 正在運行中，若直接寫入工具面板，"
-                    f"在您日後關閉 SAI2 時可能會被 SAI2 快取覆蓋。\n\n"
-                    f"建議選擇：\n"
-                    f"• 【是 (Yes)】：將筆刷加入背景隊列，待您關閉 SAI2 時自動安全寫入 (推薦)\n"
-                    f"• 【否 (No)】：立刻強制寫入工具\n"
-                    f"• 【取消 (Cancel)】：僅保留剛才生成的紋理/素材庫檔案"
-                )
-
-                if choice is True:
-                    PendingBrushQueue.add_task({
-                        'tool_name': name,
-                        'brush_type': actual_tool_type,
-                        'material_name': name,
-                        'target_group_id': grp_id,
-                        'params': params,
-                        'created_at': time.time(),
-                    })
-                    messagebox.showinfo(
-                        "已排入自動儲存佇列",
-                        f"已將工具 [{name}] 加入佇列！\n"
-                        f"DrawCompanion 會在背景監控，當您關閉 SAI2 時自動合併寫入。\n"
-                        f"下次開啟 SAI2 即可看見全新工具！"
-                    )
-                    if self.on_brush_created_callback:
-                        self.on_brush_created_callback(name)
-                    self.destroy()
-                    return
-
-                elif choice is False:
-                    tid = SAI2SettingsManager.write_tool(
-                        name, actual_tool_type, name, grp_id, params, self._settings_dir
-                    )
-                    messagebox.showinfo(
-                        "建立成功",
-                        f"工具 [{name}] 已強制寫入 (ID: {tid})！\n"
-                        f"請重新啟動 SAI2 即可看見新工具。"
-                    )
-                    if self.on_brush_created_callback:
-                        self.on_brush_created_callback(name)
-                    self.destroy()
-                    return
-                else:
-                    return
-
-            else:
-                tid = SAI2SettingsManager.write_tool(
-                    name, actual_tool_type, name, grp_id, params, self._settings_dir
-                )
-                messagebox.showinfo(
-                    "建立成功 🎉",
-                    f"工具 [{name}] 已成功建立！\n\n"
-                    f"• 工具編號：{tid}\n"
-                    f"• 目標分頁：{self.var_target_group.get()}\n"
-                    f"• 工具類型：{actual_tool_type}\n\n"
-                    f"現在啟動 PaintTool SAI2 即可在工具面板中看見此工具！"
-                )
-                if self.on_brush_created_callback:
-                    self.on_brush_created_callback(name)
-                self.destroy()
-
-        except Exception as e:
-            messagebox.showerror("建立失敗", f"發生錯誤：{e}")
+        self._run_write(create_tool_requested=True)
