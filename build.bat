@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ============================================
-echo  SAI2 繪圖助手 - 編譯 EXE (v1.6.0)
+echo  SAI2 繪圖助手 - 編譯 EXE (v1.7.0)
 echo ============================================
 echo.
 
@@ -42,6 +42,11 @@ pyinstaller ^
     --hidden-import "pywintypes" ^
     --hidden-import "PIL._tkinter_finder" ^
     --hidden-import "brush_studio" ^
+    --hidden-import "daily_quests" ^
+    --hidden-import "study_lessons" ^
+    --hidden-import "study_refs" ^
+    --hidden-import "study_window" ^
+    --hidden-import "psd_writer" ^
     main.py
 
 if errorlevel 1 (

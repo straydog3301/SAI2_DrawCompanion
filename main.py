@@ -22,6 +22,9 @@ from i18n import _tr, set_language, get_current_language, get_available_language
 from liquify_helper import LiquifyEditor, read_image_from_clipboard
 from brush_studio import (BrushStudioWindow, PendingBrushQueue, is_text_input_widget,
                           FAILED_QUEUE_FILE, PENDING_ASSET_DIR)
+from daily_quests import QuestManager, MODES as QUEST_MODES, UNLIMITED_SKETCH_MIN_SECONDS, PASS_RATING
+from study_window import StudyWindow, StudyCheckinDialog
+import study_lessons
 
 # ─── 啟動參數 ─────────────────────────────────────────────────────────────
 # --auto-close：由 watcher.pyw 傳入，SAI2 關閉時自動儲存並關閉計時器
@@ -124,6 +127,8 @@ _DEFAULT_DATA = os.path.join(_APP_DIR, 'sai2_draw_time.json')
 
 # 設定檔路徑
 _SETTINGS_PATH = os.path.join(_APP_DIR, 'sai2_timer_settings.json')
+_QUESTS_PATH = os.path.join(_APP_DIR, 'daily_quests.json')
+_STUDY_CACHE_DIR = os.path.join(_APP_DIR, 'study_refs_cache')
 
 
 def _win32_set_topmost(win, on: bool):
@@ -499,7 +504,7 @@ def _card(parent, **kw) -> tk.Frame:
 
 
 # ─── 主應用程式 ───────────────────────────────────────────────────────────
-VERSION = '1.6.0'
+VERSION = '1.7.0'
 
 
 class App:
@@ -583,6 +588,12 @@ class App:
         # 檔名比對回呼：讓錄影引擎能驗證目標視窗是否屬於目前錄製的圖檔
         # (視窗標題 → 檔名 key → 別名解析後的主圖檔 key)
         self.timelapse_recorder.file_matcher = self._match_window_title_to_file
+
+        # ── 每日任務 ──
+        self.quests = QuestManager(_QUESTS_PATH)
+        self.quests.ensure_today()
+        self._quest_last_counter = None   # 上次讀到的追蹤器動筆計數（以差值累計任務進度）
+        self._quest_sig = None            # 任務卡上次繪製時的狀態簽章（有變才重繪）
 
         self._build_ui()
         self._apply_topmost()
@@ -721,6 +732,9 @@ class App:
         self.var_draw_ind = tk.StringVar(value='')
         tk.Label(c1, textvariable=self.var_draw_ind,
                  font=FS, fg=GREEN, bg=CARD).pack(anchor='w', pady=(2, 0))
+
+        # ── 卡片：今日任務 ──────────────────────────────────────────────
+        self._build_quest_card(body)
 
         # ── 卡片 2：目前工作階段統計 ─────────────────────────────────────
         c2 = _card(body)
@@ -1011,11 +1025,17 @@ class App:
         alive = state.get('sai2_running', False)
         self._check_pending_brushes(alive)
 
+        try:
+            self._quest_tick()
+        except Exception as e:
+            print(f'[Quests] tick error: {e}')
+
         if self._auto_close:
             if self._sai2_was_alive and not alive:
                 # SAI2 剛剛關閉 → 進入自動關閉流程
                 self._closing = True
                 self.tracker.stop()
+                self.quests.save(force=True)
                 self._start_close_countdown()
                 return
             self._sai2_was_alive = alive
@@ -1385,73 +1405,80 @@ class App:
                     f'⚠️ 找不到檔案路徑：{fname}'
                 ))
                 return
-            try:
-                # 優先找尋正在執行的 SAI2 執行檔路徑
-                sai2_exe = None
-                
-                # 1. 優先從當前已開啟的 SAI 視窗取得執行路徑（精準且極速）
-                try:
-                    from timelapse import scan_sai_windows
-                    main_win, _ = scan_sai_windows(os.getpid())
-                    if main_win:
-                        import win32process
-                        import psutil
-                        _, pid = win32process.GetWindowThreadProcessId(main_win[0])
-                        proc = psutil.Process(pid)
-                        exe_path = proc.exe()
-                        if exe_path and os.path.isfile(exe_path):
-                            sai2_exe = exe_path
-                except Exception:
-                    pass
-                
-                # 2. 備用方案：如果未開啟，遍歷行程尋找符合名稱的軟體
-                if not sai2_exe:
-                    try:
-                        import psutil
-                        for proc in psutil.process_iter(['name', 'exe']):
-                            n = (proc.info.get('name') or '').lower()
-                            # 排除本計時器、監視器及 python 進程，精確尋找繪圖軟體
-                            if n in ('sai.exe', 'sai2.exe', 'sai2c.exe', 'sai2_backup.exe') or (
-                                ('painttool' in n or 'sai' in n)
-                                and not any(x in n for x in ('drawcompanion', 'drawtimer', 'watcher', 'python', 'cmd', 'powershell', 'explorer', 'lsaiso'))
-                                and n.endswith('.exe')
-                            ):
-                                exe_path = proc.info.get('exe')
-                                if exe_path and os.path.isfile(exe_path):
-                                    sai2_exe = exe_path
-                                    break
-                    except Exception:
-                        pass
-
-                # 備援一：尋找同層或上層目錄下的 PaintTool SAI 執行檔
-                if not sai2_exe:
-                    for folder in (_APP_DIR, os.path.dirname(_APP_DIR)):
-                        for candidate in ('sai2.exe', 'sai.exe', 'sai2_backup.exe'):
-                            p = os.path.join(folder, candidate)
-                            if os.path.isfile(p):
-                                sai2_exe = p
-                                break
-                        if sai2_exe:
-                            break
-
-                if sai2_exe and os.path.isfile(sai2_exe):
-                    subprocess.Popen([sai2_exe, path])
-                    self.root.after(0, lambda: self.var_status.set(
-                        f'✅ 已要求 SAI2 開啟：{os.path.basename(path)}'
-                    ))
-                else:
-                    # 備案二：用 Windows 檔案關聯開啟
-                    os.startfile(path)
-                    self.root.after(0, lambda: self.var_status.set(
-                        f'✅ 已開啟：{os.path.basename(path)}'
-                    ))
-            except Exception as e:
-                # 以預設參數綁定例外物件：except 區塊結束後 Python 會刪除 e，
-                # 延遲執行的 lambda 若直接引用 e 會拋出 NameError
-                self.root.after(0, lambda err=e: self.var_status.set(_tr('msg.open_failed', err=err)))
-
+            self._launch_in_sai2(path)
         import threading
         threading.Thread(target=_do_open, daemon=True).start()
+
+    def _launch_in_sai2(self, path: str):
+        """用執行中的 SAI2（或 SAI2 資料夾內的執行檔 / 檔案關聯）開啟檔案；在背景執行緒呼叫"""
+        try:
+            # 優先找尋正在執行的 SAI2 執行檔路徑
+            sai2_exe = None
+            
+            # 1. 優先從當前已開啟的 SAI 視窗取得執行路徑（精準且極速）
+            try:
+                from timelapse import scan_sai_windows
+                main_win, _ = scan_sai_windows(os.getpid())
+                if main_win:
+                    import win32process
+                    import psutil
+                    _, pid = win32process.GetWindowThreadProcessId(main_win[0])
+                    proc = psutil.Process(pid)
+                    exe_path = proc.exe()
+                    if exe_path and os.path.isfile(exe_path):
+                        sai2_exe = exe_path
+            except Exception:
+                pass
+            
+            # 2. 備用方案：如果未開啟，遍歷行程尋找符合名稱的軟體
+            if not sai2_exe:
+                try:
+                    import psutil
+                    for proc in psutil.process_iter(['name', 'exe']):
+                        n = (proc.info.get('name') or '').lower()
+                        # 排除本計時器、監視器及 python 進程，精確尋找繪圖軟體
+                        if n in ('sai.exe', 'sai2.exe', 'sai2c.exe', 'sai2_backup.exe') or (
+                            ('painttool' in n or 'sai' in n)
+                            and not any(x in n for x in ('drawcompanion', 'drawtimer', 'watcher', 'python', 'cmd', 'powershell', 'explorer', 'lsaiso'))
+                            and n.endswith('.exe')
+                        ):
+                            exe_path = proc.info.get('exe')
+                            if exe_path and os.path.isfile(exe_path):
+                                sai2_exe = exe_path
+                                break
+                except Exception:
+                    pass
+
+            # 備援一：尋找同層或上層目錄下的 PaintTool SAI 執行檔
+            if not sai2_exe:
+                for folder in (_APP_DIR, os.path.dirname(_APP_DIR)):
+                    for candidate in ('sai2.exe', 'sai.exe', 'sai2_backup.exe'):
+                        p = os.path.join(folder, candidate)
+                        if os.path.isfile(p):
+                            sai2_exe = p
+                            break
+                    if sai2_exe:
+                        break
+
+            if sai2_exe and os.path.isfile(sai2_exe):
+                subprocess.Popen([sai2_exe, path])
+                self.root.after(0, lambda: self.var_status.set(
+                    f'✅ 已要求 SAI2 開啟：{os.path.basename(path)}'
+                ))
+            else:
+                # 備案二：用 Windows 檔案關聯開啟
+                os.startfile(path)
+                self.root.after(0, lambda: self.var_status.set(
+                    f'✅ 已開啟：{os.path.basename(path)}'
+                ))
+        except Exception as e:
+            # 以預設參數綁定例外物件：except 區塊結束後 Python 會刪除 e，
+            # 延遲執行的 lambda 若直接引用 e 會拋出 NameError
+            self.root.after(0, lambda err=e: self.var_status.set(_tr('msg.open_failed', err=err)))
+
+    def open_in_sai2(self, path: str):
+        """在背景執行緒開啟檔案（找 SAI2 執行檔需列舉行程，避免卡住 UI）"""
+        threading.Thread(target=self._launch_in_sai2, args=(path,), daemon=True).start()
 
     def _on_tree_right_click(self, event):
         """在 Treeview 上顯示右鍵快捷選單"""
@@ -2229,6 +2256,315 @@ class App:
                 self._brush_studio_win = None
         self._brush_studio_win.bind('<Destroy>', _on_destroy)
 
+    # ─── 每日任務 ─────────────────────────────────────────────────────────
+    def _build_quest_card(self, parent):
+        self.quest_card = _card(parent)
+        if self.quests.settings.get('enabled', True):
+            self.quest_card.pack(fill='x', pady=(0, 8))
+
+        hdr = tk.Frame(self.quest_card, bg=CARD)
+        hdr.pack(fill='x')
+        tk.Label(hdr, text=_tr('ui.quest.title', '📅 今日任務'), font=FH, fg=TEXT, bg=CARD).pack(side='left')
+        self.var_quest_streak = tk.StringVar(value='')
+        tk.Label(hdr, textvariable=self.var_quest_streak, font=FS, fg=YELLOW, bg=CARD
+                 ).pack(side='left', padx=(8, 0))
+        self._quest_add_btn = _btn(hdr, _tr('ui.quest.btn_add', '＋ 加入'), CARD2, ACCH,
+                                   self._quest_add_menu, font=FS, pady=1)
+        self._quest_add_btn.pack(side='right')
+
+        self.quest_rows = tk.Frame(self.quest_card, bg=CARD)
+        self.quest_rows.pack(fill='x', pady=(6, 0))
+        self._quest_sig = None
+        self._quest_render()
+
+    def _quest_signature(self):
+        """任務卡需要重繪的狀態；時間型進度以分鐘為單位比較，避免每秒重建元件"""
+        rows = []
+        for t in self.quests.today_tasks():
+            unit = QUEST_MODES[t['mode']]['unit']
+            prog = int(t['progress'] // 60) if unit == 'seconds' else int(t['progress'])
+            rows.append((t['uid'], t['status'], prog))
+        return (self.quests.data.get('current_day'), self.quests.active_study,
+                self.quests.rerolls_left(), self.quests.streak(), tuple(rows))
+
+    def _quest_render(self, force: bool = False):
+        if not hasattr(self, 'quest_rows'):
+            return
+        try:
+            if not self.quest_rows.winfo_exists():
+                return
+        except Exception:
+            return
+        sig = self._quest_signature()
+        if not force and sig == self._quest_sig:
+            return
+        self._quest_sig = sig
+
+        for w in self.quest_rows.winfo_children():
+            w.destroy()
+        streak = self.quests.streak()
+        self.var_quest_streak.set(_tr('ui.quest.streak', '🔥 連續 {n} 天', n=streak) if streak else '')
+
+        tasks = self.quests.today_tasks()
+        if not tasks:
+            tk.Label(self.quest_rows, text=_tr('ui.quest.empty', '今天沒有任務，可以按「＋ 加入」自選'),
+                     font=FS, fg=TEXTD, bg=CARD).pack(anchor='w')
+            return
+        for t in tasks:
+            self._quest_row(t)
+
+    def _quest_row(self, t: dict):
+        mode = QUEST_MODES[t['mode']]
+        status = t['status']
+        studying = self.quests.active_study == t['uid']
+
+        row = tk.Frame(self.quest_rows, bg=CARD2, padx=8, pady=5)
+        row.pack(fill='x', pady=(0, 4))
+
+        right = tk.Frame(row, bg=CARD2)
+        right.pack(side='right', padx=(6, 0))
+        left = tk.Frame(row, bg=CARD2)
+        left.pack(side='left', fill='x', expand=True)
+
+        title_fg = TEXTD if status in ('done', 'expired') else TEXT
+        tk.Label(left, text=f"{mode['icon']} {t['name']}", font=FB, fg=title_fg, bg=CARD2,
+                 anchor='w').pack(fill='x')
+        info = f"{self.quests.skill_label(t['skills']) or mode['name']}　{QuestManager.progress_text(t)}"
+        if studying:
+            info += '　' + _tr('ui.quest.studying', '● 研究計時中')
+        if t.get('self_reported') and status == 'done':
+            info += '　' + _tr('ui.quest.self_reported', '（自行回報）')
+        tk.Label(left, text=info, font=FS, fg=GREEN if studying else TEXTD, bg=CARD2,
+                 anchor='w').pack(fill='x')
+
+        # 進度條：Canvas 寬度於版面配置後才確定，在 <Configure> 時依比例重畫
+        bar = tk.Canvas(left, height=4, bg=BORDER, highlightthickness=0)
+        bar.pack(fill='x', pady=(3, 0))
+        ratio = QuestManager.progress_ratio(t)
+        color = GREEN if status in ('ready', 'done') else ACCENT
+
+        def _draw_bar(e, b=bar, r=ratio, c=color):
+            b.delete('all')
+            if r > 0:
+                b.create_rectangle(0, 0, max(2, int(e.width * r)), e.height, fill=c, width=0)
+        bar.bind('<Configure>', _draw_bar)
+
+        uid = t['uid']
+        if status == 'done':
+            tk.Label(right, text=_tr('ui.quest.done', '✓ 已打卡'), font=FS, fg=GREEN, bg=CARD2).pack(side='left')
+            return
+        if status == 'expired':
+            tk.Label(right, text=_tr('ui.quest.expired', '已過期'), font=FS, fg=TEXTD, bg=CARD2).pack(side='left')
+            return
+        if status == 'ready':
+            _btn(right, _tr('ui.quest.btn_checkin', '✔ 打卡'), GREEN, ACCH,
+                 lambda: self._quest_checkin(uid), font=FS, pady=2).pack(side='left')
+        elif studying:
+            _btn(right, _tr('ui.quest.btn_stop', '■ 停止'), CARD, BORDER,
+                 self._quest_stop_study, font=FS, pady=2).pack(side='left')
+        else:
+            _btn(right, _tr('ui.quest.btn_go', '▶ 前往'), ACCENT, ACCH,
+                 lambda: self._quest_go(uid), font=FS, pady=2).pack(side='left')
+        _btn(right, '⋯', CARD2, CARD, lambda: self._quest_more_menu(uid), font=FS, pady=2
+             ).pack(side='left', padx=(4, 0))
+
+    def _quest_tick(self):
+        """每秒由 _poll 呼叫：以追蹤器動筆計數的差值累計時間型任務，並處理換日"""
+        counter = self.tracker.get_draw_counter()
+        last = self._quest_last_counter
+        self._quest_last_counter = counter
+        # 第一次讀值或追蹤器被重建（計數歸零）時只重設基準，不計入
+        delta = 0.0 if last is None or counter < last else counter - last
+        self._quest_notify_ready(self.quests.tick(delta))
+        self.quests.save()
+        self._quest_render()
+
+    def _quest_notify_ready(self, tasks: list):
+        for t in tasks:
+            self.var_status.set(_tr('ui.quest.ready_msg', '🎉 任務「{name}」已達標，可以打卡了！', name=t['name']))
+        if tasks:
+            self.quests.save(force=True)
+            self._quest_render(force=True)
+
+    def _focus_sai2(self) -> bool:
+        """把 SAI2 帶到前景；SAI2 未開啟時回傳 False"""
+        try:
+            import ctypes
+            from liquify_helper import find_sai2_hwnd
+            hwnd = find_sai2_hwnd()
+            if not hwnd:
+                return False
+            user32 = ctypes.windll.user32
+            if user32.IsIconic(hwnd):
+                user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+            return True
+        except Exception:
+            return False
+
+    def _quest_go(self, uid: str):
+        t = self.quests.task(uid)
+        if not t:
+            return
+        mode = t['mode']
+        if mode == 'sketch':
+            self._open_sketch_for_quest(t)
+        elif mode in ('study', 'draw_time'):
+            if mode == 'study':
+                self.quests.start_study(uid)
+                self.quests.save(force=True)
+                # 一律開啟研究視窗：沒有對應課程（自訂範本）時仍可自選參考圖、看計時
+                self._open_study(uid)
+                msg = _tr('ui.quest.study_started',
+                          '🖌️ 開始「{name}」研究計時：在 SAI2 動筆的時間會計入任務', name=t['name'])
+            else:
+                msg = _tr('ui.quest.draw_started', '⏱️ 「{name}」：在 SAI2 動筆的時間會自動累計', name=t['name'])
+            if not self._focus_sai2():
+                msg += _tr('ui.quest.open_sai2_hint', '（請先開啟 SAI2）')
+            self.var_status.set(msg)
+        else:
+            unit = '張' if mode == 'thumbnail' else '個'
+            n = simpledialog.askinteger(
+                _tr('ui.quest.report_title', '回報進度'),
+                _tr('ui.quest.report_prompt', '「{name}」這次完成了幾{unit}？\n目前進度：{progress}',
+                    name=t['name'], unit=unit, progress=QuestManager.progress_text(t)),
+                minvalue=1, maxvalue=999, parent=self.root)
+            if n:
+                self._quest_notify_ready(self.quests.add_count(uid, n))
+                self.quests.save(force=True)
+        self._quest_render(force=True)
+
+    def _open_study(self, uid: str):
+        """開啟臨摹研究視窗（單例；換成另一個任務時關閉舊視窗）"""
+        win = getattr(self, '_study_win', None)
+        if win is not None:
+            try:
+                if win.winfo_exists() and win.uid == uid:
+                    win.deiconify()
+                    win.lift()
+                    return
+                win.close(stop_timer=False)
+            except Exception:
+                pass
+        self._study_win = StudyWindow(self.root, self, uid, _STUDY_CACHE_DIR,
+                                      topmost_fn=_win32_set_topmost, checkin_fn=self._quest_checkin)
+        try:
+            import study_refs
+            keep = {(t.get('ref') or {}).get('cache', '') for t in self.quests.today_tasks()}
+            study_refs.prune_cache(_STUDY_CACHE_DIR, {k for k in keep if k})
+        except Exception as e:
+            print(f'[Study] prune cache error: {e}')
+
+    def _quest_stop_study(self):
+        self.quests.stop_study()
+        self.quests.save(force=True)
+        self._quest_render(force=True)
+
+    def _quest_checkin(self, uid: str, self_report: bool = False):
+        t = self.quests.task(uid)
+        if not t:
+            return
+        if self_report and t['status'] != 'ready':
+            if not messagebox.askyesno(
+                    _tr('ui.quest.self_report_title', '自行回報打卡'),
+                    _tr('ui.quest.self_report_prompt',
+                        '「{name}」尚未達標（{progress}）。\n若是在程式外完成的練習，可以自行回報打卡。\n\n確定要打卡嗎？',
+                        name=t['name'], progress=QuestManager.progress_text(t)),
+                    parent=self.root):
+                return
+        lesson = study_lessons.lesson(t['params'].get('lesson_id', '')) if t['mode'] == 'study' else None
+        rating = None
+        if lesson:
+            # 臨摹研究：依課程的完成檢查自評，決定是否進入下一課
+            win = getattr(self, '_study_win', None)
+            parent = win if win is not None and win.winfo_exists() else self.root
+            dlg = StudyCheckinDialog(parent, t, lesson, PASS_RATING)
+            if dlg.result is None:
+                return
+            rating, note = dlg.result
+        else:
+            note = simpledialog.askstring(
+                _tr('ui.quest.checkin_title', '打卡'),
+                _tr('ui.quest.checkin_prompt', '🎉 完成「{name}」！\n留一句心得（可留白）：', name=t['name']),
+                parent=self.root)
+            if note is None:
+                return   # 按取消 = 不打卡
+        err = self.quests.check_in(uid, note, self_report=self_report, rating=rating)
+        if err:
+            messagebox.showwarning(_tr('ui.quest.checkin_title', '打卡'), err, parent=self.root)
+            return
+        self.quests.save(force=True)
+        streak = self.quests.streak()
+        msg = _tr('ui.quest.checked_msg', '✅ 已打卡「{name}」　🔥 連續 {n} 天', name=t['name'], n=streak)
+        if lesson:
+            nxt = study_lessons.lesson(t.get('advanced_to') or '')
+            if nxt:
+                msg += '　' + _tr('ui.quest.lesson_next', '📈 下一課：Lv{level} {lesson}',
+                                  level=nxt['level'], lesson=nxt['name'])
+            elif rating is not None and rating < PASS_RATING:
+                msg += '　' + _tr('ui.quest.lesson_retry', '下次會換一張參考圖再練一次這一課')
+        self.var_status.set(msg)
+        self._quest_render(force=True)
+
+    def _quest_reroll(self, uid: str):
+        err = self.quests.reroll(uid)
+        if err:
+            self.var_status.set(f'⚠️ {err}')
+            return
+        self.quests.save(force=True)
+        self._quest_render(force=True)
+
+    def _popup_menu(self) -> tk.Menu:
+        return tk.Menu(self.root, tearoff=0, bg=CARD, fg=TEXT, activebackground=ACCENT,
+                       activeforeground='white', disabledforeground=TEXTD, font=FB)
+
+    def _quest_more_menu(self, uid: str):
+        t = self.quests.task(uid)
+        if not t:
+            return
+        m = self._popup_menu()
+        left = self.quests.rerolls_left()
+        can_reroll = t['status'] == 'active' and t['progress'] <= 0 and left > 0
+        m.add_command(label=_tr('ui.quest.menu_reroll', '🔄 換一個（今天剩 {n} 次）', n=left),
+                      command=lambda: self._quest_reroll(uid),
+                      state='normal' if can_reroll else 'disabled')
+        if t['status'] == 'active':
+            m.add_command(label=_tr('ui.quest.menu_self_report', '✔ 自行回報打卡'),
+                          command=lambda: self._quest_checkin(uid, self_report=True))
+        if self.quests.active_study == uid:
+            m.add_command(label=_tr('ui.quest.menu_stop_study', '■ 停止研究計時'), command=self._quest_stop_study)
+        m.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
+
+    def _quest_add_menu(self):
+        from daily_quests import est_minutes
+        m = self._popup_menu()
+        tpls = self.quests.addable_templates()
+        if not tpls:
+            m.add_command(label=_tr('ui.quest.menu_add_none', '（沒有可加入的任務）'), state='disabled')
+        for tpl in tpls:
+            label = f"{QUEST_MODES[tpl['mode']]['icon']} {tpl['name']}（約 {int(round(est_minutes(tpl)))} 分）"
+            m.add_command(label=label, command=lambda tid=tpl['id']: self._quest_add(tid))
+        m.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
+
+    def _quest_add(self, tid: str):
+        if self.quests.add_today(tid):
+            self.quests.save(force=True)
+            self._quest_render(force=True)
+
+    def _open_sketch_for_quest(self, t: dict):
+        self._open_sketch()
+        win = getattr(self, '_sketch_win', None)
+        if win is None:
+            return
+        p = t['params']
+        win.start_quest(t['uid'], t['name'], p.get('topic', 'pose'), int(p.get('interval', 60)))
+
+    def _on_sketch_image_done(self, topic: str, seconds: float, quest_uid: str | None, interval: int):
+        """速寫視窗每完成一張有效圖時呼叫"""
+        self._quest_notify_ready(self.quests.record_sketch(topic, seconds, quest_uid, interval))
+        self.quests.save()
+        self._quest_render()
+
     def _apply_settings(self, new_settings: dict):
         self._settings = new_settings
         _save_settings(new_settings)
@@ -2288,6 +2624,13 @@ class App:
         if win is not None:
             try:
                 if win.winfo_exists() and (win.var_top.get() or win._sketch_mini):
+                    _win32_set_topmost(win, True)
+            except Exception:
+                pass
+        win = getattr(self, '_study_win', None)
+        if win is not None:
+            try:
+                if win.winfo_exists() and win.var_top.get():
                     _win32_set_topmost(win, True)
             except Exception:
                 pass
@@ -2860,6 +3203,10 @@ class App:
         self.tracker.stop()
         self.timelapse_recorder.stop()
         self._flush_pending_brushes_on_exit()
+        try:
+            self.quests.save(force=True)
+        except Exception as e:
+            print(f'[Quests] save on exit error: {e}')
         
         # 檢查是否有縮時背景編碼程序在執行
         active_threads = [t for t in self.timelapse_recorder.export_threads if t.is_alive()]
@@ -3942,6 +4289,8 @@ class SketchPracticeWindow(tk.Toplevel):
         self._web_totals = {}        # (來源, 關鍵字) → Pexels 搜尋結果總數（決定隨機頁碼範圍）
         self._web_seen = set()       # 已顯示過的網址，補充網址池時盡量避開重複
         self._web_retry_job = None   # 抓圖失敗後的自動重試排程
+        self._quest = None           # 由每日任務「前往」開啟時的任務資訊（uid / 名稱 / 題目 / 設定簽章）
+        self._img_shown_at = 0.0     # 目前圖片開始顯示的時間（不限時模式判定有效張數用）
         self._sketch_mini = False    # 精簡模式（只留圖像+計時）
         self._normal_geom = None     # 進精簡前的視窗幾何
         self._drag_x = 0
@@ -3971,7 +4320,7 @@ class SketchPracticeWindow(tk.Toplevel):
         self.after(200, lambda: _apply_titlebar_theme(self))
         self.after(250, self._toggle_topmost)
         self.after(300, self._topmost_heal)
-        self.after(400, self.next_image)   # 載入首張
+        self.after(400, self._initial_load)   # 載入首張
 
     WEB_RETRY_SEC = 10                 # 暫時性網路錯誤的重試間隔
     WEB_RATE_LIMIT_RETRY_SEC = 120     # HTTP 429（超過 API 額度）的重試間隔
@@ -4064,6 +4413,11 @@ class SketchPracticeWindow(tk.Toplevel):
                                   font=FBIG, fg='#ffffff', bg='#101010', padx=8, pady=2)
         self.lbl_count.place(relx=1.0, x=-6, y=6, anchor='ne')
 
+        # 每日任務進度 overlay（左上角，僅由任務開啟時顯示；精簡模式下也保留）
+        self.var_quest = tk.StringVar(value='')
+        self.lbl_quest = tk.Label(self.img_holder, textvariable=self.var_quest,
+                                  font=FB, fg='#ffffff', bg='#101010', padx=8, pady=3)
+
         # 精簡模式滑入圖像時才浮現的懸浮控制列（底部置中）
         self.hover_ctrl = tk.Frame(self.img_holder, bg='#101010')
         self._hover_btn(self.hover_ctrl, '⏮', self.prev_image)
@@ -4126,8 +4480,19 @@ class SketchPracticeWindow(tk.Toplevel):
             pass
 
     # ── 影像載入 ──────────────────────────────────────────────────────
+    def _initial_load(self):
+        # 由任務開啟時 start_quest 已先載入，避免重複抓圖
+        if not self._history and not self._loading and not self._destroyed:
+            self.next_image()
+
     def next_image(self, *_):
         self._cancel_web_retry()
+        # 不限時模式：停留滿 UNLIMITED_SKETCH_MIN_SECONDS 再翻頁才算一張
+        if self._interval_secs() == 0 and self._img_shown_at:
+            elapsed = time.monotonic() - self._img_shown_at
+            if elapsed >= UNLIMITED_SKETCH_MIN_SECONDS:
+                self._img_shown_at = 0.0
+                self._report_image_done(int(elapsed))
         if self._hist_idx < len(self._history) - 1:
             self._hist_idx += 1
             self._show_pil(self._history[self._hist_idx])
@@ -4411,6 +4776,8 @@ class SketchPracticeWindow(tk.Toplevel):
             except Exception:
                 pass
             self._timer_job = None
+        self._img_shown_at = time.monotonic()
+        self._update_quest_banner()
         secs = self._interval_secs()
         if secs <= 0:
             self.var_count.set('∞')
@@ -4427,6 +4794,8 @@ class SketchPracticeWindow(tk.Toplevel):
         self._remaining -= 1
         if self._remaining <= 0:
             self.var_count.set('0')
+            # 倒數自然歸零才算一張有效速寫（提前按下一張不算，避免灌數量）
+            self._report_image_done(self._interval_secs())
             self.next_image()
             return
         self.var_count.set(str(self._remaining))
@@ -4491,6 +4860,7 @@ class SketchPracticeWindow(tk.Toplevel):
             self.ent_custom.config(state='normal' if is_custom else 'disabled')
             self._set('sketch_category', self._cat_key())
             self._persist()
+            self._update_quest_banner()
 
     def _on_interval_change(self, *_):
         self._set('sketch_interval', self._interval_secs())
@@ -4645,6 +5015,105 @@ class SketchPracticeWindow(tk.Toplevel):
             self.hover_ctrl.place_forget()
         except Exception:
             pass
+
+    # ── 每日任務 ──────────────────────────────────────────────────────
+    def _topic_key(self) -> str:
+        """目前設定對應的速寫題目 key（與每日任務範本的 topic 格式一致）"""
+        if self._source_key() == 'local':
+            return 'local:' + self._get('sketch_local_category', '')
+        key = self._cat_key()
+        return 'kw:' + self.var_custom.get().strip() if key == 'custom' else key
+
+    def _quest_sig_now(self):
+        query = self.var_custom.get().strip() if self._cat_key() == 'custom' else ''
+        return (self._source_key(), self.var_cat.get(), self._interval_secs(), query)
+
+    def _quest_active_uid(self) -> str | None:
+        """任務開啟後題目 / 間隔都沒被改動時，回傳任務 uid（改動後的練習不計入該任務）"""
+        if self._quest and self._quest['sig'] == self._quest_sig_now():
+            return self._quest['uid']
+        return None
+
+    def _resolve_quest_source(self, topic: str):
+        """任務題目 → (來源, 本機子資料夾, 網路類型 key, 自訂關鍵字, 提示訊息)。
+        網路題目沒有任何 API 金鑰時，改用本機圖庫中名稱相符的子資料夾。"""
+        if topic.startswith('local:'):
+            return 'local', topic[len('local:'):], None, '', ''
+        if topic.startswith('kw:'):
+            web_key, query = 'custom', topic[len('kw:'):]
+        else:
+            web_key, query = topic, ''
+
+        def has_key(m):
+            return bool(self._get(f'sketch_{m}_key', '').strip())
+        cur = self._source_key()
+        src = cur if cur != 'local' and has_key(cur) else next(
+            (m for m in ('unsplash', 'pexels') if has_key(m)), None)
+        if src:
+            return src, None, web_key, query, ''
+
+        label = next((l for k, l, q in SKETCH_CATEGORIES if k == web_key), query)
+        names = {n.strip().lower() for n in label.split('/')} | {web_key.lower(), query.lower()}
+        sub = next((s for s in self._local_subdirs() if s.lower() in names), '')
+        note = '' if sub else '未設定圖庫 API 金鑰，改用本機圖庫全部圖片'
+        return 'local', sub, None, '', note
+
+    def start_quest(self, uid: str, name: str, topic: str, interval: int):
+        """由每日任務「前往」呼叫：套用題目與間隔並開始練習"""
+        src, sub, web_key, query, note = self._resolve_quest_source(topic)
+        self.var_source.set(next((l for l, k in SKETCH_SOURCES if k == src), '本機資料夾'))
+        self._set('sketch_source_mode', src)
+        if src == 'local':
+            self._set('sketch_local_category', sub or '')
+        else:
+            self._set('sketch_category', web_key)
+            if web_key == 'custom':
+                self._set('sketch_custom_query', query)
+                self.var_custom.set(query)
+        int_label = next((l for l, s in SKETCH_INTERVALS if s == interval), None)
+        if int_label:
+            self.var_interval.set(int_label)
+            self._set('sketch_interval', interval)
+        self._persist()
+        self._queue = []
+        self._queue_root = None
+        self._refresh_category_values()
+        if self._paused:
+            self.toggle_pause()
+        self._quest = {'uid': uid, 'name': name, 'topic': topic, 'sig': self._quest_sig_now()}
+        self.next_image()
+        if note:
+            self._set_status(f'{note}｜{self.var_status.get()}')
+
+    def _update_quest_banner(self):
+        if not self._quest:
+            self.lbl_quest.place_forget()
+            return
+        t = self.app.quests.task(self._quest['uid'])
+        if not t:
+            self._quest = None
+            self.lbl_quest.place_forget()
+            return
+        prog = QuestManager.progress_text(t)
+        if t['status'] in ('ready', 'done'):
+            text = f"🎯 {t['name']}　{prog}　✓ 已達標"
+        elif self._quest_active_uid() is None:
+            text = f"🎯 {t['name']}（已改變題目或間隔，不計入任務）"
+        else:
+            text = f"🎯 {t['name']}　{prog}"
+        self.var_quest.set(text)
+        self.lbl_quest.place(x=6, y=6, anchor='nw')
+        self.lbl_quest.lift()
+
+    def _report_image_done(self, seconds: float):
+        """完成一張有效速寫：回報主程式累計任務進度與技能練習時間"""
+        try:
+            uid = self._quest_active_uid()
+            topic = self._quest['topic'] if uid else self._topic_key()
+            self.app._on_sketch_image_done(topic, seconds, uid, self._interval_secs())
+        except Exception as e:
+            print(f'[Sketch] report error: {e}')
+        self._update_quest_banner()
 
     def _on_close(self):
         self._destroyed = True

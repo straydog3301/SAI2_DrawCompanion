@@ -282,6 +282,8 @@ class DrawTracker:
         self._session_draw_seg_start: float = 0.0   # 當前動筆區段開始，0 = 不在動筆
         self._session_last_mouse:     float = 0.0   # 最後一次滑鼠按下時間
         self._session_draw_flushed:   float = 0.0   # 本次工作階段已寫入每日統計的秒數
+        # 程式啟動以來的動筆總秒數（只增不減、不受換檔/存檔重置），供每日任務以差值累計進度
+        self._draw_total:             float = 0.0
 
         # UI 讀取的快照（由 _loop 更新）
         self._state: dict = {
@@ -493,6 +495,7 @@ class DrawTracker:
 
                                 if is_drawing:
                                     self._session_draw_accum += dt
+                                    self._draw_total += dt
 
                     # ── 更新 UI 快照 ─────────────────────────────────────
                     self._update_state(now)
@@ -657,6 +660,11 @@ class DrawTracker:
         """取得目前快照（供 UI 輪詢）。"""
         with self._lock:
             return dict(self._state)
+
+    def get_draw_counter(self) -> float:
+        """程式啟動以來累計的動筆秒數（單調遞增）。呼叫端以兩次讀值的差計算期間動筆時間。"""
+        with self._lock:
+            return self._draw_total
 
     # ── 匯出 / 重置 ───────────────────────────────────────────────────────
 

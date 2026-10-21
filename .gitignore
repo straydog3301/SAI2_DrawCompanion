@@ -27,6 +27,9 @@ sai2_pending_brushes.json
 sai2_pending_brushes_failed.json
 sai2_pending_brushes*.json.*
 liquify_settings.json
+daily_quests.json
+daily_quests.json.*
+study_refs_cache/
 sai2_pending_assets/
 sai2_settings_backup/
 watcher_out.log
