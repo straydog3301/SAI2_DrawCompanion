@@ -20,9 +20,8 @@ from tkinter import filedialog, messagebox
 
 from PIL import Image, ImageTk, ImageOps, ImageDraw, ImageChops
 
-import study_lessons
-import study_refs
-from psd_writer import write_blank_psd
+from core import study_lessons, study_refs
+from core.psd_writer import write_blank_psd
 from ui_kit import px, fit_window, bind_wraplength
 
 # ─── 樣式（與筆刷工坊一致的深色配色）───────────────────────────────────────
@@ -61,7 +60,7 @@ def _safe_filename(name: str) -> str:
 def _documents_dir() -> str:
     """實際的「文件」資料夾（被 OneDrive 重新導向時也能找到）"""
     try:
-        from brush_studio import SAI2SettingsManager
+        from core.brush_assets import SAI2SettingsManager
         return SAI2SettingsManager._documents_dir()
     except Exception:
         return os.path.expanduser('~/Documents')
@@ -122,7 +121,7 @@ def trim_workspace(img: Image.Image) -> Image.Image:
 
 def capture_sai2_canvas() -> Image.Image | None:
     """擷取 SAI2 畫布視窗（沿用縮時錄影的視窗尋找與 GDI 擷取）"""
-    from timelapse import find_canvas_hwnd, capture_window_gdi
+    from core.timelapse import find_canvas_hwnd, capture_window_gdi
     hwnd = find_canvas_hwnd(os.getpid())
     if not hwnd:
         return None

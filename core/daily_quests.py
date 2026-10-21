@@ -19,7 +19,7 @@ import copy
 import random
 from datetime import datetime, timedelta
 
-import study_lessons
+from core import study_lessons
 
 SCHEMA_VERSION = 1
 PASS_RATING = 3   # 臨摹研究自評達此分數才推進到下一課

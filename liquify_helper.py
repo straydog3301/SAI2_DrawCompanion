@@ -1595,21 +1595,7 @@ class HotkeyManager:
     def on_exit(self):
         self.root.destroy()
 
-def find_sai2_hwnd():
-    hwnd_out = [0]
-    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
-    def _cb(hwnd, lparam):
-        buf_size = 512
-        buf = ctypes.create_unicode_buffer(buf_size)
-        user32.GetWindowTextW(hwnd, buf, buf_size)
-        title = buf.value.lower()
-        if "painttool sai" in title:
-            hwnd_out[0] = hwnd
-            return False
-        return True
-    cb_func = WNDENUMPROC(_cb)
-    user32.EnumWindows(cb_func, 0)
-    return hwnd_out[0]
+from core.sai2_win import find_sai2_hwnd  # noqa: E402（定義移至 core，保留此處匯出）
 
 def clear_clipboard():
     import time

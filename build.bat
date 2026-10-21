@@ -42,11 +42,18 @@ pyinstaller ^
     --hidden-import "pywintypes" ^
     --hidden-import "PIL._tkinter_finder" ^
     --hidden-import "brush_studio" ^
-    --hidden-import "daily_quests" ^
-    --hidden-import "study_lessons" ^
-    --hidden-import "study_refs" ^
     --hidden-import "study_window" ^
-    --hidden-import "psd_writer" ^
+    --hidden-import "ui_kit" ^
+    --hidden-import "core.paths" ^
+    --hidden-import "core.sai2_win" ^
+    --hidden-import "core.i18n" ^
+    --hidden-import "core.tracker" ^
+    --hidden-import "core.timelapse" ^
+    --hidden-import "core.brush_assets" ^
+    --hidden-import "core.daily_quests" ^
+    --hidden-import "core.study_lessons" ^
+    --hidden-import "core.study_refs" ^
+    --hidden-import "core.psd_writer" ^
     main.py
 
 if errorlevel 1 (

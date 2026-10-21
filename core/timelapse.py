@@ -17,7 +17,7 @@ import ctypes
 from ctypes import wintypes
 from PIL import Image
 import queue
-from i18n import _tr
+from core.i18n import _tr
 
 
 def file_key_to_subdir(key: str) -> str:

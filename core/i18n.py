@@ -2,15 +2,8 @@ import os
 import sys
 import json
 
-# Determine base application directory
-if getattr(sys, 'frozen', False):
-    _EXE_DIR = os.path.dirname(sys.executable)
-    if os.path.basename(_EXE_DIR).lower() == 'dist':
-        _APP_DIR = os.path.dirname(_EXE_DIR)
-    else:
-        _APP_DIR = _EXE_DIR
-else:
-    _APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# 程式資料目錄（外部語系資料夾 locales/ 放在這裡）
+from core.paths import APP_DIR as _APP_DIR
 
 # Internal bundled locales directory (PyInstaller temporary directory)
 _INTERNAL_LOCALES_DIR = ""

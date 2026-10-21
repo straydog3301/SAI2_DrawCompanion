@@ -18,7 +18,7 @@ from datetime import datetime
 
 import win32api
 import win32gui
-from i18n import _tr
+from core.i18n import _tr
 
 
 # ─── 工具函式 ─────────────────────────────────────────────────────────────

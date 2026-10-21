@@ -16,16 +16,16 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk, ImageOps
 
-from tracker import DrawTracker, fmt_seconds
-from timelapse import TimelapseRecorder, find_ffmpeg, file_key_to_subdir
-from i18n import _tr, set_language, get_current_language, get_available_languages
+from core.tracker import DrawTracker, fmt_seconds
+from core.timelapse import TimelapseRecorder, find_ffmpeg, file_key_to_subdir
+from core.i18n import _tr, set_language, get_current_language, get_available_languages
 from liquify_helper import LiquifyEditor, read_image_from_clipboard
-from brush_studio import (BrushStudioWindow, PendingBrushQueue, is_text_input_widget,
-                          FAILED_QUEUE_FILE, PENDING_ASSET_DIR)
-from daily_quests import QuestManager, MODES as QUEST_MODES, UNLIMITED_SKETCH_MIN_SECONDS, PASS_RATING
+from brush_studio import BrushStudioWindow, is_text_input_widget
+from core.brush_assets import PendingBrushQueue, FAILED_QUEUE_FILE, PENDING_ASSET_DIR
+from core.daily_quests import QuestManager, MODES as QUEST_MODES, UNLIMITED_SKETCH_MIN_SECONDS, PASS_RATING
 from study_window import StudyWindow, StudyCheckinDialog
 from ui_kit import px, fit_window, bind_wraplength
-import study_lessons
+from core import study_lessons
 
 # ─── 啟動參數 ─────────────────────────────────────────────────────────────
 # --auto-close：由 watcher.pyw 傳入，SAI2 關閉時自動儲存並關閉計時器
@@ -81,16 +81,8 @@ FM     = ('Microsoft JhengHei', 10)
 FBIG   = ('Microsoft JhengHei', 20, 'bold')
 FEFF   = ('Microsoft JhengHei', 24, 'bold')
 
-# 取得程式運行所在的實際目錄（相容 PyInstaller 打包）
-if getattr(sys, 'frozen', False):
-    _exe_dir = os.path.dirname(sys.executable)
-    # 如果執行檔位於 dist 目錄中，則將套件目錄指回其父目錄
-    if os.path.basename(_exe_dir).lower() == 'dist':
-        _APP_DIR = os.path.dirname(_exe_dir)
-    else:
-        _APP_DIR = _exe_dir
-else:
-    _APP_DIR = os.path.dirname(os.path.abspath(__file__))
+# 程式資料目錄（打包 / 原始碼執行的規則見 core/paths.py）
+from core.paths import APP_DIR as _APP_DIR
 
 # 預設資料路徑：套件目錄底下的 sai2_draw_time.json
 _DEFAULT_DATA = os.path.join(_APP_DIR, 'sai2_draw_time.json')
@@ -1382,7 +1374,7 @@ class App:
             
             # 1. 優先從當前已開啟的 SAI 視窗取得執行路徑（精準且極速）
             try:
-                from timelapse import scan_sai_windows
+                from core.timelapse import scan_sai_windows
                 main_win, _ = scan_sai_windows(os.getpid())
                 if main_win:
                     import win32process
@@ -1875,7 +1867,7 @@ class App:
             if not val:
                 return
             # 驗證檔名必須有副檔名
-            from tracker import is_saved_filename
+            from core.tracker import is_saved_filename
             if not is_saved_filename(val):
                 messagebox.showerror("格式錯誤", "別名必須是合法的檔案名稱（需包含副檔名，如 .sai2, .png 等）。", parent=dlg)
                 return
@@ -2414,7 +2406,7 @@ class App:
         self._study_win = StudyWindow(self.root, self, uid, _STUDY_CACHE_DIR,
                                       topmost_fn=_win32_set_topmost, checkin_fn=self._quest_checkin)
         try:
-            import study_refs
+            from core import study_refs
             keep = {(t.get('ref') or {}).get('cache', '') for t in self.quests.today_tasks()}
             study_refs.prune_cache(_STUDY_CACHE_DIR, {k for k in keep if k})
         except Exception as e:
@@ -2501,7 +2493,7 @@ class App:
         m.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
 
     def _quest_add_menu(self):
-        from daily_quests import est_minutes
+        from core.daily_quests import est_minutes
         m = self._popup_menu()
         tpls = self.quests.addable_templates()
         if not tpls:
@@ -3295,7 +3287,7 @@ class App:
     def _match_window_title_to_file(self, window_title: str) -> str | None:
         """將 SAI 視窗標題解析為圖檔 key (含別名解析)，供錄影引擎驗證錄製目標。"""
         try:
-            from tracker import extract_filename
+            from core.tracker import extract_filename
             fname = extract_filename(window_title)
             if not fname:
                 return None
