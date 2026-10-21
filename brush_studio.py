@@ -24,6 +24,7 @@ from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk, ImageDraw, ImageOps, ImageGrab, ImageChops, ImageStat
 
 from i18n import _tr
+from ui_kit import px, fit_window
 from liquify_helper import read_image_from_clipboard, find_sai2_hwnd
 
 
@@ -1829,8 +1830,6 @@ class BrushStudioWindow(tk.Toplevel):
 
         self.title(_tr('ui.brush_studio.title', "🖌️ SAI2 筆刷與紋理製作工坊 (Brush & Texture Studio)"))
         self.configure(bg=BG)
-        self.geometry("980x680")
-        self.minsize(880, 600)
 
         # 不設 transient：transient 視窗會跟著主視窗最小化而隱藏，主視窗縮小時用快捷鍵叫出會看不到
         self.focus_force()
@@ -1905,6 +1904,8 @@ class BrushStudioWindow(tk.Toplevel):
         self._load_from_clipboard_silent()
         self._on_mode_switched()
         self._update_sai2_status()
+        # 依縮放倍率與內容決定大小（原本固定 980x680，在 150% 縮放下內容需要約 1229x800）
+        fit_window(self, 980, 680)
 
     def _on_window_close(self):
         """關閉視窗前持久化所有參數"""
@@ -2001,7 +2002,7 @@ class BrushStudioWindow(tk.Toplevel):
         tk.Label(col1, text="1. 圖案來源與預覽", font=FT_HEAD, fg=TEXT, bg=CARD).pack(anchor='w', pady=(0, 6))
 
         # 縮圖預覽框
-        self.canvas_preview = tk.Canvas(col1, width=190, height=190, bg='#1a1a1a',
+        self.canvas_preview = tk.Canvas(col1, width=px(self, 190), height=px(self, 190), bg='#1a1a1a',
                                         highlightthickness=1, highlightbackground=BORDER)
         self.canvas_preview.pack(pady=2)
 
@@ -2179,7 +2180,7 @@ class BrushStudioWindow(tk.Toplevel):
         self._create_btn(bg_btn_box, "羅蘭", lambda: self.pad.set_bg_mode('accent'), pad=(4, 1)).pack(side='left', padx=2)
 
         # 動態自適應畫布
-        self.pad = ScratchpadCanvas(col3, width=280, height=260)
+        self.pad = ScratchpadCanvas(col3, width=px(self, 280), height=px(self, 260))
         self.pad.pack(fill='both', expand=True, pady=4)
 
         self.lbl_pad_tip = tk.Label(col3, text="※ 在上方試畫區拖曳即可即時模擬筆觸軌跡 (支援視窗自由縮放)",
@@ -2451,7 +2452,7 @@ class BrushStudioWindow(tk.Toplevel):
         cw = self.canvas_preview.winfo_width()
         ch = self.canvas_preview.winfo_height()
         if cw <= 1 or ch <= 1:
-            cw, ch = 190, 190
+            cw = ch = px(self, 190)
 
         pw, ph = cw - 4, ch - 4
         is_tiled = (self.var_preview_view.get() == "tiled")

@@ -24,6 +24,7 @@ from brush_studio import (BrushStudioWindow, PendingBrushQueue, is_text_input_wi
                           FAILED_QUEUE_FILE, PENDING_ASSET_DIR)
 from daily_quests import QuestManager, MODES as QUEST_MODES, UNLIMITED_SKETCH_MIN_SECONDS, PASS_RATING
 from study_window import StudyWindow, StudyCheckinDialog
+from ui_kit import px, fit_window, bind_wraplength
 import study_lessons
 
 # ─── 啟動參數 ─────────────────────────────────────────────────────────────
@@ -48,37 +49,6 @@ def _excepthook(et, ev, etb):
 sys.excepthook = _excepthook
 
 # ─── 螢幕解析度自適應 ─────────────────────────────────────────────────────
-def _get_scaled_size(screen_width: int, base_width: int = 540, base_height: int = 820) -> tuple[int, int]:
-    """
-    根據螢幕寬度計算合適的視窗大小。
-    在 2560x1440 上使用 540x820，在 3840x2160 上適當放大。
-    """
-    # 基準解析度 (2560x1440)
-    base_screen_width = 2560
-    
-    # 計算縮放比例，但限制在合理範圍內
-    scale_factor = screen_width / base_screen_width
-    
-    # 針對不同解析度進行調整
-    if screen_width >= 3840:  # 4K
-        width = int(base_width * 1.2)  # 放大20%
-        height = int(base_height * 1.15)  # 放大15%
-    elif screen_width >= 1920:  # Full HD
-        width = int(base_width * 1.1)  # 放大10%
-        height = int(base_height * 1.05)  # 放大5%
-    else:  # 較低解析度
-        width = base_width
-        height = base_height
-    
-    # 確保視窗不會超出螢幕範圍
-    max_width = int(screen_width * 0.7)
-    max_height = int(screen_width * 0.8)  # 基於寬度計算最大高度
-    
-    width = min(width, max_width)
-    height = min(height, max_height)
-    
-    return width, height
-
 def _get_scaled_dialog_size(screen_width: int, base_width: int) -> int:
     """
     計算對話框的適當大小。
@@ -520,19 +490,9 @@ class App:
 
         self.root.configure(bg=BG)
         
-        # 取得螢幕解析度並計算合適的視窗大小
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        window_width, window_height = _get_scaled_size(screen_width)
-        
-        # 設定視窗大小並允許調整寬度
-        self.root.geometry(f'{window_width}x{window_height}')
+        # 視窗大小於 _build_ui 之後依顯示縮放與內容決定（見 fit_window）
         self.root.resizable(True, True)  # 允許調整寬度和高度
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
-        
-        # 儲存基礎大小供精簡模式使用
-        self._base_width = window_width
-        self._base_height = window_height
 
         _setup_styles()
 
@@ -596,6 +556,10 @@ class App:
         self._quest_sig = None            # 任務卡上次繪製時的狀態簽章（有變才重繪）
 
         self._build_ui()
+        # 設計尺寸 540x820（100% 縮放）× 縮放倍率，且至少容得下內容（例如下方按鈕列、英文介面較長的文字）
+        # 最小寬度鎖在內容寬度（按鈕不被裁切）；高度可縮短，檔案清單會自行縮小
+        fit_window(self.root, 540, 820, center=False, min_height=480)
+        self._normal_minsize = self.root.minsize()
         self._apply_topmost()
         self._setup_system_hotkey()
 
@@ -725,8 +689,9 @@ class App:
         self.var_cur_file = tk.StringVar(value=_tr('ui.tracker.not_detected'))
         self.lbl_cur_file = tk.Label(c1, textvariable=self.var_cur_file,
                                       font=FB, fg=TEXT, bg=CARD,
-                                      wraplength=490, justify='left')
+                                      wraplength=px(self.root, 300), justify='left')
         self.lbl_cur_file.pack(fill='x', pady=(4, 0))
+        bind_wraplength(self.lbl_cur_file)
 
         # 動筆指示燈
         self.var_draw_ind = tk.StringVar(value='')
@@ -2680,17 +2645,13 @@ class App:
             x = parts[1] if len(parts) > 1 else "100"
             y = parts[2] if len(parts) > 2 else "100"
             
-            # 根據螢幕寬度計算精簡模式寬度
-            screen_width = self.root.winfo_screenwidth()
-            if screen_width >= 3840:  # 4K
-                mini_width = 400
-            elif screen_width >= 2560:  # 2K
-                mini_width = 350
-            else:  # 較低解析度
-                mini_width = 300
-            
-            self.root.geometry(f"{mini_width}x36+{x}+{y}")
-            
+            # 精簡模式寬度：依縮放倍率換算，且不小於精簡內容實際需要的寬度
+            self.root.update_idletasks()
+            mini_width = max(px(self.root, 270), self.mini_frame.winfo_reqwidth())
+            mini_height = max(px(self.root, 24), self.mini_frame.winfo_reqheight())
+            self.root.minsize(1, 1)   # 一般模式的最小尺寸會擋住精簡模式縮小
+            self.root.geometry(f"{mini_width}x{mini_height}+{x}+{y}")
+
             # 關閉縮圖生成，節省 CPU
             self.timelapse_recorder.needs_thumbnail = False
         else:
@@ -2703,9 +2664,10 @@ class App:
             # 恢復標題列邊框
             self.root.overrideredirect(False)
             
-            # 恢復常規尺寸
+            # 恢復常規尺寸與最小尺寸
+            self.root.minsize(*getattr(self, '_normal_minsize', (1, 1)))
             self.root.geometry(self._normal_geometry)
-            
+
             # 開啟縮圖生成
             self.timelapse_recorder.needs_thumbnail = True
 
@@ -4269,8 +4231,6 @@ class SketchPracticeWindow(tk.Toplevel):
         self.app = app
         self.title('🎨 速寫練習 (Gesture Practice)')
         self.configure(bg=BG)
-        self.minsize(380, 420)
-
         # 狀態
         self._history = []          # 已載入的 PIL.Image（供上一張/下一張）
         self._hist_idx = -1
@@ -4304,9 +4264,9 @@ class SketchPracticeWindow(tk.Toplevel):
         self._build_ui()
 
         # 置中
-        w, h = 720, 680
-        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        self.geometry(f'{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}')
+        # 依縮放倍率與內容決定大小；精簡模式要能自由縮小，因此最小尺寸另外設定、不鎖成內容尺寸
+        fit_window(self, 720, 680, set_minsize=False)
+        self.minsize(px(self, 380), px(self, 420))
 
         self.protocol('WM_DELETE_WINDOW', self._on_close)
         self.bind('<Configure>', self._on_resize)

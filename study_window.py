@@ -23,6 +23,7 @@ from PIL import Image, ImageTk, ImageOps, ImageDraw, ImageChops
 import study_lessons
 import study_refs
 from psd_writer import write_blank_psd
+from ui_kit import px, fit_window, bind_wraplength
 
 # ─── 樣式（與筆刷工坊一致的深色配色）───────────────────────────────────────
 BG = '#111111'
@@ -163,7 +164,6 @@ class StudyWindow(tk.Toplevel):
         self.lesson = study_lessons.lesson(task['params'].get('lesson_id', '')) if task else None
         self.title('🖌️ 臨摹研究')
         self.configure(bg=BG)
-        self.minsize(820, 560)
 
         # 檢查工具狀態（依課程預設開啟）
         tools = set(self.lesson['tools']) if self.lesson else set()
@@ -186,9 +186,8 @@ class StudyWindow(tk.Toplevel):
         self._jobs: dict[str, str] = {}
 
         self._build_ui()
-        w, h = 1080, 720
-        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        self.geometry(f'{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2)}')
+        # 依縮放倍率與內容決定大小：最小尺寸 = 工具列等內容實際需要的寬高，縮小後按鈕也不會被裁切
+        fit_window(self, 1000, 680)
         self.protocol('WM_DELETE_WINDOW', self.close)
         self.img_holder.bind('<Configure>', self._on_resize)
 
@@ -215,10 +214,12 @@ class StudyWindow(tk.Toplevel):
                  f"・{les['name']}") if les else (task['name'] if task else '臨摹研究')
         tk.Label(hdr, text=title, font=FT_TITLE, fg=TEXT, bg=CARD, anchor='w').pack(fill='x')
         if les:
-            tk.Label(hdr, text=f"🎯 目標：{les['goal']}", font=FT_NORM, fg=TEXT, bg=CARD,
-                     anchor='w', justify='left', wraplength=900).pack(fill='x', pady=(2, 0))
-            tk.Label(hdr, text=f"👁 本次只專注：{les['focus']}", font=FT_HEAD, fg=YELLOW, bg=CARD,
-                     anchor='w', justify='left', wraplength=900).pack(fill='x', pady=(2, 0))
+            for text, font, fg in ((f"🎯 目標：{les['goal']}", FT_NORM, TEXT),
+                                   (f"👁 本次只專注：{les['focus']}", FT_HEAD, YELLOW)):
+                lbl = tk.Label(hdr, text=text, font=font, fg=fg, bg=CARD, anchor='w', justify='left',
+                               wraplength=px(self, 400))
+                lbl.pack(fill='x', pady=(2, 0))
+                bind_wraplength(lbl)
 
         # 工具列
         bar = tk.Frame(self, bg=CARD2, padx=10, pady=5)
@@ -235,12 +236,13 @@ class StudyWindow(tk.Toplevel):
         _btn(bar, '🔄 換一張', self._next_reference).pack(side='right', padx=(0, 4))
         self.b_canvas = _btn(bar, '🆕 練習畫布', self._canvas_menu, bg=TEAL, hbg=TEAL_H)   # 與「已開啟」的工具色區隔
         self.b_canvas.pack(side='right', padx=(0, 10))
-        self.b_recapture = _btn(bar, '📸 重新擷取', self._capture)
+        self.b_recapture = _btn(bar, '📸 重新擷取', self._capture, disabledforeground=TEXTD)
+        self.b_recapture.pack(side='left', padx=(0, 4))
 
         # 主體：左圖右課程
         body = tk.Frame(self, bg=BG)
         body.pack(fill='both', expand=True, padx=10, pady=8)
-        side = tk.Frame(body, bg=CARD, width=300, padx=12, pady=10)
+        side = tk.Frame(body, bg=CARD, width=px(self, 300), padx=12, pady=10)
         side.pack(side='right', fill='y', padx=(8, 0))
         side.pack_propagate(False)
         left = tk.Frame(body, bg=BG)
@@ -252,10 +254,9 @@ class StudyWindow(tk.Toplevel):
         self.palette_box.pack(side='right', anchor='n', padx=(10, 0))
         self.var_ref = tk.StringVar(value='讀取中…')
         ref_lbl = tk.Label(info, textvariable=self.var_ref, font=FT_SMALL, fg=TEXTD, bg=CARD, anchor='w',
-                           justify='left', wraplength=460)
+                           justify='left', wraplength=px(self, 300))
         ref_lbl.pack(fill='x')
-        # 換行寬度跟著可用寬度走（右側主色色票寬度會變動）
-        ref_lbl.bind('<Configure>', lambda e: ref_lbl.config(wraplength=max(120, e.width - 4)))
+        bind_wraplength(ref_lbl, minimum=120)   # 右側主色色票寬度會變動
         self.b_source = _btn(info, '🔗 開啟來源頁面', self._open_source, font=FT_SMALL, pady=1)
         self.b_source.pack(anchor='w', pady=(4, 0))
         self.img_holder = tk.Frame(left, bg=IMG_BG)
@@ -293,7 +294,7 @@ class StudyWindow(tk.Toplevel):
         for it in items:
             # 不換行空白：中文沒有空格可斷行，一般空白會讓 Tk 在「•」後面直接換行
             tk.Label(parent, text=f'• {it}', font=FT_SMALL, fg=fg, bg=CARD, anchor='w', justify='left',
-                     wraplength=270).pack(fill='x')
+                     wraplength=px(parent, 270)).pack(fill='x')
 
     def _build_side(self, side):
         les = self.lesson
@@ -309,7 +310,7 @@ class StudyWindow(tk.Toplevel):
         tk.Label(self.phase_box, textvariable=self.var_phase_left, font=FT_SMALL, fg=YELLOW, bg=CARD2,
                  anchor='w').pack(fill='x')
         tk.Label(self.phase_box, textvariable=self.var_phase_tip, font=FT_NORM, fg=TEXT, bg=CARD2,
-                 anchor='w', justify='left', wraplength=260).pack(fill='x', pady=(4, 0))
+                 anchor='w', justify='left', wraplength=px(self, 260)).pack(fill='x', pady=(4, 0))
 
         self.phase_labels = []
         if les:
@@ -515,10 +516,8 @@ class StudyWindow(tk.Toplevel):
         _set_btn_bg(self.b_guide, ACCENT if self.guide != 'none' else CARD2)
         _set_btn_bg(self.b_palette, ACCENT if self.show_palette else CARD2)
         _set_btn_bg(self.b_compare, ACCENT if self.compare else CARD2)
-        if self.compare:
-            self.b_recapture.pack(side='left', padx=(0, 4))
-        else:
-            self.b_recapture.pack_forget()
+        # 「重新擷取」固定佔位、只在比對模式啟用：工具列寬度不變，視窗最小尺寸才能一次算準
+        self.b_recapture.config(state='normal' if self.compare else 'disabled')
 
     def _toggle_flip(self):
         self.flip = not self.flip
@@ -850,12 +849,12 @@ class StudyCheckinDialog(tk.Toplevel):
                  anchor='w').pack(fill='x')
         if lesson:
             tk.Label(self, text=f"本次專注：{lesson['focus']}", font=FT_NORM, fg=YELLOW, bg=CARD,
-                     anchor='w', justify='left', wraplength=420).pack(fill='x', pady=(4, 6))
+                     anchor='w', justify='left', wraplength=px(self, 420)).pack(fill='x', pady=(4, 6))
             tk.Label(self, text='對照下列問題，誠實評估這次的成果：', font=FT_NORM, fg=TEXT, bg=CARD,
                      anchor='w').pack(fill='x')
             for c in lesson['checks']:
                 tk.Label(self, text=f'• {c}', font=FT_NORM, fg=TEXTD, bg=CARD, anchor='w', justify='left',
-                         wraplength=420).pack(fill='x')
+                         wraplength=px(self, 420)).pack(fill='x')
 
         self.var_rating = tk.IntVar(value=pass_rating)
         row = tk.Frame(self, bg=CARD)
@@ -866,7 +865,7 @@ class StudyCheckinDialog(tk.Toplevel):
                            activeforeground='white', width=9, pady=4, cursor='hand2'
                            ).pack(side='left', padx=(0, 4))
         tk.Label(self, text=f'自評 {pass_rating} 分以上會進入下一課；低於 {pass_rating} 分下次換一張參考圖再練一次。',
-                 font=FT_SMALL, fg=TEXTD, bg=CARD, anchor='w', wraplength=420, justify='left').pack(fill='x')
+                 font=FT_SMALL, fg=TEXTD, bg=CARD, anchor='w', wraplength=px(self, 420), justify='left').pack(fill='x')
 
         tk.Label(self, text='心得（可留白）：', font=FT_NORM, fg=TEXT, bg=CARD, anchor='w').pack(fill='x', pady=(10, 2))
         self.var_note = tk.StringVar()
@@ -883,8 +882,8 @@ class StudyCheckinDialog(tk.Toplevel):
         self.bind('<Escape>', lambda _e: self.destroy())
 
         self.update_idletasks()
-        px, py = parent.winfo_rootx(), parent.winfo_rooty()
-        self.geometry(f'+{px + 60}+{py + 60}')
+        ox, oy = parent.winfo_rootx(), parent.winfo_rooty()
+        self.geometry(f'+{ox + px(self, 60)}+{oy + px(self, 60)}')
         try:
             self.wm_attributes('-topmost', True)   # 研究視窗可能置頂，對話框需在其上方
         except Exception:
