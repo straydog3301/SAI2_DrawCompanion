@@ -16,14 +16,26 @@ import math
 import uuid
 import random
 import shutil
+import contextlib
 import ctypes
 import ctypes.wintypes
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from PIL import Image, ImageTk, ImageDraw, ImageOps, ImageGrab
+from PIL import Image, ImageTk, ImageDraw, ImageOps, ImageGrab, ImageChops, ImageStat
 
 from i18n import _tr
 from liquify_helper import read_image_from_clipboard, find_sai2_hwnd
+
+
+def is_text_input_widget(widget) -> bool:
+    """事件來源是否為可輸入文字的元件（Entry / 可編輯 Combobox / Text / Spinbox）。
+    綁在整個視窗上的單鍵快捷鍵（空白、方向鍵、Ctrl+V）遇到這類元件時應讓出，避免打字時誤觸。"""
+    if not isinstance(widget, (tk.Entry, ttk.Entry, tk.Text, tk.Spinbox, ttk.Spinbox)):
+        return False
+    try:
+        return str(widget.cget('state')) not in ('readonly', 'disabled')
+    except Exception:
+        return True
 
 # ─── 色彩 / 樣式常數 ─────────────────────────────────────────────────────────
 BG     = '#111111'
@@ -140,7 +152,7 @@ def read_clipboard_safely() -> Image.Image | None:
                         try:
                             f_img = Image.open(item)
                             f_img.load()
-                            return f_img
+                            return ImageOps.exif_transpose(f_img)
                         except Exception:
                             pass
     except Exception as e:
@@ -152,12 +164,51 @@ def read_clipboard_safely() -> Image.Image | None:
 # ─── SAI2 設定檔安全讀寫 ──────────────────────────────────────────────────────
 # 所有會「改寫」SAI2 settings 內既有檔案的操作都必須經過這裡：
 #   1. 以嚴格 UTF-8 解碼，無法解碼即中止改寫（避免 errors='ignore' 默默刪除位元組）
-#   2. 每個檔案在本次執行中第一次被改寫前，先備份到 sai2_settings_backup/<時間>/
+#   2. 每次寫入作業（sai2_write_session）中，每個檔案第一次被改寫前先備份到
+#      sai2_settings_backup/<時間>/；不在作業內的單次改寫則每次都備份
 #   3. 以暫存檔 + os.replace 原子寫入，避免寫到一半中斷造成檔案損毀
+# 備份以「作業」而非「程式執行」為單位：程式常駐一整天時，兩次寫入之間 SAI2 可能已改過檔案，
+# 每次作業都要留下改寫前的狀態。
 
 BACKUP_ROOT = os.path.join(_APP_DIR, 'sai2_settings_backup')
-_BACKUP_SESSION = time.strftime('%Y%m%d_%H%M%S')
+BACKUP_KEEP = 30                       # 只保留最近幾次作業的備份資料夾
+_BACKUP_SESSION: str | None = None     # 目前作業的備份資料夾名稱（None = 不在作業中）
 _backed_up_files: set[str] = set()
+
+
+def _new_backup_session_name() -> str:
+    # 含毫秒，確保名稱排序 = 時間順序（_prune_backups 依名稱判斷新舊）
+    now = time.time()
+    return f"{time.strftime('%Y%m%d_%H%M%S', time.localtime(now))}_{int(now * 1000) % 1000:03d}_{uuid.uuid4().hex[:4]}"
+
+
+def _prune_backups(keep: int = BACKUP_KEEP):
+    """刪除較舊的備份資料夾，只留最近 keep 份（只動本程式產生、名稱符合格式的資料夾）"""
+    try:
+        names = sorted(n for n in os.listdir(BACKUP_ROOT)
+                       if len(n) >= 15 and n[:8].isdigit() and n[8] == '_'
+                       and os.path.isdir(os.path.join(BACKUP_ROOT, n)))
+    except OSError:
+        return
+    for n in names[:-keep] if keep > 0 else names:
+        shutil.rmtree(os.path.join(BACKUP_ROOT, n), ignore_errors=True)
+
+
+@contextlib.contextmanager
+def sai2_write_session():
+    """一次完整寫入作業（素材 + 工具、或一批佇列任務）。可巢狀，內層沿用外層的備份資料夾。"""
+    global _BACKUP_SESSION, _backed_up_files
+    if _BACKUP_SESSION is not None:
+        yield
+        return
+    _BACKUP_SESSION = _new_backup_session_name()
+    _backed_up_files = set()
+    try:
+        yield
+    finally:
+        _BACKUP_SESSION = None
+        _backed_up_files = set()
+        _prune_backups()
 
 
 class SAI2FileEncodingError(Exception):
@@ -186,14 +237,16 @@ def _backup_relpath(path: str) -> str:
 
 
 def _backup_sai2_file(path: str):
-    """在本次執行中第一次改寫某檔案前備份它；備份失敗會拋出例外以中止寫入"""
+    """在本次作業中第一次改寫某檔案前備份它；備份失敗會拋出例外以中止寫入"""
     key = os.path.normcase(os.path.abspath(path))
     if key in _backed_up_files or not os.path.isfile(path):
         return
-    dst = os.path.join(BACKUP_ROOT, _BACKUP_SESSION, _backup_relpath(path))
+    session = _BACKUP_SESSION or _new_backup_session_name()
+    dst = os.path.join(BACKUP_ROOT, session, _backup_relpath(path))
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     shutil.copy2(path, dst)
-    _backed_up_files.add(key)
+    if _BACKUP_SESSION is not None:
+        _backed_up_files.add(key)
 
 
 def _write_sai2_file(path: str, data: bytes):
@@ -253,36 +306,62 @@ def _safe_child_path(base_dir: str, filename: str) -> str:
 class SAI2SettingsManager:
     """負責偵測與管理 SAI2 settings 目錄下的筆刷形狀、紋理、紙張材質與自訂工具"""
 
-    @staticmethod
-    def get_settings_dir() -> str | None:
-        doc_dir = os.path.expanduser('~/Documents/SYSTEMAX Software Development/SAIv2/settings')
-        if os.path.isdir(doc_dir):
-            return doc_dir
+    SAI2_EXE_NAMES = ('sai2.exe', 'sai2demo.exe')
 
-        for cand in [
-            r"C:\Users\cing\Documents\SYSTEMAX Software Development\SAIv2\settings",
-            os.path.join(_APP_DIR, '..', 'settings'),
-        ]:
+    @staticmethod
+    def _documents_dir() -> str:
+        """實際的「文件」資料夾：被 OneDrive 或使用者重新導向時，~/Documents 不一定是它"""
+        try:
+            buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+            # CSIDL_PERSONAL = 5（我的文件）, SHGFP_TYPE_CURRENT = 0
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:
+                return buf.value
+        except Exception:
+            pass
+        return os.path.expanduser('~/Documents')
+
+    @classmethod
+    def _running_sai2_dirs(cls) -> list[str]:
+        """執行中的 SAI2 程式所在資料夾（免安裝版的 settings 位於 exe 旁）"""
+        dirs = []
+        try:
+            import psutil
+            for p in psutil.process_iter(['name', 'exe']):
+                if (p.info.get('name') or '').lower() in cls.SAI2_EXE_NAMES and p.info.get('exe'):
+                    dirs.append(os.path.dirname(p.info['exe']))
+        except Exception:
+            pass
+        return dirs
+
+    @classmethod
+    def get_settings_dir(cls) -> str | None:
+        cands = [os.path.join(cls._documents_dir(), 'SYSTEMAX Software Development', 'SAIv2', 'settings'),
+                 os.path.expanduser('~/Documents/SYSTEMAX Software Development/SAIv2/settings')]
+        cands += [os.path.join(d, 'settings') for d in cls._running_sai2_dirs()]
+        cands.append(os.path.join(_APP_DIR, '..', 'settings'))   # 本工具放在 SAI2 資料夾內時
+        for cand in cands:
             if os.path.isdir(cand):
                 return os.path.abspath(cand)
         return None
 
-    @staticmethod
-    def is_sai2_running() -> bool:
-        try:
-            hwnd = find_sai2_hwnd()
-            if hwnd != 0:
-                return True
-        except Exception:
-            pass
+    @classmethod
+    def is_sai2_running(cls) -> bool:
+        # 以行程名稱判斷為準：視窗標題比對（find_sai2_hwnd）也會命中標題含「PaintTool SAI」的
+        # 瀏覽器分頁或資料夾視窗而誤判。只有 psutil 無法使用時才退回標題比對。
         try:
             import psutil
-            for p in psutil.process_iter(['name']):
-                if (p.info.get('name') or '').lower() in ('sai2.exe', 'sai2demo.exe'):
-                    return True
+        except ImportError:
+            psutil = None
+        if psutil is not None:
+            try:
+                return any((p.info.get('name') or '').lower() in cls.SAI2_EXE_NAMES
+                           for p in psutil.process_iter(['name']))
+            except Exception:
+                pass
+        try:
+            return find_sai2_hwnd() != 0
         except Exception:
-            pass
-        return False
+            return False
 
     @classmethod
     def get_tool_groups(cls, settings_dir: str | None = None) -> list[dict]:
@@ -299,20 +378,7 @@ class SAI2SettingsManager:
         groups = []
         if os.path.isfile(set_file):
             try:
-                with open(set_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    lines = f.readlines()
-                grp_ids = []
-                in_list = False
-                for line in lines:
-                    line = line.strip()
-                    if line == '.':
-                        in_list = not in_list
-                        continue
-                    if in_list and '=' in line:
-                        parts = line.split('=', 1)
-                        if parts[1].strip().isdigit():
-                            grp_ids.append(int(parts[1].strip()))
-
+                grp_ids = cls._read_saitset_group_ids(custool_dir)
                 for gid in grp_ids:
                     grp_file = os.path.join(custool_dir, f'_{gid}.saitgrp')
                     name = f"Group {gid}"
@@ -333,6 +399,64 @@ class SAI2SettingsManager:
                 {'id': 5, 'name': '效果'},
             ]
         return groups
+
+    @staticmethod
+    def _read_group_name(path: str) -> str | None:
+        try:
+            with open(path, 'rb') as f:
+                text = f.read().decode('utf-8', errors='ignore')
+        except OSError:
+            return None
+        for line in text.splitlines():
+            if line.startswith('name=U:'):
+                return line.split(':', 1)[1].strip()
+        return None
+
+    @classmethod
+    def _resolve_group_id(cls, folder: str, ext: str, listed_ids: list[int],
+                          name: str, fallback_id: int = 0) -> int:
+        """
+        於「寫入當下」依磁碟內容決定群組 ID（工具分頁 .saitgrp / 素材分類 .saiagrp 共用）：
+          1. 依名稱找既有群組（清單順序優先，與 UI 選單一致）
+          2. 找不到但呼叫端指定了既有 ID（fallback_id > 0）→ 沿用
+          3. 否則配發新 ID：大於清單與磁碟上所有既有 ID
+        不在 UI 端預先算 max+1，避免清單過期或多筆佇列任務算出相同 ID 而互相覆蓋。
+        """
+        disk_ids: list[int] = []
+        if os.path.isdir(folder):
+            for fname in os.listdir(folder):
+                if fname.startswith('_') and fname.endswith(ext):
+                    stem = fname[1:-len(ext)]
+                    if stem.isdigit():
+                        disk_ids.append(int(stem))
+        name = (name or '').strip()
+        if name:
+            for gid in list(listed_ids) + sorted(disk_ids):
+                if cls._read_group_name(os.path.join(folder, f'_{gid}{ext}')) == name:
+                    return gid
+        if fallback_id > 0:
+            return fallback_id
+        return max([0, *listed_ids, *disk_ids]) + 1
+
+    @staticmethod
+    def _read_saitset_group_ids(custool_dir: str) -> list[int]:
+        set_file = os.path.join(custool_dir, '_0.saitset')
+        if not os.path.isfile(set_file):
+            return []
+        with open(set_file, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+        grp_ids = []
+        in_list = False
+        for line in lines:
+            line = line.strip()
+            if line == '.':
+                in_list = not in_list
+                continue
+            if in_list and '=' in line:
+                parts = line.split('=', 1)
+                if parts[1].strip().isdigit():
+                    grp_ids.append(int(parts[1].strip()))
+        return grp_ids
 
     @classmethod
     def get_next_tool_id(cls, settings_dir: str | None = None) -> int:
@@ -432,16 +556,15 @@ class SAI2SettingsManager:
         # 維持既有行為：.ini 以 Windows 文字模式 (CRLF) 寫出
         _write_sai2_file(ini_path, ini_content.replace('\n', '\r\n').encode('utf-8'))
 
-        p = params or {}
         asset_grp_id = p.get('asset_group_id', 0)
         asset_grp_name = p.get('asset_group_name', '')
-        cls._register_material_in_saiaset(settings_dir, brush_type, name, asset_grp_id, asset_grp_name)
-        return bmp_path, ini_path
+        gid = cls._register_material_in_saiaset(settings_dir, brush_type, name, asset_grp_id, asset_grp_name)
+        return bmp_path, ini_path, gid
 
     @classmethod
     def write_texture(cls, name: str, pil_img: Image.Image, tex_type: str,
                       settings_dir: str | None = None,
-                      asset_group_id: int = 0, asset_group_name: str = '') -> str:
+                      asset_group_id: int = 0, asset_group_name: str = '') -> tuple[str, int]:
         if not settings_dir:
             settings_dir = cls.get_settings_dir()
         if not settings_dir:
@@ -457,8 +580,8 @@ class SAI2SettingsManager:
         _backup_sai2_file(bmp_path)
         gray_img.save(bmp_path, format='BMP')
 
-        cls._register_texture_in_saiaset(settings_dir, tex_type, name, asset_group_id, asset_group_name)
-        return bmp_path
+        gid = cls._register_texture_in_saiaset(settings_dir, tex_type, name, asset_group_id, asset_group_name)
+        return bmp_path, gid
 
     @classmethod
     def _parse_saiaset_content(cls, text: str) -> tuple[list[str], list[int], list[str]]:
@@ -625,9 +748,8 @@ class SAI2SettingsManager:
         if not os.path.isdir(folder):
             return groups
 
-        # 僅讀取分類清單；SAI2 運行中不做任何修復寫入（_parse_saiaset_content 本身可容錯解析）
-        if not cls.is_sai2_running():
-            cls._repair_saiaset_in_folder(folder)
+        # 只讀不寫：列出清單不應改動 SAI2 的檔案（_parse_saiaset_content 本身可容錯解析）。
+        # 格式修復只在實際寫入素材時（_register_asset_in_folder / 佇列處理）進行，且會先備份。
         set_path = os.path.join(folder, '_0.saiaset')
         if not os.path.isfile(set_path):
             return groups
@@ -685,7 +807,9 @@ class SAI2SettingsManager:
         # 先從未分類移除同名舊 tag
         item_lines = [it for it in item_lines if it != tag]
 
-        if asset_group_id > 0:
+        if asset_group_id > 0 or asset_group_name:
+            asset_group_id = cls._resolve_group_id(
+                folder_path, '.saiagrp', group_ids, asset_group_name, asset_group_id)
             gpath = os.path.join(folder_path, f'_{asset_group_id}.saiagrp')
             if os.path.isfile(gpath):
                 raw_glines = [gl.strip() for gl in _read_sai2_text(gpath).splitlines() if gl.strip()]
@@ -744,19 +868,19 @@ class SAI2SettingsManager:
         else:
             folder = os.path.join(settings_dir, 'brushfom')
             tag = f"bshp,{mat_name}"
-        cls._register_asset_in_folder(folder, tag, asset_group_id, asset_group_name)
+        return cls._register_asset_in_folder(folder, tag, asset_group_id, asset_group_name)
 
     @classmethod
     def _register_texture_in_saiaset(cls, settings_dir: str, tex_type: str, tex_name: str,
                                      asset_group_id: int = 0, asset_group_name: str = ''):
         folder = os.path.join(settings_dir, tex_type)
         tag = f"btex,{tex_name}" if tex_type == 'brushtex' else f"ptex,{tex_name}"
-        cls._register_asset_in_folder(folder, tag, asset_group_id, asset_group_name)
+        return cls._register_asset_in_folder(folder, tag, asset_group_id, asset_group_name)
 
     @classmethod
     def write_tool(cls, tool_name: str, brush_type: str, material_name: str,
                    target_group_id: int, params: dict | None = None,
-                   settings_dir: str | None = None) -> int:
+                   settings_dir: str | None = None, target_group_name: str = '') -> int:
         if not settings_dir:
             settings_dir = cls.get_settings_dir()
         if not settings_dir:
@@ -992,16 +1116,22 @@ showf_tex=I:0
 .
 --EOF--
 """
+        # 分頁名稱寫入 name=U: 單行欄位，移除換行等控制字元
+        target_group_name = ''.join(ch for ch in (target_group_name or '') if ord(ch) >= 32).strip()
+        grp_id = cls._resolve_group_id(
+            custool_dir, '.saitgrp', cls._read_saitset_group_ids(custool_dir),
+            target_group_name, target_group_id)
+
         _write_sai2_file(dat_path, dat_content.encode('utf-8'))
 
-        cls._add_tool_to_group(custool_dir, target_group_id, tool_id)
+        cls._add_tool_to_group(custool_dir, grp_id, tool_id, target_group_name)
         return tool_id
 
     @classmethod
-    def _add_tool_to_group(cls, custool_dir: str, grp_id: int, tool_id: int):
+    def _add_tool_to_group(cls, custool_dir: str, grp_id: int, tool_id: int, group_name: str = ''):
         grp_file = os.path.join(custool_dir, f'_{grp_id}.saitgrp')
         if not os.path.isfile(grp_file):
-            content = f"vsbpos=I:0\nname=U:自製筆刷\ncsrbid0=I:0\ncsrbid1=I:0\ncsrbid2=I:0\nvkc=I:0\nprvbid0=I:0\nprvbid1=I:0\nprvbid2=I:0\n.\n0={tool_id}\n.\n--EOF--\n"
+            content = f"vsbpos=I:0\nname=U:{group_name or '自製筆刷'}\ncsrbid0=I:0\ncsrbid1=I:0\ncsrbid2=I:0\nvkc=I:0\nprvbid0=I:0\nprvbid1=I:0\nprvbid2=I:0\n.\n0={tool_id}\n.\n--EOF--\n"
             _write_sai2_file(grp_file, content.encode('utf-8'))
             cls._register_group_in_saitset(custool_dir, grp_id)
             return
@@ -1106,6 +1236,15 @@ class BrushImageProcessor:
     MODE_BLACK_BG   = 'black_bg'    # 黑底白線 (發光/原亮)
     MODE_SILHOUETTE = 'silhouette'  # 純實心形狀剪影
 
+    @staticmethod
+    def _masked_mean(gray: Image.Image, alpha: Image.Image, threshold: int,
+                     default: float = 128.0) -> float:
+        """alpha > threshold 區域的平均亮度（ImageStat 於 C 層計算）；沒有任何像素時回傳 default"""
+        sel = alpha.point(lambda v: 255 if v > threshold else 0)
+        if sel.getbbox() is None:
+            return default
+        return ImageStat.Stat(gray, sel).mean[0]
+
     @classmethod
     def process(cls, src_img: Image.Image, mode: str = 'alpha',
                 autocrop: bool = True, padding_ratio: float = 0.08,
@@ -1115,15 +1254,14 @@ class BrushImageProcessor:
             src_img = src_img.convert('RGBA')
 
         w, h = src_img.size
-        r, g, b, a = src_img.split()
+        a = src_img.getchannel('A')
 
         if mode == cls.MODE_ALPHA:
             a_ext = a.getextrema()
             if a_ext[0] < 250:
                 gray = ImageOps.grayscale(src_img)
                 inv_gray = ImageOps.invert(gray)
-                mask_pixels = [p for i, p in enumerate(gray.getdata()) if a.getdata()[i] > 20]
-                avg_l = sum(mask_pixels) / max(len(mask_pixels), 1) if mask_pixels else 128
+                avg_l = cls._masked_mean(gray, a, 20)
                 base_mask = inv_gray if avg_l < 128 else gray
                 mask = Image.composite(base_mask, Image.new('L', (w, h), 0), a)
             else:
@@ -1139,16 +1277,9 @@ class BrushImageProcessor:
 
         elif mode == cls.MODE_SILHOUETTE:
             gray = ImageOps.grayscale(src_img)
-            a_data = list(a.getdata())
-            g_data = list(gray.getdata())
-            out_data = []
-            for alpha_val, gray_val in zip(a_data, g_data):
-                if alpha_val > 25 and gray_val < 250:
-                    out_data.append(255)
-                else:
-                    out_data.append(0)
-            mask = Image.new('L', (w, h))
-            mask.putdata(out_data)
+            opaque = a.point(lambda v: 255 if v > 25 else 0)
+            not_white = gray.point(lambda v: 255 if v < 250 else 0)
+            mask = ImageChops.darker(opaque, not_white)   # 兩者皆成立才為 255（逐像素 AND）
         else:
             mask = a
 
@@ -1196,16 +1327,13 @@ class BrushImageProcessor:
         sq_img = src_img.crop((left, top, left + side, top + side))
         sq_img = sq_img.resize((target_size, target_size), Image.Resampling.LANCZOS)
 
-        r, g, b, a = sq_img.split()
+        a = sq_img.getchannel('A')
         a_ext = a.getextrema()
         has_alpha = a_ext[0] < 250
 
         if has_alpha:
             gray_raw = ImageOps.grayscale(sq_img)
-            alpha_data = list(a.getdata())
-            gray_data = list(gray_raw.getdata())
-            opaque_grays = [g for a_val, g in zip(alpha_data, gray_data) if a_val > 20]
-            avg_l = sum(opaque_grays) / max(len(opaque_grays), 1) if opaque_grays else 128
+            avg_l = cls._masked_mean(gray_raw, a, 20)
 
             if convert_mode == 'white_bg' or (convert_mode == 'alpha' and avg_l < 128):
                 inv_gray = ImageOps.invert(gray_raw)
@@ -1251,17 +1379,24 @@ class BrushImageProcessor:
 
         bw_x = max(2, int(w * blend_ratio))
         bw_y = max(2, int(h * blend_ratio))
-        cx, cy = w / 2.0, h / 2.0
-        mask_data = []
-        for y in range(h):
-            dist_y = abs(y - cy)
-            wy = (0.5 - 0.5 * math.cos((1.0 - dist_y / bw_y) * math.pi)) if dist_y < bw_y else 0.0
-            for x in range(w):
-                dist_x = abs(x - cx)
-                wx = (0.5 - 0.5 * math.cos((1.0 - dist_x / bw_x) * math.pi)) if dist_x < bw_x else 0.0
-                mask_data.append(int(min(1.0, wx + wy) * 255))
-        mask = Image.new('L', (w, h))
-        mask.putdata(mask_data)
+
+        def _weights(n: int, bw: int) -> list[int]:
+            c = n / 2.0
+            out = []
+            for i in range(n):
+                d = abs(i - c)
+                wgt = (0.5 - 0.5 * math.cos((1.0 - d / bw) * math.pi)) if d < bw else 0.0
+                out.append(int(round(wgt * 255)))
+            return out
+
+        # 權重可分離為 x、y 兩條一維曲線：只算 w + h 個值，再拉伸成整張並做飽和加法
+        # （= min(1, wx + wy)），取代原本 w×h 次的 Python 逐像素迴圈
+        row = Image.new('L', (w, 1))
+        row.putdata(_weights(w, bw_x))
+        col = Image.new('L', (1, h))
+        col.putdata(_weights(h, bw_y))
+        mask = ImageChops.add(row.resize((w, h), Image.Resampling.NEAREST),
+                              col.resize((w, h), Image.Resampling.NEAREST))
         return Image.composite(img, wrapped, mask)
 
     @staticmethod
@@ -1285,6 +1420,7 @@ class BrushImageProcessor:
 
 PENDING_QUEUE_FILE = os.path.join(_APP_DIR, 'sai2_pending_brushes.json')
 PENDING_ASSET_DIR = os.path.join(_APP_DIR, 'sai2_pending_assets')
+FAILED_QUEUE_FILE = os.path.join(_APP_DIR, 'sai2_pending_brushes_failed.json')
 
 class PendingBrushQueue:
     """
@@ -1303,6 +1439,8 @@ class PendingBrushQueue:
           },
         }
     """
+
+    MAX_ATTEMPTS = 5   # 可重試錯誤的最大嘗試次數（每次間隔約 15 秒）
 
     @classmethod
     def load_tasks(cls) -> list[dict]:
@@ -1344,7 +1482,7 @@ class PendingBrushQueue:
     @classmethod
     def add_deploy_task(cls, name: str, mode: str, image: Image.Image | None,
                         params: dict, target_group_id: int, create_tool: bool,
-                        tool_type: str):
+                        tool_type: str, target_group_name: str = ''):
         """
         將「素材 + (選擇性) 工具」整組排入佇列。素材圖檔先存到 sai2_pending_assets/，
         待 SAI2 關閉後才寫入 SAI2 settings 並註冊，SAI2 運行期間完全不碰其設定檔。
@@ -1360,6 +1498,7 @@ class PendingBrushQueue:
             'brush_type': tool_type,
             'material_name': name,
             'target_group_id': target_group_id,
+            'target_group_name': target_group_name,   # 寫入時依名稱解析 ID（見 _resolve_group_id）
             'params': params,
             'create_tool': bool(create_tool),
             'asset': {
@@ -1386,40 +1525,85 @@ class PendingBrushQueue:
             with Image.open(asset['image']) as img:
                 img.load()
                 if asset['kind'] == 'texture':
-                    SAI2SettingsManager.write_texture(
+                    _, gid = SAI2SettingsManager.write_texture(
                         t['material_name'], img, asset['type'],
                         asset_group_id=asset.get('asset_group_id', 0),
                         asset_group_name=asset.get('asset_group_name', ''))
                 else:
-                    SAI2SettingsManager.write_material(
+                    _, _, gid = SAI2SettingsManager.write_material(
                         t['material_name'], img, asset['type'], params)
+            asset['resolved_group_id'] = gid
             asset['done'] = True   # 即使後續工具寫入失敗，重試時也不重複寫素材
+        if asset and 'resolved_group_id' in asset:
+            # 工具的 fomgid / texgid 必須指向素材實際被放入的分類
+            params = dict(params, asset_group_id=asset['resolved_group_id'])
         if t.get('create_tool', True):
             SAI2SettingsManager.write_tool(
-                name, t['brush_type'], t['material_name'], t['target_group_id'], params)
+                name, t['brush_type'], t['material_name'], t['target_group_id'], params,
+                target_group_name=t.get('target_group_name', ''))
         if asset:
             try:
                 os.remove(asset['image'])
             except Exception:
                 pass
 
+    @staticmethod
+    def _is_permanent_failure(t: dict, err: Exception) -> bool:
+        """重試也不可能成功的錯誤：暫存素材圖檔已遺失，或名稱 / 路徑不合法"""
+        asset = t.get('asset')
+        if asset and not asset.get('done') and not os.path.isfile(asset.get('image', '')):
+            return True
+        return isinstance(err, ValueError)
+
     @classmethod
-    def process_all_if_closed(cls) -> list[str]:
+    def _archive_failed(cls, t: dict):
+        """放棄重試的任務移到 FAILED_QUEUE_FILE 保存（暫存圖檔保留不刪），供使用者手動處理"""
+        t['failed_at'] = time.time()
+        failed = []
+        if os.path.isfile(FAILED_QUEUE_FILE):
+            try:
+                with open(FAILED_QUEUE_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    failed = data
+            except Exception as e:
+                print(f"[PendingBrushQueue] Load failed-list error: {e}")
+        failed.append(t)
+        try:
+            tmp = FAILED_QUEUE_FILE + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(failed, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, FAILED_QUEUE_FILE)
+        except Exception as e:
+            print(f"[PendingBrushQueue] Save failed-list error: {e}")
+
+    @classmethod
+    def process_all_if_closed(cls) -> tuple[list[str], list[dict]]:
         """
         若 SAI2 已完全結束，將佇列中所有素材 / 筆刷寫入 SAI2 設定。
-        呼叫端應在 SAI2 關閉後等待數秒再呼叫（讓 SAI2 先把自身快取寫回磁碟），
-        失敗的任務會留在佇列中，供下次重試。
+        呼叫端應在 SAI2 關閉後等待數秒再呼叫（讓 SAI2 先把自身快取寫回磁碟）。
+        失敗的任務留在佇列中供下次重試；超過 MAX_ATTEMPTS 次或屬於無法重試的錯誤時，
+        移到 FAILED_QUEUE_FILE 不再重試。
+
+        回傳 (成功的名稱清單, 失敗清單)，失敗項目為
+        {'name', 'error', 'attempts', 'gave_up'}，供呼叫端通知使用者。
         """
         tasks = cls.load_tasks()
         if not tasks:
-            return []
+            return [], []
 
         if SAI2SettingsManager.is_sai2_running():
-            return []
+            return [], []
 
+        with sai2_write_session():
+            return cls._process_tasks(tasks)
+
+    @classmethod
+    def _process_tasks(cls, tasks: list[dict]) -> tuple[list[str], list[dict]]:
         SAI2SettingsManager.repair_all_saiaset_files()
 
         succeeded = []
+        failures = []
         remaining = []
         for t in tasks:
             try:
@@ -1427,10 +1611,18 @@ class PendingBrushQueue:
                 succeeded.append(t['tool_name'])
             except Exception as e:
                 print(f"[PendingBrushQueue] Process failed for {t.get('tool_name')}: {e}")
-                remaining.append(t)   # 含已更新的 asset['done'] 狀態
+                t['attempts'] = t.get('attempts', 0) + 1
+                t['last_error'] = str(e)
+                gave_up = cls._is_permanent_failure(t, e) or t['attempts'] >= cls.MAX_ATTEMPTS
+                if gave_up:
+                    cls._archive_failed(t)
+                else:
+                    remaining.append(t)   # 含已更新的 asset['done'] 狀態
+                failures.append({'name': t.get('tool_name', '?'), 'error': str(e),
+                                 'attempts': t['attempts'], 'gave_up': gave_up})
 
         cls.save_tasks(remaining)
-        return succeeded
+        return succeeded, failures
 
 
 # ─── 動態自適應試畫畫布 (Auto-resizing Scratchpad) ────────────────────────────
@@ -1448,6 +1640,7 @@ class ScratchpadCanvas(tk.Canvas):
         self.h = max(10, height)
 
         self.brush_stamp_img: Image.Image | None = None
+        self._stamp_cache: dict[int, Image.Image] = {}   # 尺寸 → 已縮放的印章，避免每個印章點都從 512px 重新縮放
         self.texture_img: Image.Image | None = None
         self.brush_type = 'scatter'
         self.brush_size = 50
@@ -1491,6 +1684,8 @@ class ScratchpadCanvas(tk.Canvas):
                          size: int, spacing: int, scattering: int,
                          angle_ctl: int, angle: int, angle_jitter: int, size_jitter: int,
                          texture: Image.Image | None = None):
+        if stamp is not self.brush_stamp_img:
+            self._stamp_cache.clear()
         self.brush_stamp_img = stamp
         self.texture_img = texture
         self.brush_type = brush_type
@@ -1593,7 +1788,13 @@ class ScratchpadCanvas(tk.Canvas):
 
         stamp = self.brush_stamp_img
         if stamp.size != (cur_sz, cur_sz):
-            stamp = stamp.resize((cur_sz, cur_sz), Image.Resampling.BILINEAR)
+            cached = self._stamp_cache.get(cur_sz)
+            if cached is None:
+                if len(self._stamp_cache) >= 64:
+                    self._stamp_cache.clear()
+                cached = stamp.resize((cur_sz, cur_sz), Image.Resampling.BILINEAR)
+                self._stamp_cache[cur_sz] = cached
+            stamp = cached
 
         if abs(cur_ang % 360) > 0.5:
             stamp = stamp.rotate(-cur_ang, resample=Image.Resampling.BILINEAR, expand=True)
@@ -1606,6 +1807,11 @@ class ScratchpadCanvas(tk.Canvas):
         self._buf_img.paste(tinted, (left, top), mask=stamp)
 
     def _refresh_canvas(self):
+        photo = self._buf_photo
+        if photo is not None and (photo.width(), photo.height()) == self._buf_img.size:
+            # 尺寸未變：直接更新既有 Tk 影像，避免每個拖曳事件都重建 PhotoImage 與 canvas 物件
+            photo.paste(self._buf_img)
+            return
         self._buf_photo = ImageTk.PhotoImage(self._buf_img)
         self.delete('all')
         self.create_image(0, 0, image=self._buf_photo, anchor='nw')
@@ -1626,18 +1832,19 @@ class BrushStudioWindow(tk.Toplevel):
         self.geometry("980x680")
         self.minsize(880, 600)
 
-        self.transient(parent)
+        # 不設 transient：transient 視窗會跟著主視窗最小化而隱藏，主視窗縮小時用快捷鍵叫出會看不到
         self.focus_force()
 
         # 讀取使用者上次設定
         self._saved_cfg = BrushStudioSettings.load()
 
         # 內部狀態
-        self._raw_image: Image.Image | None = None
+        self._raw_image: Image.Image | None = None       # 原始全解析度來源（最終寫入時使用）
+        self._preview_src: Image.Image | None = None     # 縮小後的 RGBA 工作副本（即時預覽用）
+        self._update_job = None                          # 延遲重算的 after() 排程
         self._processed_stamp: Image.Image | None = None
         self._processed_texture: Image.Image | None = None
         self._settings_dir = SAI2SettingsManager.get_settings_dir()
-        SAI2SettingsManager.repair_all_saiaset_files(self._settings_dir)
         self._tool_groups = SAI2SettingsManager.get_tool_groups(self._settings_dir)
         self._asset_groups = SAI2SettingsManager.get_asset_groups(
             self._saved_cfg.get('main_mode', 'scatter'), self._settings_dir
@@ -1685,8 +1892,8 @@ class BrushStudioWindow(tk.Toplevel):
         self._build_ui()
 
         # 綁定全域貼上快捷鍵 Ctrl+V
-        self.bind('<Control-v>', lambda e: self._on_click_clip())
-        self.bind('<Control-V>', lambda e: self._on_click_clip())
+        self.bind('<Control-v>', self._on_ctrl_v)
+        self.bind('<Control-V>', self._on_ctrl_v)
 
         # 視窗關閉時自動儲存所有參數設定
         self.protocol("WM_DELETE_WINDOW", self._on_window_close)
@@ -1703,6 +1910,18 @@ class BrushStudioWindow(tk.Toplevel):
         """關閉視窗前持久化所有參數"""
         self._save_current_settings()
         self.destroy()
+
+    def destroy(self):
+        # 取消所有排程：視窗銷毀後仍觸發會對已不存在的元件操作而拋出 TclError
+        for attr in ('_update_job', '_status_job'):
+            job = getattr(self, attr, None)
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+        super().destroy()
 
     def _save_current_settings(self):
         """將當前視窗的所有選項保存到設定檔"""
@@ -1858,8 +2077,8 @@ class BrushStudioWindow(tk.Toplevel):
         self.frame_group_sel.pack(fill='x', pady=(0, 4))
         tk.Label(self.frame_group_sel, text="加入 SAI2 工具分頁 (群組)：", font=FT_NORM, fg=TEXT, bg=CARD).pack(anchor='w')
         grp_names = [g['name'] for g in self._tool_groups] or ["基本", "二值", "效果"]
-        cbo_group = ttk.Combobox(self.frame_group_sel, textvariable=self.var_target_group, values=grp_names, font=FT_NORM)
-        cbo_group.pack(fill='x', pady=(2, 0))
+        self.cbo_group = ttk.Combobox(self.frame_group_sel, textvariable=self.var_target_group, values=grp_names, font=FT_NORM)
+        self.cbo_group.pack(fill='x', pady=(2, 0))
 
         self.frame_asset_grp_sel = tk.Frame(col2, bg=CARD)
         self.frame_asset_grp_sel.pack(fill='x', pady=(0, 6))
@@ -1872,29 +2091,31 @@ class BrushStudioWindow(tk.Toplevel):
         self.box_brush_params = tk.Frame(col2, bg=CARD)
         self.box_brush_params.pack(fill='both', expand=True)
 
-        self._add_slider(self.box_brush_params, "間距 (Spacing %):", self.var_spacing, 1, 300)
-        self._add_slider(self.box_brush_params, "散布幅度 (Scattering %):", self.var_scattering, 0, 200)
-        self._add_slider(self.box_brush_params, "尺寸大小 (Size px):", self.var_size, 10, 500)
-        self._add_slider(self.box_brush_params, "尺寸抖動 (Size Jitter %):", self.var_size_jitter, 0, 100)
-        self._add_slider(self.box_brush_params, "角度抖動 (Angle Jitter %):", self.var_angle_jitter, 0, 100)
+        # 以下參數只影響試畫區的筆觸模擬，不改變素材圖像本身 → 不需重算圖像
+        brush_cb = self._on_brush_param_changed
+        self._add_slider(self.box_brush_params, "間距 (Spacing %):", self.var_spacing, 1, 300, brush_cb)
+        self._add_slider(self.box_brush_params, "散布幅度 (Scattering %):", self.var_scattering, 0, 200, brush_cb)
+        self._add_slider(self.box_brush_params, "尺寸大小 (Size px):", self.var_size, 10, 500, brush_cb)
+        self._add_slider(self.box_brush_params, "尺寸抖動 (Size Jitter %):", self.var_size_jitter, 0, 100, brush_cb)
+        self._add_slider(self.box_brush_params, "角度抖動 (Angle Jitter %):", self.var_angle_jitter, 0, 100, brush_cb)
 
         ang_box = tk.Frame(self.box_brush_params, bg=CARD)
         ang_box.pack(fill='x', pady=3)
         tk.Label(ang_box, text="角度控制：", font=FT_NORM, fg=TEXT, bg=CARD).pack(side='left')
         tk.Radiobutton(ang_box, text="無", variable=self.var_angle_ctl, value=0,
                        font=FT_NORM, fg=TEXT, bg=CARD, selectcolor=CARD2,
-                       command=self._on_param_changed).pack(side='left')
+                       command=brush_cb).pack(side='left')
         tk.Radiobutton(ang_box, text="隨筆向", variable=self.var_angle_ctl, value=2,
                        font=FT_NORM, fg=TEXT, bg=CARD, selectcolor=CARD2,
-                       command=self._on_param_changed).pack(side='left', padx=4)
+                       command=brush_cb).pack(side='left', padx=4)
         tk.Radiobutton(ang_box, text="自動", variable=self.var_angle_ctl, value=1,
                        font=FT_NORM, fg=TEXT, bg=CARD, selectcolor=CARD2,
-                       command=self._on_param_changed).pack(side='left')
+                       command=brush_cb).pack(side='left')
 
         tk.Checkbutton(self.box_brush_params, text="啟用繪圖板筆壓 (感應大小與濃度)",
                        variable=self.var_pen_pressure, font=FT_NORM,
                        fg=TEXT, bg=CARD, selectcolor=CARD2,
-                       command=self._on_param_changed).pack(anchor='w', pady=(3, 0))
+                       command=brush_cb).pack(anchor='w', pady=(3, 0))
 
         # 紋理與材質專用參數容器
         self.box_texture_params = tk.Frame(col2, bg=CARD)
@@ -1993,7 +2214,8 @@ class BrushStudioWindow(tk.Toplevel):
         b.bind('<Leave>', lambda e: b.config(bg=CARD2))
         return b
 
-    def _add_slider(self, parent, label_text, var, min_v, max_v):
+    def _add_slider(self, parent, label_text, var, min_v, max_v, on_change=None):
+        on_change = on_change or self._on_param_changed
         f = tk.Frame(parent, bg=CARD)
         f.pack(fill='x', pady=2)
         lbl = tk.Label(f, text=f"{label_text} {var.get()}", font=FT_NORM, fg=TEXT, bg=CARD)
@@ -2001,7 +2223,7 @@ class BrushStudioWindow(tk.Toplevel):
 
         def _on_slide(val):
             lbl.config(text=f"{label_text} {int(float(val))}")
-            self._on_param_changed()
+            on_change()
 
         s = ttk.Scale(f, from_=min_v, to=max_v, variable=var, command=_on_slide)
         s.pack(side='top', fill='x')
@@ -2063,15 +2285,32 @@ class BrushStudioWindow(tk.Toplevel):
                 text="🟢 SAI2 未運行 (可直接寫入並立即生效)",
                 fg=GREEN
             )
-        self.after(2000, self._update_sai2_status)
+        self._status_job = self.after(2000, self._update_sai2_status)
+
+    # 預覽時的來源長邊上限；最終寫入仍以全解析度原圖重新處理，品質不受影響
+    PREVIEW_MAX_SIDE = 1024
+    # 參數變動後的重算延遲：拖曳滑桿時每秒會觸發數十次，合併成停手後的一次重算
+    UPDATE_DELAY_MS = 120
+
+    def _set_source_image(self, img: Image.Image):
+        self._raw_image = img
+        work = img.convert('RGBA')   # convert 一律回傳新影像，下方 thumbnail 不會改到原圖
+        work.thumbnail((self.PREVIEW_MAX_SIDE, self.PREVIEW_MAX_SIDE), Image.Resampling.LANCZOS)
+        self._preview_src = work
 
     def _load_from_clipboard_silent(self):
         try:
             img = read_clipboard_safely()
             if img:
-                self._raw_image = img
+                self._set_source_image(img)
         except Exception:
             pass
+
+    def _on_ctrl_v(self, event):
+        # 在名稱 / 分類輸入框內 Ctrl+V 是貼上文字，交給輸入框自己處理，不去讀剪貼簿圖像
+        if is_text_input_widget(event.widget):
+            return
+        self._on_click_clip()
 
     def _on_click_clip(self):
         img = read_clipboard_safely()
@@ -2081,87 +2320,117 @@ class BrushStudioWindow(tk.Toplevel):
                 "剪貼簿中未偵測到有效圖像！\n\n"
                 "• 若在 SAI2 中：請先選取圖樣並按下 Ctrl+C 複製\n"
                 "• 若在檔案總管中：選取圖片檔案按下 Ctrl+C 即可貼上\n"
-                "• 亦可直接在工作台視窗中按下 Ctrl+V 貼上"
+                "• 亦可直接在工作台視窗中按下 Ctrl+V 貼上",
+                parent=self
             )
             return
-        self._raw_image = img
+        self._set_source_image(img)
         self.lbl_pad_tip.config(text=f"✅ 已成功從剪貼簿讀取圖像 ({img.size[0]}×{img.size[1]})！", fg=GREEN)
         self._update_processed_output()
 
     def _on_click_file(self):
         fpath = filedialog.askopenfilename(
             title="選擇圖片素材",
-            filetypes=[("圖片檔案", "*.png;*.jpg;*.jpeg;*.bmp;*.webp"), ("所有檔案", "*.*")]
+            filetypes=[("圖片檔案", "*.png;*.jpg;*.jpeg;*.bmp;*.webp"), ("所有檔案", "*.*")],
+            parent=self
         )
         if not fpath or not os.path.isfile(fpath):
             return
         try:
             img = Image.open(fpath)
             img.load()
-            self._raw_image = img
+            self._set_source_image(ImageOps.exif_transpose(img))
             base_name = os.path.splitext(os.path.basename(fpath))[0]
             self.var_brush_name.set(base_name)
             self._update_processed_output()
         except Exception as e:
-            messagebox.showerror("載入失敗", f"無法開啟圖片檔案：{e}")
+            messagebox.showerror("載入失敗", f"無法開啟圖片檔案：{e}", parent=self)
 
     def _on_clear_pad(self):
         self.pad.clear()
 
     def _on_param_changed(self, *args):
-        self._update_processed_output()
+        """會改變輸出圖像的參數：延遲合併後再重算"""
+        if self._update_job is not None:
+            self.after_cancel(self._update_job)
+        self._update_job = self.after(self.UPDATE_DELAY_MS, self._update_processed_output)
 
-    def _update_processed_output(self):
-        m = self.var_main_mode.get()
-        is_texture_mode = m in ('brushtex', 'papertex')
+    def _on_brush_param_changed(self, *args):
+        """只影響試畫筆觸的參數：直接更新試畫區，不重算圖像"""
+        self._sync_pad_params()
 
-        if not self._raw_image:
-            if is_texture_mode:
-                base_im = Image.new('L', (256, 256), 180)
-                d = ImageDraw.Draw(base_im)
-                for _ in range(300):
-                    x, y = random.randint(0, 255), random.randint(0, 255)
-                    d.point((x, y), fill=random.randint(60, 220))
-                src = base_im
-            else:
-                default_im = Image.new('L', (512, 512), 0)
-                d = ImageDraw.Draw(default_im)
-                pts = []
-                cx, cy, r_out, r_in = 256, 256, 200, 90
-                for i in range(10):
-                    ang = i * math.pi / 5 - math.pi / 2
-                    r = r_out if i % 2 == 0 else r_in
-                    pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
-                d.polygon(pts, fill=255)
-                src = default_im
-        else:
-            src = self._raw_image
+    def _flush_processed_output(self):
+        """若還有尚未執行的延遲重算，立即執行（寫入前確保圖像對應目前參數）"""
+        if self._update_job is not None:
+            self._update_processed_output()
 
-        mode = self.var_convert_mode.get()
-
+    @staticmethod
+    def _default_source(is_texture_mode: bool) -> Image.Image:
         if is_texture_mode:
-            target_sz = self.var_tex_res.get()
-            s_mode = self.var_seamless_mode.get()
-            b_ratio = self.var_blend_margin.get() / 100.0
-            cnt = self.var_contrast.get()
-            brt = self.var_brightness.get()
-            inv = self.var_invert.get()
-            self._processed_texture = BrushImageProcessor.process_texture(
-                src, seamless_mode=s_mode, blend_ratio=b_ratio,
-                contrast=cnt, brightness=brt, invert=inv, target_size=target_sz,
+            base_im = Image.new('L', (256, 256), 180)
+            d = ImageDraw.Draw(base_im)
+            for _ in range(300):
+                x, y = random.randint(0, 255), random.randint(0, 255)
+                d.point((x, y), fill=random.randint(60, 220))
+            return base_im
+        default_im = Image.new('L', (512, 512), 0)
+        d = ImageDraw.Draw(default_im)
+        pts = []
+        cx, cy, r_out, r_in = 256, 256, 200, 90
+        for i in range(10):
+            ang = i * math.pi / 5 - math.pi / 2
+            r = r_out if i % 2 == 0 else r_in
+            pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
+        d.polygon(pts, fill=255)
+        return default_im
+
+    def _process_image(self, src: Image.Image) -> Image.Image:
+        """依目前模式與參數處理來源影像（預覽與最終寫入共用）"""
+        mode = self.var_convert_mode.get()
+        if self.var_main_mode.get() in ('brushtex', 'papertex'):
+            return BrushImageProcessor.process_texture(
+                src, seamless_mode=self.var_seamless_mode.get(),
+                blend_ratio=self.var_blend_margin.get() / 100.0,
+                contrast=self.var_contrast.get(), brightness=self.var_brightness.get(),
+                invert=self.var_invert.get(), target_size=self.var_tex_res.get(),
                 convert_mode=mode
             )
+        return BrushImageProcessor.process(
+            src, mode=mode, autocrop=self.var_autocrop.get(), target_size=512
+        )
+
+    def _final_output_image(self) -> Image.Image | None:
+        """寫入用的圖像：有使用者來源時以全解析度原圖重新處理，否則沿用預覽結果"""
+        self._flush_processed_output()
+        is_texture = self.var_main_mode.get() in ('brushtex', 'papertex')
+        preview = self._processed_texture if is_texture else self._processed_stamp
+        if self._raw_image is None or preview is None:
+            return preview
+        return self._process_image(self._raw_image)
+
+    def _update_processed_output(self):
+        if self._update_job is not None:
+            try:
+                self.after_cancel(self._update_job)
+            except Exception:
+                pass
+            self._update_job = None
+
+        is_texture_mode = self.var_main_mode.get() in ('brushtex', 'papertex')
+        src = self._preview_src if self._preview_src is not None else self._default_source(is_texture_mode)
+        out = self._process_image(src)
+        if is_texture_mode:
+            self._processed_texture = out
         else:
-            autocrop = self.var_autocrop.get()
-            self._processed_stamp = BrushImageProcessor.process(
-                src, mode=mode, autocrop=autocrop, target_size=512
-            )
+            self._processed_stamp = out
 
         self._render_preview()
+        self._sync_pad_params()
 
+    def _sync_pad_params(self):
         self.pad.set_brush_params(
             stamp=self._processed_stamp,
-            brush_type=m,
+            brush_type=self.var_main_mode.get(),
             size=self.var_size.get(),
             spacing=self.var_spacing.get(),
             scattering=self.var_scattering.get(),
@@ -2212,13 +2481,14 @@ class BrushStudioWindow(tk.Toplevel):
         self.canvas_preview.delete('all')
         self.canvas_preview.create_image(2, 2, image=self._preview_photo, anchor='nw')
 
-    def _get_target_group_id(self) -> int:
+    # 新群組（清單中沒有的名稱）一律回傳 ID 0，實際 ID 由 SAI2SettingsManager 在寫入當下
+    # 依磁碟內容配發；不在這裡算 max+1，否則清單過期或連續排入佇列時會算出重複的 ID。
+    def _get_target_group_info(self) -> tuple[int, str]:
         chosen_name = self.var_target_group.get().strip()
         for g in self._tool_groups:
             if g['name'] == chosen_name:
-                return g['id']
-        max_gid = max([g['id'] for g in self._tool_groups], default=0)
-        return max_gid + 1
+                return g['id'], chosen_name
+        return 0, chosen_name
 
     def _get_asset_group_info(self) -> tuple[int, str]:
         chosen_name = self.var_asset_group.get().strip()
@@ -2227,8 +2497,14 @@ class BrushStudioWindow(tk.Toplevel):
         for g in self._asset_groups:
             if g['name'] == chosen_name:
                 return g['id'], g['name']
-        max_gid = max([g['id'] for g in self._asset_groups], default=0)
-        return max_gid + 1, chosen_name
+        return 0, chosen_name
+
+    def _reload_groups(self):
+        """寫入後重新讀取分頁與分類清單，讓剛建立的群組出現在選單中"""
+        self._tool_groups = SAI2SettingsManager.get_tool_groups(self._settings_dir)
+        self.cbo_group.config(values=[g['name'] for g in self._tool_groups] or ["基本", "二值", "效果"])
+        self._asset_groups = SAI2SettingsManager.get_asset_groups(self.var_main_mode.get(), self._settings_dir)
+        self.cbo_asset_group.config(values=[g['name'] for g in self._asset_groups] or ["(未分類)"])
 
     def _gather_params(self) -> dict:
         ag_id, ag_name = self._get_asset_group_info()
@@ -2300,16 +2576,17 @@ class BrushStudioWindow(tk.Toplevel):
             self.on_brush_created_callback(name)
         self.destroy()
 
-    def _write_asset_now(self, name: str, mode: str, params: dict) -> str:
-        """立即寫入素材 / 紋理並註冊，回傳 BMP 路徑"""
+    def _write_asset_now(self, name: str, mode: str, image: Image.Image,
+                         params: dict) -> tuple[str, int]:
+        """立即寫入素材 / 紋理並註冊，回傳 (BMP 路徑, 實際歸屬的素材分類 ID)"""
         if mode in ('brushtex', 'papertex'):
             return SAI2SettingsManager.write_texture(
-                name, self._processed_texture, mode, self._settings_dir,
+                name, image, mode, self._settings_dir,
                 asset_group_id=params.get('asset_group_id', 0),
                 asset_group_name=params.get('asset_group_name', ''))
-        bmp_p, _ = SAI2SettingsManager.write_material(
-            name, self._processed_stamp, mode, params, self._settings_dir)
-        return bmp_p
+        bmp_p, _, gid = SAI2SettingsManager.write_material(
+            name, image, mode, params, self._settings_dir)
+        return bmp_p, gid
 
     def _run_write(self, create_tool_requested: bool):
         self._save_current_settings()
@@ -2318,8 +2595,11 @@ class BrushStudioWindow(tk.Toplevel):
             return
 
         m = self.var_main_mode.get()
-        is_texture = m in ('brushtex', 'papertex')
-        image = self._processed_texture if is_texture else self._processed_stamp
+        try:
+            image = self._final_output_image()
+        except Exception as e:
+            messagebox.showerror("錯誤", f"處理圖像時發生錯誤：{e}", parent=self)
+            return
         if image is None:
             messagebox.showerror("錯誤", "尚未產生可儲存的圖像。", parent=self)
             return
@@ -2337,7 +2617,7 @@ class BrushStudioWindow(tk.Toplevel):
             return
 
         params = self._gather_params()
-        grp_id = self._get_target_group_id()
+        grp_id, grp_name = self._get_target_group_info()
         what = "素材與工具" if create_tool else "素材"
 
         strategy = self._ask_write_strategy(what)
@@ -2347,7 +2627,7 @@ class BrushStudioWindow(tk.Toplevel):
         try:
             if strategy == 'queue':
                 PendingBrushQueue.add_deploy_task(
-                    name, m, image, params, grp_id, create_tool, tool_type)
+                    name, m, image, params, grp_id, create_tool, tool_type, grp_name)
                 messagebox.showinfo(
                     "已排入自動儲存佇列",
                     f"已將 [{name}] 的{what}加入佇列！\n"
@@ -2357,14 +2637,24 @@ class BrushStudioWindow(tk.Toplevel):
                 self._finish_success(name, close=create_tool_requested)
                 return
 
-            bmp_p = self._write_asset_now(name, m, params)
-            tid = None
-            if create_tool:
-                tid = SAI2SettingsManager.write_tool(
-                    name, tool_type, name, grp_id, params, self._settings_dir)
+            with sai2_write_session():
+                bmp_p, asset_gid = self._write_asset_now(name, m, image, params)
+                tid = None
+                if create_tool:
+                    # 工具的 fomgid / texgid 必須指向素材實際被放入的分類
+                    tool_params = dict(params, asset_group_id=asset_gid)
+                    tid = SAI2SettingsManager.write_tool(
+                        name, tool_type, name, grp_id, tool_params, self._settings_dir,
+                        target_group_name=grp_name)
         except Exception as e:
             messagebox.showerror("寫入失敗", f"發生錯誤：{e}", parent=self)
             return
+        finally:
+            # 無論成功或部分失敗，磁碟上的群組都可能已變動；「僅儲存素材」不關視窗，需重新整理選單
+            try:
+                self._reload_groups()
+            except Exception:
+                pass
 
         restart_hint = "\n\n⚠️ SAI2 目前仍在運行，請重新啟動 SAI2 後才會看見變更。" if strategy == 'force' else ""
         if m == 'papertex':

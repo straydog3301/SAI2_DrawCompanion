@@ -14,13 +14,14 @@ import time
 import traceback
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps
 
 from tracker import DrawTracker, fmt_seconds
 from timelapse import TimelapseRecorder, find_ffmpeg, file_key_to_subdir
 from i18n import _tr, set_language, get_current_language, get_available_languages
 from liquify_helper import LiquifyEditor, read_image_from_clipboard
-from brush_studio import BrushStudioWindow, PendingBrushQueue
+from brush_studio import (BrushStudioWindow, PendingBrushQueue, is_text_input_widget,
+                          FAILED_QUEUE_FILE, PENDING_ASSET_DIR)
 
 # ─── 啟動參數 ─────────────────────────────────────────────────────────────
 # --auto-close：由 watcher.pyw 傳入，SAI2 關閉時自動儲存並關閉計時器
@@ -167,6 +168,14 @@ SKETCH_SOURCES = [('本機資料夾', 'local'), ('Unsplash', 'unsplash'), ('Pexe
 
 # 精簡模式透明底所用的色鍵（罕見洋紅，避免與照片像素撞色而破洞）
 MINI_CHROMA = '#ff00fe'
+
+
+class SketchWebError(RuntimeError):
+    """速寫網路抓圖錯誤；retry_after > 0 表示可在該秒數後自動重試，0 表示重試也無效（金鑰錯誤等）"""
+
+    def __init__(self, msg: str, retry_after: int = 0):
+        super().__init__(msg)
+        self.retry_after = retry_after
 
 
 def _eff_color(pct: int) -> str:
@@ -1041,18 +1050,41 @@ class App:
         self._pending_brush_next_try = now + self.PENDING_BRUSH_RETRY_SEC
         self._process_pending_brushes()
 
-    def _process_pending_brushes(self) -> list:
+    def _process_pending_brushes(self, notify: bool = True) -> list:
         try:
             if not PendingBrushQueue.has_tasks():
                 return []
-            processed = PendingBrushQueue.process_all_if_closed()
-            if processed:
-                names_str = ', '.join(processed)
-                self.var_status.set(f"✅ 已在 SAI2 關閉後安全儲存自製筆刷：{names_str}")
-            return processed
+            processed, failures = PendingBrushQueue.process_all_if_closed()
         except Exception as e:
             print(f"[PendingBrushQueue] Process error: {e}")
+            self.var_status.set(f"⚠️ 自製筆刷佇列處理失敗：{e}")
             return []
+
+        msgs = []
+        if processed:
+            msgs.append(f"✅ 已在 SAI2 關閉後安全儲存自製筆刷：{', '.join(processed)}")
+        retrying = [f for f in failures if not f['gave_up']]
+        gave_up = [f for f in failures if f['gave_up']]
+        if retrying:
+            f = retrying[0]
+            msgs.append(f"⚠️ 自製筆刷 [{f['name']}] 寫入失敗"
+                        f"（第 {f['attempts']}/{PendingBrushQueue.MAX_ATTEMPTS} 次，稍後重試）：{f['error']}")
+        if gave_up:
+            msgs.append(f"❌ 自製筆刷寫入失敗，已停止重試：{', '.join(f['name'] for f in gave_up)}")
+        if msgs:
+            self.var_status.set('　'.join(msgs))
+
+        if gave_up and notify:
+            detail = '\n'.join(f"• {f['name']}：{f['error']}" for f in gave_up)
+            # 延後顯示：此處在 _poll 內，直接開 modal 對話框會讓輪詢停到使用者按下確定為止
+            self.root.after(0, lambda: messagebox.showerror(
+                "自製筆刷寫入失敗",
+                f"以下自製筆刷在多次嘗試後仍無法寫入 SAI2，已停止自動重試：\n\n{detail}\n\n"
+                f"任務紀錄：{FAILED_QUEUE_FILE}\n"
+                f"素材暫存圖檔保留於：{PENDING_ASSET_DIR}\n"
+                f"可排除問題後，用筆刷工坊重新開啟該圖檔建立。",
+                parent=self.root))
+        return processed
 
     def _flush_pending_brushes_on_exit(self):
         """程式結束前最後一次嘗試寫入佇列（例如 --auto-close 模式在 SAI2 關閉後自動退出）。
@@ -1066,7 +1098,7 @@ class App:
             remain = self.PENDING_BRUSH_SETTLE_SEC - (time.time() - closed_since)
             if remain > 0:
                 time.sleep(min(remain, self.PENDING_BRUSH_SETTLE_SEC))
-            self._process_pending_brushes()
+            self._process_pending_brushes(notify=False)   # 程式即將結束，不再跳出對話框
         except Exception as e:
             print(f"[PendingBrushQueue] Exit flush error: {e}")
 
@@ -3906,6 +3938,10 @@ class SketchPracticeWindow(tk.Toplevel):
         self._timer_job = None
         self._resize_job = None
         self._last_size = (0, 0)
+        self._web_pool = {}          # (來源, 關鍵字) → 尚未顯示的圖片網址
+        self._web_totals = {}        # (來源, 關鍵字) → Pexels 搜尋結果總數（決定隨機頁碼範圍）
+        self._web_seen = set()       # 已顯示過的網址，補充網址池時盡量避開重複
+        self._web_retry_job = None   # 抓圖失敗後的自動重試排程
         self._sketch_mini = False    # 精簡模式（只留圖像+計時）
         self._normal_geom = None     # 進精簡前的視窗幾何
         self._drag_x = 0
@@ -3925,9 +3961,10 @@ class SketchPracticeWindow(tk.Toplevel):
 
         self.protocol('WM_DELETE_WINDOW', self._on_close)
         self.bind('<Configure>', self._on_resize)
-        self.bind('<space>', self.toggle_pause)
-        self.bind('<Right>', self.next_image)
-        self.bind('<Left>', self.prev_image)
+        # 單鍵快捷鍵：焦點在可輸入的欄位（自訂關鍵字）時讓出，避免打字時暫停或翻頁
+        self.bind('<space>', self._key_guard(self.toggle_pause))
+        self.bind('<Right>', self._key_guard(self.next_image))
+        self.bind('<Left>', self._key_guard(self.prev_image))
         self.bind('<Escape>', self._exit_mini_if_active)
         self.bind('<Control-Key-m>', lambda _e: self.toggle_sketch_mini())
 
@@ -3935,6 +3972,19 @@ class SketchPracticeWindow(tk.Toplevel):
         self.after(250, self._toggle_topmost)
         self.after(300, self._topmost_heal)
         self.after(400, self.next_image)   # 載入首張
+
+    WEB_RETRY_SEC = 10                 # 暫時性網路錯誤的重試間隔
+    WEB_RATE_LIMIT_RETRY_SEC = 120     # HTTP 429（超過 API 額度）的重試間隔
+    HISTORY_MAX_SIDE = 2048            # 歷史紀錄中每張圖保留的最長邊（顯示用，足以涵蓋 2K/4K 視窗）
+    HISTORY_MAX = 15
+
+    @staticmethod
+    def _key_guard(fn):
+        def handler(e):
+            if is_text_input_widget(e.widget):
+                return None
+            return fn(e)
+        return handler
 
     # ── 設定存取（透過 app 保持與設定彈窗一致）──────────────────────────
     def _get(self, k, default=None):
@@ -4077,6 +4127,7 @@ class SketchPracticeWindow(tk.Toplevel):
 
     # ── 影像載入 ──────────────────────────────────────────────────────
     def next_image(self, *_):
+        self._cancel_web_retry()
         if self._hist_idx < len(self._history) - 1:
             self._hist_idx += 1
             self._show_pil(self._history[self._hist_idx])
@@ -4085,6 +4136,7 @@ class SketchPracticeWindow(tk.Toplevel):
             self._load_new()
 
     def prev_image(self, *_):
+        self._cancel_web_retry()
         if self._hist_idx > 0:
             self._hist_idx -= 1
             self._show_pil(self._history[self._hist_idx])
@@ -4100,14 +4152,18 @@ class SketchPracticeWindow(tk.Toplevel):
             self._load_web(mode)
 
     def _push_history(self, pil):
+        """加入歷史紀錄並回傳實際保存（已縮小）的影像，呼叫端應顯示回傳值。
+        相機原圖可達 6000×4000（約 96MB），15 張原圖會吃掉上 GB 記憶體；
+        顯示只需視窗大小，因此先縮到 HISTORY_MAX_SIDE 再保存。"""
+        pil.thumbnail((self.HISTORY_MAX_SIDE, self.HISTORY_MAX_SIDE), Image.LANCZOS)
         # 若曾往回看，捨棄後面的分支再接上新圖
         if self._hist_idx < len(self._history) - 1:
             self._history = self._history[:self._hist_idx + 1]
         self._history.append(pil)
-        MAX = 15
-        if len(self._history) > MAX:
-            self._history = self._history[len(self._history) - MAX:]
+        if len(self._history) > self.HISTORY_MAX:
+            self._history = self._history[len(self._history) - self.HISTORY_MAX:]
         self._hist_idx = len(self._history) - 1
+        return pil
 
     def _scan_dir(self, d):
         out = []
@@ -4154,6 +4210,7 @@ class SketchPracticeWindow(tk.Toplevel):
         try:
             img = Image.open(path)
             img.load()
+            img = ImageOps.exif_transpose(img)   # 依 EXIF 方向轉正（手機直拍照片）
             self._push_history(img)
             self._show_pil(img)
             sub = self._get('sketch_local_category', '')
@@ -4163,9 +4220,24 @@ class SketchPracticeWindow(tk.Toplevel):
         except Exception as e:
             self._set_status(f'讀取失敗：{e}')
 
+    def _cancel_web_retry(self):
+        if self._web_retry_job is not None:
+            try:
+                self.after_cancel(self._web_retry_job)
+            except Exception:
+                pass
+            self._web_retry_job = None
+
+    def _retry_web(self):
+        self._web_retry_job = None
+        if self._destroyed or self._paused or self._source_key() == 'local':
+            return
+        self._load_new()
+
     def _load_web(self, mode):
         if self._loading:
             return
+        self._cancel_web_retry()
         key = self._get(f'sketch_{mode}_key', '').strip()
         if not key:
             self._set_status(f'尚未設定 {mode.capitalize()} API 金鑰（設定 → 速寫練習 API）')
@@ -4175,18 +4247,26 @@ class SketchPracticeWindow(tk.Toplevel):
         self._set_status(f'從 {mode.capitalize()} 抓圖中…（{query}）')
 
         def worker():
-            img, err = None, None
+            img, err, retry_after = None, None, 0
             try:
                 img = self._fetch_web_image(mode, key, query)
+            except SketchWebError as e:
+                err, retry_after = str(e), e.retry_after
             except Exception as e:
-                err = str(e)
+                # 連線逾時、DNS、圖檔下載中斷等暫時性錯誤：稍後自動重試
+                err, retry_after = str(e), self.WEB_RETRY_SEC
 
             def done():
                 self._loading = False
                 if self._destroyed:
                     return
                 if img is None:
-                    self._set_status(f'抓圖失敗：{err}')
+                    if retry_after > 0 and not self._paused:
+                        # 自動翻頁中抓圖失敗時排程重試，避免倒數停在 0 後整個練習卡住
+                        self._set_status(f'抓圖失敗：{err}（{retry_after} 秒後自動重試）')
+                        self._web_retry_job = self.after(retry_after * 1000, self._retry_web)
+                    else:
+                        self._set_status(f'抓圖失敗：{err}')
                 else:
                     self._push_history(img)
                     self._show_pil(img)
@@ -4222,51 +4302,66 @@ class SketchPracticeWindow(tk.Toplevel):
                     body = e.read().decode('utf-8', 'ignore')[:200]
                 except Exception:
                     pass
-                hint = ''
+                hint, retry_after = '', 0          # 金鑰錯誤 / 請求不合法：重試也沒用
                 if e.code in (401, 403):
                     hint = '（請確認 API 金鑰正確；Unsplash 用 Access Key，非 Secret Key）'
-                raise RuntimeError(f'HTTP {e.code} {e.reason}{hint}｜{body}')
+                elif e.code == 429:
+                    hint = '（已達 API 每小時請求上限，請稍候或拉長間隔）'
+                    retry_after = self.WEB_RATE_LIMIT_RETRY_SEC
+                elif e.code >= 500:
+                    retry_after = self.WEB_RETRY_SEC
+                raise SketchWebError(f'HTTP {e.code} {e.reason}{hint}｜{body}', retry_after)
 
-        if mode == 'unsplash':
-            params = urllib.parse.urlencode({
-                'query': query or 'portrait',
-                'orientation': 'portrait',
-                'content_filter': 'high',
-            })
-            data = _get_json(f'https://api.unsplash.com/photos/random?{params}',
-                             {'Authorization': f'Client-ID {key}', 'Accept-Version': 'v1'})
-            if isinstance(data, list):
-                data = data[0]
-            img_url = data['urls']['regular']
-        else:  # pexels
-            q = query or 'portrait'
-            per_page = 80
-            hdr = {'Authorization': key}
-            # 先抓第 1 頁取得 total_results，避免隨機翻頁超出結果數而拿到空陣列
-            first = _get_json(
-                'https://api.pexels.com/v1/search?' + urllib.parse.urlencode(
-                    {'query': q, 'per_page': per_page, 'page': 1}), hdr)
-            total = int(first.get('total_results', 0) or 0)
-            photos = first.get('photos', []) or []
-            if total > per_page:
-                import math
-                max_page = min(50, math.ceil(total / per_page))  # 控制在合理頁數內
-                page = random.randint(1, max_page)
-                if page != 1:
-                    data = _get_json(
-                        'https://api.pexels.com/v1/search?' + urllib.parse.urlencode(
-                            {'query': q, 'per_page': per_page, 'page': page}), hdr)
-                    photos = data.get('photos', []) or photos  # 空頁時退回第 1 頁結果
-            if not photos:
-                raise RuntimeError('此關鍵字無搜尋結果，換個關鍵字試試（建議用英文）')
-            img_url = random.choice(photos)['src']['large']
+        # 圖片網址池：一次 API 請求取回一批網址，抽完才再請求。
+        # 圖片本體由 CDN 提供、不計入 API 額度，因此 30 秒間隔也不會超過
+        # Unsplash Demo（50 次/時）或 Pexels（200 次/時）的上限。
+        # 只有背景 worker 會存取（_loading 保證同時最多一個 worker），不需加鎖。
+        pool_key = (mode, query)
+        pool = self._web_pool.setdefault(pool_key, [])
+        if not pool:
+            if mode == 'unsplash':
+                params = urllib.parse.urlencode({
+                    'query': query or 'portrait',
+                    'orientation': 'portrait',
+                    'content_filter': 'high',
+                    'count': 30,                       # 單次請求最多 30 張
+                })
+                data = _get_json(f'https://api.unsplash.com/photos/random?{params}',
+                                 {'Authorization': f'Client-ID {key}', 'Accept-Version': 'v1'})
+                if isinstance(data, dict):
+                    data = [data]
+                urls = [d['urls']['regular'] for d in data if d.get('urls', {}).get('regular')]
+            else:  # pexels
+                q = query or 'portrait'
+                per_page = 80
+                hdr = {'Authorization': key}
+                # 第一次以第 1 頁取得 total_results 並記住；之後每批只需 1 次請求就能隨機跳頁
+                total = self._web_totals.get(pool_key)
+                page = 1
+                if total and total > per_page:
+                    page = random.randint(1, min(50, -(-total // per_page)))  # 上限 50 頁
+                data = _get_json(
+                    'https://api.pexels.com/v1/search?' + urllib.parse.urlencode(
+                        {'query': q, 'per_page': per_page, 'page': page}), hdr)
+                self._web_totals[pool_key] = int(data.get('total_results', 0) or 0)
+                urls = [p['src']['large'] for p in (data.get('photos') or [])
+                        if p.get('src', {}).get('large')]
+            if not urls:
+                raise SketchWebError('此關鍵字無搜尋結果，換個關鍵字試試（建議用英文）')
+            fresh = [u for u in urls if u not in self._web_seen]
+            pool.extend(fresh or urls)        # 整批都看過時仍沿用，避免無圖可抽
+            random.shuffle(pool)
+        img_url = pool.pop()
+        if len(self._web_seen) > 3000:
+            self._web_seen.clear()
+        self._web_seen.add(img_url)
 
         img_req = urllib.request.Request(img_url, headers={'User-Agent': ua})
         with urllib.request.urlopen(img_req, timeout=20) as r:
             raw = r.read()
         img = Image.open(io.BytesIO(raw))
         img.load()
-        return img
+        return ImageOps.exif_transpose(img)
 
     # ── 顯示 / 縮放 ──────────────────────────────────────────────────
     def _show_pil(self, pil):
@@ -4558,6 +4653,7 @@ class SketchPracticeWindow(tk.Toplevel):
                 self.after_cancel(self._timer_job)
             except Exception:
                 pass
+        self._cancel_web_retry()
         try:
             self._set('sketch_custom_query', self.var_custom.get().strip())
             self._persist()
