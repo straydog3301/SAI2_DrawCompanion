@@ -25,6 +25,7 @@ from core.brush_assets import PendingBrushQueue, FAILED_QUEUE_FILE, PENDING_ASSE
 from core.daily_quests import QuestManager, MODES as QUEST_MODES, UNLIMITED_SKETCH_MIN_SECONDS, PASS_RATING
 from study_window import StudyWindow, StudyCheckinDialog
 from ui_kit import px, fit_window, bind_wraplength
+from growth_view import GrowthView
 from core import study_lessons
 
 # ─── 啟動參數 ─────────────────────────────────────────────────────────────
@@ -617,39 +618,23 @@ class App:
         self.tab_frame = tk.Frame(self.main_container, bg=BG, bd=0)
         self.tab_frame.pack(fill='x', pady=(6, 2))
         
-        # 🕒 繪圖計時 頁籤
-        self.tab_tracker_btn = tk.Frame(self.tab_frame, bg=BG, cursor='hand2')
-        self.tab_tracker_btn.pack(side='left', expand=True, fill='x')
-        self.tab_tracker_lbl = tk.Label(self.tab_tracker_btn, text=_tr('ui.tab.tracker'), font=FT, fg=TEXT, bg=BG)
-        self.tab_tracker_lbl.pack(pady=(6, 4))
-        self.tab_tracker_indicator = tk.Frame(self.tab_tracker_btn, height=3, bg=ACCENT)
-        self.tab_tracker_indicator.pack(fill='x', side='bottom')
-        
-        # 📊 統計圖表 頁籤
-        self.tab_stats_btn = tk.Frame(self.tab_frame, bg=BG, cursor='hand2')
-        self.tab_stats_btn.pack(side='left', expand=True, fill='x')
-        self.tab_stats_lbl = tk.Label(self.tab_stats_btn, text=_tr('ui.tab.stats'), font=FT, fg=TEXTD, bg=BG)
-        self.tab_stats_lbl.pack(pady=(6, 4))
-        self.tab_stats_indicator = tk.Frame(self.tab_stats_btn, height=3, bg=BG)
-        self.tab_stats_indicator.pack(fill='x', side='bottom')
-        
-        self.tab_tracker_btn.bind('<Button-1>', lambda _: self._switch_tab('tracker'))
-        self.tab_tracker_lbl.bind('<Button-1>', lambda _: self._switch_tab('tracker'))
-        self.tab_stats_btn.bind('<Button-1>', lambda _: self._switch_tab('stats'))
-        self.tab_stats_lbl.bind('<Button-1>', lambda _: self._switch_tab('stats'))
-        
-        def _on_tab_enter(lbl, indicator):
-            if indicator['bg'] != ACCENT:
-                lbl.config(fg=TEXT)
-        def _on_tab_leave(lbl, indicator):
-            if indicator['bg'] != ACCENT:
-                lbl.config(fg=TEXTD)
-                
-        self.tab_tracker_btn.bind('<Enter>', lambda _: _on_tab_enter(self.tab_tracker_lbl, self.tab_tracker_indicator))
-        self.tab_tracker_btn.bind('<Leave>', lambda _: _on_tab_leave(self.tab_tracker_lbl, self.tab_tracker_indicator))
-        self.tab_stats_btn.bind('<Enter>', lambda _: _on_tab_enter(self.tab_stats_lbl, self.tab_stats_indicator))
-        self.tab_stats_btn.bind('<Leave>', lambda _: _on_tab_leave(self.tab_stats_lbl, self.tab_stats_indicator))
-        
+        # 頁籤：(key, 標題)。每個頁籤一個按鈕框 + 標籤 + 底線指示條
+        self._tabs = {}
+        for key, title in (('tracker', _tr('ui.tab.tracker')),
+                           ('stats', _tr('ui.tab.stats')),
+                           ('growth', _tr('ui.tab.growth', '🎯 成長'))):
+            btn = tk.Frame(self.tab_frame, bg=BG, cursor='hand2')
+            btn.pack(side='left', expand=True, fill='x')
+            lbl = tk.Label(btn, text=title, font=FT, fg=TEXTD, bg=BG)
+            lbl.pack(pady=(6, 4))
+            ind = tk.Frame(btn, height=3, bg=BG)
+            ind.pack(fill='x', side='bottom')
+            for w in (btn, lbl):
+                w.bind('<Button-1>', lambda _e, k=key: self._switch_tab(k))
+            btn.bind('<Enter>', lambda _e, l=lbl, d=ind: d['bg'] != ACCENT and l.config(fg=TEXT))
+            btn.bind('<Leave>', lambda _e, l=lbl, d=ind: d['bg'] != ACCENT and l.config(fg=TEXTD))
+            self._tabs[key] = {'lbl': lbl, 'ind': ind}
+
         # ── 內容展示區 ──────────────────────────────────────────────────
         self.content_frame = tk.Frame(self.main_container, bg=BG)
         self.content_frame.pack(fill='both', expand=True)
@@ -661,6 +646,18 @@ class App:
         # 2. 統計圖表視圖
         self.stats_view = tk.Frame(self.content_frame, bg=BG)
         self._build_stats_view()
+
+        # 3. 成長頁（技能卡、月曆、連續天數）
+        self.growth_view = GrowthView(
+            self.content_frame, self, btn=_btn, draw_seconds=self._recent_draw_seconds,
+            theme={'BG': BG, 'CARD': CARD, 'CARD2': CARD2, 'TEXT': TEXT, 'TEXTD': TEXTD, 'ACCENT': ACCENT,
+                   'ACCH': ACCH, 'GREEN': GREEN, 'YELLOW': YELLOW, 'BORDER': BORDER,
+                   'FT': FT, 'FH': FH, 'FB': FB, 'FS': FS})
+        self._tabs['tracker']['view'] = self.tracker_view
+        self._tabs['stats']['view'] = self.stats_view
+        self._tabs['growth']['view'] = self.growth_view
+        self._current_tab = 'tracker'
+        self._style_tabs()
         
         body = tk.Frame(self.tracker_view, bg=BG)
         body.pack(fill='both', expand=True, padx=14, pady=10)
@@ -2262,6 +2259,9 @@ class App:
         streak = self.quests.streak()
         self.var_quest_streak.set(_tr('ui.quest.streak', '🔥 連續 {n} 天', n=streak) if streak else '')
 
+        if getattr(self, '_current_tab', '') == 'growth':
+            self.growth_view.refresh()
+
         tasks = self.quests.today_tasks()
         if not tasks:
             tk.Label(self.quest_rows, text=_tr('ui.quest.empty', '今天沒有任務，可以按「＋ 加入」自選'),
@@ -3325,24 +3325,31 @@ class App:
                     pass
         self.root.after(0, _update)
 
+    def _style_tabs(self):
+        for key, tab in self._tabs.items():
+            on = key == self._current_tab
+            tab['lbl'].config(fg=TEXT if on else TEXTD)
+            tab['ind'].config(bg=ACCENT if on else BG)
+
     def _switch_tab(self, tab: str):
-        if tab == 'tracker':
-            self.tab_tracker_lbl.config(fg=TEXT)
-            self.tab_tracker_indicator.config(bg=ACCENT)
-            self.tab_stats_lbl.config(fg=TEXTD)
-            self.tab_stats_indicator.config(bg=BG)
-            
-            self.stats_view.pack_forget()
-            self.tracker_view.pack(fill='both', expand=True)
-        else:
-            self.tab_tracker_lbl.config(fg=TEXTD)
-            self.tab_tracker_indicator.config(bg=BG)
-            self.tab_stats_lbl.config(fg=TEXT)
-            self.tab_stats_indicator.config(bg=ACCENT)
-            
-            self.tracker_view.pack_forget()
-            self.stats_view.pack(fill='both', expand=True)
+        self._current_tab = tab
+        self._style_tabs()
+        for key, t in self._tabs.items():
+            if key != tab:
+                t['view'].pack_forget()
+        self._tabs[tab]['view'].pack(fill='both', expand=True)
+        if tab == 'stats':
             self._refresh_stats_chart()
+        elif tab == 'growth':
+            self.growth_view.refresh()
+
+    def _recent_draw_seconds(self, days: int) -> float:
+        """最近 days 天（日曆日，含今天）SAI2 的繪圖秒數，取自追蹤器的每日統計"""
+        from datetime import date, timedelta
+        hist = self.tracker._persist.get('daily_history', {})
+        today = date.today()
+        keys = {(today - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(days)}
+        return sum(float(v) for k, v in hist.items() if k in keys)
 
     def _build_stats_view(self):
         self.subtab_frame = tk.Frame(self.stats_view, bg=BG)

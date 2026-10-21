@@ -14,6 +14,7 @@ ui_kit.py - Tk 版面共用工具（1.x 的最小版本）
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
 
 BASE_DPI = 96.0          # Windows 100% 縮放
 SCREEN_MAX_RATIO = 0.92  # 視窗最大佔螢幕比例（保留工作列）
@@ -60,6 +61,39 @@ def fit_window(win: tk.Misc, base_w: int, base_h: int, *, center: bool = True,
         return w, h
     win.geometry(f'{w}x{h}+{x}+{y}')
     return w, h
+
+
+class ScrollFrame(tk.Frame):
+    """可垂直捲動的容器：內容放在 self.inner；寬度跟著外框，滑鼠移入時滾輪可捲動"""
+
+    def __init__(self, parent, bg: str, **kw):
+        super().__init__(parent, bg=bg, **kw)
+        self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0, bd=0)
+        # ttk 捲軸會套用主視窗設定的 TScrollbar 深色樣式（tk.Scrollbar 在 Windows 上固定為系統白色）
+        self.vsb = ttk.Scrollbar(self, orient='vertical', command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.vsb.set)
+        self.vsb.pack(side='right', fill='y')
+        self.canvas.pack(side='left', fill='both', expand=True)
+        self.inner = tk.Frame(self.canvas, bg=bg)
+        self._win = self.canvas.create_window((0, 0), window=self.inner, anchor='nw')
+        self.inner.bind('<Configure>', lambda _e: self.canvas.configure(scrollregion=self.canvas.bbox('all')))
+        self.canvas.bind('<Configure>', lambda e: self.canvas.itemconfig(self._win, width=e.width))
+        # 只在滑鼠位於此區時接管滾輪，避免影響其他可捲動元件
+        self.bind('<Enter>', lambda _e: self.bind_all('<MouseWheel>', self._on_wheel))
+        self.bind('<Leave>', lambda _e: self.unbind_all('<MouseWheel>'))
+
+    def _on_wheel(self, e):
+        self.canvas.yview_scroll(int(-e.delta / 120), 'units')
+
+    def scroll_top(self):
+        self.canvas.yview_moveto(0)
+
+
+def blend(c1: str, c2: str, t: float) -> str:
+    """兩個 #rrggbb 顏色依比例 t（0 = c1、1 = c2）混合"""
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return '#%02x%02x%02x' % tuple(int(round(x + (y - x) * t)) for x, y in zip(a, b))
 
 
 def bind_wraplength(label: tk.Label, pad: int = 4, minimum: int = 80):

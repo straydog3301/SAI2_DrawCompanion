@@ -43,6 +43,7 @@ pyinstaller ^
     --hidden-import "PIL._tkinter_finder" ^
     --hidden-import "brush_studio" ^
     --hidden-import "study_window" ^
+    --hidden-import "growth_view" ^
     --hidden-import "ui_kit" ^
     --hidden-import "core.paths" ^
     --hidden-import "core.sai2_win" ^
@@ -51,6 +52,7 @@ pyinstaller ^
     --hidden-import "core.timelapse" ^
     --hidden-import "core.brush_assets" ^
     --hidden-import "core.daily_quests" ^
+    --hidden-import "core.growth" ^
     --hidden-import "core.study_lessons" ^
     --hidden-import "core.study_refs" ^
     --hidden-import "core.psd_writer" ^

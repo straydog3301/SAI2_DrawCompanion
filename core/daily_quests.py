@@ -116,6 +116,7 @@ DEFAULT_SETTINGS = {
     'reset_hour': 4,          # 換日時間（0~23）
     'rerolls_per_day': 1,
     'weekly_focus': '',       # 本週主修技能 id（'' = 無）
+    'rest_days_per_week': 1,  # 每週可請假（不中斷連續天數）的天數
 }
 
 WARMUP_MAX_MINUTES = 15           # 熱身：≤15 分的速寫
@@ -701,21 +702,90 @@ class QuestManager:
         return out
 
     # ── 連續天數 ──────────────────────────────────────────────────────────
+    def day_done(self, key: str) -> bool:
+        return any(t.get('status') == 'done' for t in self.data['days'].get(key, {}).get('tasks', []))
+
+    def is_rest(self, key: str) -> bool:
+        return bool(self.data['days'].get(key, {}).get('rest'))
+
     def streak(self, now: datetime | None = None) -> int:
-        """連續打卡天數：任務日至少打卡 1 項即延續；今天尚未打卡時從昨天起算，不中斷"""
-        days = self.data['days']
-
-        def done(key):
-            return any(t['status'] == 'done' for t in days.get(key, {}).get('tasks', []))
-
+        """連續打卡天數：任務日至少打卡 1 項即延續（+1）；休息日延續但不加天數；
+        今天尚未打卡也未請假時從昨天起算，不中斷"""
         cur = datetime.strptime(self.day_key(now), '%Y-%m-%d')
-        if not done(cur.strftime('%Y-%m-%d')):
+        today = cur.strftime('%Y-%m-%d')
+        if not self.day_done(today) and not self.is_rest(today):
             cur -= timedelta(days=1)
         n = 0
-        while done(cur.strftime('%Y-%m-%d')):
-            n += 1
+        while True:
+            key = cur.strftime('%Y-%m-%d')
+            if self.day_done(key):
+                n += 1
+            elif not self.is_rest(key):
+                break
             cur -= timedelta(days=1)
         return n
+
+    def longest_streak(self) -> int:
+        """歷史最長連續打卡天數（規則同 streak）"""
+        keys = sorted(k for k in self.data['days'] if self.day_done(k) or self.is_rest(k))
+        best = run = 0
+        prev = None
+        for k in keys:
+            d = datetime.strptime(k, '%Y-%m-%d')
+            if prev is None or (d - prev).days != 1:
+                run = 0
+            run += 1 if self.day_done(k) else 0
+            best = max(best, run)
+            prev = d
+        return best
+
+    # ── 休息日 ────────────────────────────────────────────────────────────
+    @staticmethod
+    def _week_keys(key: str) -> list[str]:
+        """同一週（週一到週日）的任務日 key"""
+        d = datetime.strptime(key, '%Y-%m-%d')
+        monday = d - timedelta(days=d.weekday())
+        return [(monday + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)]
+
+    def rest_used_in_week(self, key: str) -> int:
+        return sum(1 for k in self._week_keys(key) if self.is_rest(k))
+
+    def rest_quota(self) -> int:
+        return max(0, int(self.settings.get('rest_days_per_week', 1)))
+
+    def can_rest(self, key: str, now: datetime | None = None) -> str | None:
+        """可否把 key 這天設為休息日；可以回傳 None，否則回傳原因。
+        只允許今天或昨天（忘了請假時可補請昨天），且受每週次數限制。"""
+        today = datetime.strptime(self.day_key(now), '%Y-%m-%d')
+        d = datetime.strptime(key, '%Y-%m-%d')
+        if (today - d).days not in (0, 1):
+            return '只能將今天或昨天設為休息日'
+        if self.is_rest(key):
+            return '這天已經是休息日'
+        if self.day_done(key):
+            return '這天已有打卡，不需要請假'
+        quota = self.rest_quota()
+        if self.rest_used_in_week(key) >= quota:
+            return f'本週的休息日已用完（每週 {quota} 天）'
+        return None
+
+    def take_rest(self, key: str, now: datetime | None = None) -> str | None:
+        """設為休息日：連續天數不中斷。今天請假後任務仍可照常完成打卡。"""
+        err = self.can_rest(key, now)
+        if err:
+            return err
+        day = self.data['days'].setdefault(key, {'rerolls_used': 0, 'tasks': []})
+        day['rest'] = True
+        self.mark_dirty()
+        return None
+
+    def cancel_rest(self, key: str) -> bool:
+        day = self.data['days'].get(key)
+        if not day or not day.get('rest'):
+            return False
+        day.pop('rest', None)
+        self.mark_dirty()
+        return True
 
     # ── 顯示輔助 ──────────────────────────────────────────────────────────
     @staticmethod
