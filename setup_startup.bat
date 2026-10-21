@@ -1,58 +1,58 @@
 @echo off
-chcp 950 >nul
+chcp 65001 >nul
 echo ============================================
-echo  SAI2 ø�ϧU�� - �]�w�}���۰ʱҰ�
+echo  SAI2 繪圖助手 - 設定開機自動啟動
 echo ============================================
 echo.
-echo �N�|�b�z�� Windows �Ұʸ�Ƨ����إ߱��|�C
-echo �Ұʫ�A�������� PaintTool SAI �}�ҮɡA���n��N�|�۰ʱҰʡF
-echo �� PaintTool SAI �����ɡA���n��]�|�۰��x�s�������C
+echo 將會在您的 Windows 啟動資料夾中建立捷徑。
+echo 啟動後，當偵測到 PaintTool SAI 開啟時，本軟體將會自動啟動；
+echo 當 PaintTool SAI 關閉時，本軟體也會自動儲存並關閉。
 echo.
 
-:: ���� watcher.pyw �����|
+:: 偵測 watcher.pyw 的路徑
 set "WATCHER=%~dp0watcher.pyw"
 set "STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
 set "LINK=%STARTUP_DIR%\SAI2_DrawCompanion_Watcher.lnk"
 
-:: �M�� pythonw.exe
+:: 尋找 pythonw.exe
 for /f "delims=" %%i in ('where pythonw.exe 2^>nul') do set "PYTHONW=%%i"
 if "%PYTHONW%"=="" (
     for /f "delims=" %%i in ('where python.exe 2^>nul') do set "PYTHONW=%%i"
 )
 if "%PYTHONW%"=="" (
-    echo [���~] �䤣�� Python�C�нT�{�w�w�� Python �B�w�N��[�J��t�Ϊ� PATH ���C
+    echo [錯誤] 找不到 Python。請確認已安裝 Python 且已將其加入到系統的 PATH 中。
     pause
     exit /b 1
 )
 
-echo �ϥ� Python�G %PYTHONW%
-echo �ʵ������|�G %WATCHER%
-echo �إ߱��|�G %LINK%
+echo 使用 Python： %PYTHONW%
+echo 監視器路徑： %WATCHER%
+echo 建立捷徑： %LINK%
 echo.
 
-:: �ϥ� PowerShell �إ߱��|
+:: 使用 PowerShell 建立捷徑
 powershell -NoProfile -Command ^
     "$ws = New-Object -ComObject WScript.Shell;" ^
     "$s = $ws.CreateShortcut('%LINK%');" ^
     "$s.TargetPath = '%PYTHONW%';" ^
     "$s.Arguments = '\"%WATCHER%\"';" ^
     "$s.WorkingDirectory = '%~dp0';" ^
-    "$s.Description = 'SAI2 ø�ϧU�� �Ұʺʵ���';" ^
+    "$s.Description = 'SAI2 繪圖助手 啟動監視器';" ^
     "$s.Save();"
 
 if errorlevel 1 (
-    echo [���~] �إ߱��|���ѡC
+    echo [錯誤] 建立捷徑失敗。
     pause
     exit /b 1
 )
 
 echo ============================================
-echo  �]�w�����I
+echo  設定完成！
 echo.
-echo  �U���z�n�J�t�ΩαҰʹq���ɡA�Ӻʵ����N�|�۰ʦb�I���ҰʡC
-echo  �@���z�}�� PaintTool SAI�A�p�ɧU��]�|�۰ʳQ�ҰʡC
+echo  下次您登入系統或啟動電腦時，該監視器將會自動在背景啟動。
+echo  一旦您開啟 PaintTool SAI，計時助手也會自動被啟動。
 echo.
-echo  �Y�Q�����}���۰ʱҰʡA�а��� remove_startup.bat
+echo  若想移除開機自動啟動，請執行 remove_startup.bat
 echo ============================================
 echo.
 pause

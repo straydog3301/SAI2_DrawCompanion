@@ -1,0 +1,3 @@
+# Windows 批次檔必須是 CRLF：LF-only 的 .bat 會讓 cmd 誤判標籤與多行指令
+*.bat text eol=crlf
+*.cmd text eol=crlf
