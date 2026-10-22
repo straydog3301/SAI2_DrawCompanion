@@ -661,6 +661,20 @@ class DrawTracker:
         with self._lock:
             return dict(self._state)
 
+    def daily_history(self) -> dict[str, float]:
+        """每日動筆秒數 {YYYY-MM-DD: 秒}（副本）"""
+        with self._lock:
+            return dict(self._persist.get('daily_history', {}))
+
+    def today_draw_seconds(self) -> float:
+        """今天的動筆秒數（已寫入每日統計＋目前工作階段尚未寫入的部分）"""
+        with self._lock:
+            today = datetime.now().strftime('%Y-%m-%d')
+            done = self._persist.get('daily_history', {}).get(today, 0.0)
+            if self._cur_file:
+                done += max(0.0, self._current_session_draw(time.monotonic()) - self._session_draw_flushed)
+            return done
+
     def get_draw_counter(self) -> float:
         """程式啟動以來累計的動筆秒數（單調遞增）。呼叫端以兩次讀值的差計算期間動筆時間。"""
         with self._lock:
