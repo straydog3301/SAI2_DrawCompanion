@@ -588,13 +588,14 @@ class QuestManager:
         return ready
 
     def record_sketch(self, topic: str, seconds: float, quest_uid: str | None = None,
-                      interval: int | None = None) -> list[dict]:
+                      interval: int | None = None, now: datetime | None = None) -> list[dict]:
         """速寫視窗每完成一張有效圖時呼叫。
 
         quest_uid：從任務「前往」開啟且題目設定未被改動時傳入，進度直接計入該任務；
         否則計入第一個題目與間隔都相符的速寫任務。非任務練習仍會依題目記入技能。
+        now：判斷任務日用的時間（預設為現在，測試時可指定）
         """
-        self.ensure_today()
+        self.ensure_today(now)
         task = None
         if quest_uid:
             t = self.task(quest_uid)

@@ -32,6 +32,10 @@
 `sai2_draw_time.json`、`sai2_timer_settings.json`、`daily_quests.json`（含 `schema` 版本號）、`checkin_snapshots/`、
 `brush_studio_settings.json`、`sai2_pending_brushes.json`、`study_refs_cache/`、`sai2_settings_backup/`。
 
+## 測試
+`python tests/run_tests.py`（`--core` 只跑核心、`--network` 加跑連網測試），說明見 [tests/README.md](../tests/README.md)。
+`tests/core/test_core_misc.py` 會自動確認 `core/` 每個模組都不依賴 Tk。
+
 ## 驗證 core 沒有依賴 Tk
 ```python
 import sys, importlib
