@@ -12,6 +12,7 @@ import calendar
 from datetime import datetime, timedelta
 
 from core import study_lessons
+from core.i18n import _tr
 from core.daily_quests import QuestManager, MODES
 
 # 投入時數里程碑（小時）：入門 → 基礎 → 進階 → 熟練 → 精通
@@ -38,8 +39,10 @@ def milestone(seconds: float) -> dict:
         if hours >= h:
             level = i
     floor_h, name = MILESTONES[level]
+    name = _tr(f'ui.growth.ms_{level}', name)
     if level + 1 < len(MILESTONES):
         ceil_h, next_name = MILESTONES[level + 1]
+        next_name = _tr(f'ui.growth.ms_{level + 1}', next_name)
         progress = (hours - floor_h) / (ceil_h - floor_h)
     else:
         ceil_h, next_name, progress = None, None, 1.0
@@ -174,6 +177,7 @@ def day_detail(m: QuestManager, key: str) -> dict:
             'self_reported': bool(t.get('self_reported')),
             'ref_title': ' / '.join(x for x in (ref.get('title'), ref.get('artist')) if x),
             'canvas': t.get('canvas') or '',
+            'snapshot': t.get('snapshot') or '',
         })
     summary = day_summary(m, key)
     by_skill: dict[str, float] = {}
@@ -187,5 +191,5 @@ def day_detail(m: QuestManager, key: str) -> dict:
 def fmt_hours(seconds: float) -> str:
     """秒 → 「3.5 小時」/「42 分」"""
     if seconds >= 3600:
-        return f'{seconds / 3600:.1f} 小時'
-    return f'{int(round(seconds / 60))} 分'
+        return _tr('ui.growth.hours', '{h} 小時', h=f'{seconds / 3600:.1f}')
+    return _tr('ui.growth.minutes', '{m} 分', m=int(round(seconds / 60)))

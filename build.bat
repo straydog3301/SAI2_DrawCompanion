@@ -44,6 +44,7 @@ pyinstaller ^
     --hidden-import "brush_studio" ^
     --hidden-import "study_window" ^
     --hidden-import "growth_view" ^
+    --hidden-import "quest_manager_window" ^
     --hidden-import "ui_kit" ^
     --hidden-import "core.paths" ^
     --hidden-import "core.sai2_win" ^
@@ -53,6 +54,7 @@ pyinstaller ^
     --hidden-import "core.brush_assets" ^
     --hidden-import "core.daily_quests" ^
     --hidden-import "core.growth" ^
+    --hidden-import "core.snapshots" ^
     --hidden-import "core.study_lessons" ^
     --hidden-import "core.study_refs" ^
     --hidden-import "core.psd_writer" ^

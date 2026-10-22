@@ -20,15 +20,16 @@
 | `study_lessons.py` | 臨摹研究課程與學習路徑（純資料） |
 | `study_refs.py` | 參考圖來源（美術館開放典藏、照片圖庫、本機） |
 | `growth.py` | 成長統計（技能卡、里程碑、月曆、單日明細），唯讀 |
+| `snapshots.py` | SAI2 畫布擷取（裁掉工作區）與打卡快照縮圖 |
 | `psd_writer.py` | 產生空白 PSD 練習畫布 |
 
 ### 介面（Tk，1.x）
 `main.py`（主視窗、速寫視窗、設定）、`study_window.py`、`brush_studio.py`、`liquify_helper.py`、
-`growth_view.py`（成長頁籤）、`ui_kit.py`（DPI 縮放換算、依內容決定視窗大小、捲動容器）。
+`growth_view.py`（成長頁籤）、`quest_manager_window.py`（任務與技能管理）、`ui_kit.py`（DPI 縮放換算、依內容決定視窗大小、捲動容器）。
 
 ## 資料相容
 所有資料檔都在 `APP_DIR`，2.0 直接讀取同一批檔案，使用者紀錄不需轉換：
-`sai2_draw_time.json`、`sai2_timer_settings.json`、`daily_quests.json`（含 `schema` 版本號）、
+`sai2_draw_time.json`、`sai2_timer_settings.json`、`daily_quests.json`（含 `schema` 版本號）、`checkin_snapshots/`、
 `brush_studio_settings.json`、`sai2_pending_brushes.json`、`study_refs_cache/`、`sai2_settings_backup/`。
 
 ## 驗證 core 沒有依賴 Tk
@@ -37,8 +38,8 @@ import sys, importlib
 for m in ('tkinter', 'tkinter.ttk', 'PIL.ImageTk', '_tkinter'):
     sys.modules[m] = None   # 任何 core 模組 import Tk 都會失敗
 for m in ('core.paths', 'core.sai2_win', 'core.i18n', 'core.tracker', 'core.timelapse',
-          'core.brush_assets', 'core.daily_quests', 'core.growth', 'core.study_lessons', 'core.study_refs',
-          'core.psd_writer'):
+          'core.brush_assets', 'core.daily_quests', 'core.growth', 'core.snapshots', 'core.study_lessons',
+          'core.study_refs', 'core.psd_writer'):
     importlib.import_module(m)
 ```
 

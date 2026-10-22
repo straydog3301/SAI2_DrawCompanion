@@ -30,6 +30,7 @@ liquify_settings.json
 daily_quests.json
 daily_quests.json.*
 study_refs_cache/
+checkin_snapshots/
 sai2_pending_assets/
 sai2_settings_backup/
 watcher_out.log

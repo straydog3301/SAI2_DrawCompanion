@@ -26,7 +26,9 @@ from core.daily_quests import QuestManager, MODES as QUEST_MODES, UNLIMITED_SKET
 from study_window import StudyWindow, StudyCheckinDialog
 from ui_kit import px, fit_window, bind_wraplength
 from growth_view import GrowthView
+from quest_manager_window import QuestManagerWindow
 from core import study_lessons
+from core.snapshots import capture_sai2_canvas, save_snapshot
 
 # ─── 啟動參數 ─────────────────────────────────────────────────────────────
 # --auto-close：由 watcher.pyw 傳入，SAI2 關閉時自動儲存並關閉計時器
@@ -92,6 +94,7 @@ _DEFAULT_DATA = os.path.join(_APP_DIR, 'sai2_draw_time.json')
 _SETTINGS_PATH = os.path.join(_APP_DIR, 'sai2_timer_settings.json')
 _QUESTS_PATH = os.path.join(_APP_DIR, 'daily_quests.json')
 _STUDY_CACHE_DIR = os.path.join(_APP_DIR, 'study_refs_cache')
+_SNAPSHOT_DIR = os.path.join(_APP_DIR, 'checkin_snapshots')
 
 
 def _win32_set_topmost(win, on: bool):
@@ -650,9 +653,7 @@ class App:
         # 3. 成長頁（技能卡、月曆、連續天數）
         self.growth_view = GrowthView(
             self.content_frame, self, btn=_btn, draw_seconds=self._recent_draw_seconds,
-            theme={'BG': BG, 'CARD': CARD, 'CARD2': CARD2, 'TEXT': TEXT, 'TEXTD': TEXTD, 'ACCENT': ACCENT,
-                   'ACCH': ACCH, 'GREEN': GREEN, 'YELLOW': YELLOW, 'BORDER': BORDER,
-                   'FT': FT, 'FH': FH, 'FB': FB, 'FS': FS})
+            theme=self._theme())
         self._tabs['tracker']['view'] = self.tracker_view
         self._tabs['stats']['view'] = self.stats_view
         self._tabs['growth']['view'] = self.growth_view
@@ -1153,20 +1154,40 @@ class App:
             status_text = _tr('msg.tracking_file', file=cur)
             if not sai2:
                 status_text += _tr('msg.paused_suffix')
-            save_loc = '桌面' if 'desktop' in self.tracker.data_path.lower() else '套件目錄'
-            self.var_status.set(_tr('msg.status_saved', status=status_text, path=save_loc))
+            save_loc = _tr('msg.save_loc_desktop', '桌面') if 'desktop' in self.tracker.data_path.lower() \
+                else _tr('msg.save_loc_app', '套件目錄')
+            self._set_auto_status(_tr('msg.status_saved', status=status_text, path=save_loc))
             # 取得該圖檔的總累計時間紀錄
             rec = files.get(cur, {})
             tot_open = rec.get('open_seconds', 0.0)
             tot_draw = rec.get('draw_seconds', 0.0)
             tot_pct = int(tot_draw / tot_open * 100) if tot_open > 0 else 0
             tot_pct = min(tot_pct, 100)
-            self.var_mini_text.set(f"⏱️ {fmt_seconds(tot_open)} | ✏️ {fmt_seconds(tot_draw)} ({tot_pct}%)")
+            mini = f"⏱️ {fmt_seconds(tot_open)} | ✏️ {fmt_seconds(tot_draw)} ({tot_pct}%)"
         else:
-            self.var_status.set('等待 PaintTool SAI 開啟中…')
-            self.var_mini_text.set(_tr('msg.no_working_file'))
-            
+            self._set_auto_status(_tr('msg.waiting_sai', '等待 PaintTool SAI 開啟中…'))
+            mini = _tr('msg.no_working_file')
+        self.var_mini_text.set(mini + self._quest_mini_suffix())
+
         self._update_mini_buttons()
+
+    def _set_auto_status(self, text: str):
+        """每秒輪詢產生的狀態訊息：內容改變時才更新狀態列。
+        否則打卡、請假等一次性提示會在下一秒被同樣的自動訊息蓋掉。"""
+        if text != getattr(self, '_last_auto_status', None):
+            self._last_auto_status = text
+            self.var_status.set(text)
+
+    def _quest_mini_suffix(self) -> str:
+        """精簡模式附加的今日任務進度「🎯 已打卡/總數」"""
+        q = getattr(self, 'quests', None)
+        if q is None or not q.settings.get('enabled', True):
+            return ''
+        tasks = q.today_tasks()
+        if not tasks:
+            return ''
+        done = sum(1 for t in tasks if t['status'] == 'done')
+        return f" | 🎯 {done}/{len(tasks)}"
 
     def _get_auto_group(self, fname: str) -> str:
         """依路徑第一層資料夾自動分組。"""
@@ -1434,6 +1455,48 @@ class App:
         """在背景執行緒開啟檔案（找 SAI2 執行檔需列舉行程，避免卡住 UI）"""
         threading.Thread(target=self._launch_in_sai2, args=(path,), daemon=True).start()
 
+    def _file_skill_tags_dialog(self, fname: str):
+        """作品檔案技能標籤：勾選的技能平均分配權重，平常畫這個檔案的動筆時間會計入技能卡"""
+        dlg = tk.Toplevel(self.root)
+        dlg.title(_tr('dialog.skill_tags.title', '技能標籤'))
+        dlg.configure(bg=CARD, padx=px(dlg, 16), pady=px(dlg, 12))
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+        tk.Label(dlg, text=_tr('dialog.skill_tags.prompt', '畫這個檔案時在練習哪些技能？'),
+                 font=FH, fg=TEXT, bg=CARD, anchor='w').pack(fill='x')
+        tk.Label(dlg, text=fname, font=FS, fg=TEXTD, bg=CARD, anchor='w', justify='left',
+                 wraplength=px(dlg, 360)).pack(fill='x', pady=(2, 6))
+        current = self.quests.file_tags(fname)
+        vars_ = {}
+        grid = tk.Frame(dlg, bg=CARD)
+        grid.pack(fill='x')
+        for i, s in enumerate(self.quests.data['skills']):
+            v = tk.BooleanVar(value=s['id'] in current)
+            vars_[s['id']] = v
+            tk.Checkbutton(grid, text=f"{s.get('icon', '')} {s['name']}", variable=v, font=FB, fg=TEXT, bg=CARD,
+                           selectcolor=CARD2, activebackground=CARD, activeforeground=TEXT, anchor='w'
+                           ).grid(row=i // 2, column=i % 2, sticky='w', padx=(0, 12))
+        tk.Label(dlg, text=_tr('dialog.skill_tags.hint', '勾選後，平常畫這個檔案的動筆時間會平均計入所選技能（研究計時中除外）。'),
+                 font=FS, fg=TEXTD, bg=CARD, anchor='w', justify='left',
+                 wraplength=px(dlg, 360)).pack(fill='x', pady=(8, 0))
+
+        def _ok():
+            picked = [sid for sid, v in vars_.items() if v.get()]
+            self.quests.set_file_tags(fname, picked)
+            self.quests.save(force=True)
+            label = self.quests.skill_label(self.quests.file_tags(fname))
+            self.var_status.set(_tr('msg.skill_tags_set', '🎨 已設定技能標籤：{tags}', tags=label) if label
+                                else _tr('msg.skill_tags_cleared', '已清除技能標籤'))
+            dlg.destroy()
+
+        btns = tk.Frame(dlg, bg=CARD)
+        btns.pack(fill='x', pady=(10, 0))
+        _btn(btns, _tr('dialog.btn_cancel', '取消'), CARD2, BORDER, dlg.destroy, font=FS).pack(side='right')
+        _btn(btns, _tr('dialog.btn_ok', '確定'), ACCENT, ACCH, _ok, font=FS).pack(side='right', padx=(0, 6))
+        dlg.update_idletasks()
+        dlg.geometry(f'+{self.root.winfo_rootx() + px(dlg, 40)}+{self.root.winfo_rooty() + px(dlg, 120)}')
+        dlg.grab_set()
+
     def _on_tree_right_click(self, event):
         """在 Treeview 上顯示右鍵快捷選單"""
         item = self.tree.identify_row(event.y)
@@ -1480,6 +1543,11 @@ class App:
                     label=_tr('menu.revert_auto_group'),
                     command=lambda: self._revert_to_auto_group(fname)
                 )
+            tags = self.quests.skill_label(self.quests.file_tags(fname))
+            menu.add_command(
+                label=_tr('menu.skill_tags', '🎨  技能標籤…') + (f'（{tags}）' if tags else ''),
+                command=lambda: self._file_skill_tags_dialog(fname)
+            )
             menu.add_separator()
             menu.add_command(
                 label=_tr('menu.manage_aliases', '🔗  別名管理 (關聯另存...)'),
@@ -2174,7 +2242,8 @@ class App:
         threading.Thread(target=_search, daemon=True).start()
 
     def _open_settings(self):
-        SettingsDialog(self.root, self._settings, self._apply_settings)
+        SettingsDialog(self.root, self._settings, self._apply_settings, quests=self.quests)
+        self._apply_quest_card_visibility()
 
     def _open_sketch(self):
         """開啟速寫練習參考視窗（單例，重複點擊只帶回前景）。"""
@@ -2222,14 +2291,46 @@ class App:
         self.var_quest_streak = tk.StringVar(value='')
         tk.Label(hdr, textvariable=self.var_quest_streak, font=FS, fg=YELLOW, bg=CARD
                  ).pack(side='left', padx=(8, 0))
+        _btn(hdr, _tr('ui.quest.btn_manage', '⚙ 管理'), CARD2, ACCH,
+             self._open_quest_manager, font=FS, pady=1).pack(side='right')
         self._quest_add_btn = _btn(hdr, _tr('ui.quest.btn_add', '＋ 加入'), CARD2, ACCH,
                                    self._quest_add_menu, font=FS, pady=1)
-        self._quest_add_btn.pack(side='right')
+        self._quest_add_btn.pack(side='right', padx=(0, 4))
 
         self.quest_rows = tk.Frame(self.quest_card, bg=CARD)
         self.quest_rows.pack(fill='x', pady=(6, 0))
         self._quest_sig = None
         self._quest_render()
+
+    def _apply_quest_card_visibility(self):
+        """依「啟用每日任務」顯示 / 隱藏主畫面任務卡（設定變更後呼叫）"""
+        card = getattr(self, 'quest_card', None)
+        if card is None or not card.winfo_exists():
+            return
+        enabled = self.quests.settings.get('enabled', True)
+        if enabled and not card.winfo_ismapped():
+            self.quests.ensure_today()
+            card.pack(fill='x', pady=(0, 8), after=card.master.winfo_children()[0])
+        elif not enabled and card.winfo_ismapped():
+            card.pack_forget()
+        self._quest_render(force=True)
+
+    def _theme(self) -> dict:
+        """目前主題的色彩與字型（給成長頁、任務管理等獨立模組使用）"""
+        return {'BG': BG, 'CARD': CARD, 'CARD2': CARD2, 'TEXT': TEXT, 'TEXTD': TEXTD, 'ACCENT': ACCENT,
+                'ACCH': ACCH, 'GREEN': GREEN, 'YELLOW': YELLOW, 'BORDER': BORDER,
+                'FT': FT, 'FH': FH, 'FB': FB, 'FS': FS}
+
+    def _open_quest_manager(self):
+        win = getattr(self, '_quest_mgr_win', None)
+        if win is not None and win.winfo_exists():
+            win.deiconify()
+            win.lift()
+            return
+        self._quest_mgr_win = QuestManagerWindow(
+            self.root, self, theme=self._theme(), btn=_btn,
+            sketch_topics=[(k, l) for k, l, _q in SKETCH_CATEGORIES if k != 'custom'],
+            sketch_intervals=[(l, s) for l, s in SKETCH_INTERVALS if s > 0])
 
     def _quest_signature(self):
         """任務卡需要重繪的狀態；時間型進度以分鐘為單位比較，避免每秒重建元件"""
@@ -2332,7 +2433,8 @@ class App:
         self._quest_last_counter = counter
         # 第一次讀值或追蹤器被重建（計數歸零）時只重設基準，不計入
         delta = 0.0 if last is None or counter < last else counter - last
-        self._quest_notify_ready(self.quests.tick(delta))
+        cur_file = self.tracker.get_state().get('current_file') if delta > 0 else None
+        self._quest_notify_ready(self.quests.tick(delta, current_file=cur_file))
         self.quests.save()
         self._quest_render()
 
@@ -2450,6 +2552,7 @@ class App:
         if err:
             messagebox.showwarning(_tr('ui.quest.checkin_title', '打卡'), err, parent=self.root)
             return
+        snap = self._capture_checkin_snapshot(t)
         self.quests.save(force=True)
         streak = self.quests.streak()
         msg = _tr('ui.quest.checked_msg', '✅ 已打卡「{name}」　🔥 連續 {n} 天', name=t['name'], n=streak)
@@ -2460,8 +2563,25 @@ class App:
                                   level=nxt['level'], lesson=nxt['name'])
             elif rating is not None and rating < PASS_RATING:
                 msg += '　' + _tr('ui.quest.lesson_retry', '下次會換一張參考圖再練一次這一課')
+        if snap:
+            msg += '　' + _tr('ui.quest.snapshot_saved', '📸 已存畫布快照')
         self.var_status.set(msg)
         self._quest_render(force=True)
+
+    def _capture_checkin_snapshot(self, t: dict) -> str | None:
+        """打卡時擷取 SAI2 畫布縮圖存入歷史（SAI2 沒開或設定關閉時略過，失敗不影響打卡）"""
+        if not self.quests.settings.get('snapshot_on_checkin', True):
+            return None
+        try:
+            img = capture_sai2_canvas()
+            if img is None:
+                return None
+            path = save_snapshot(img, os.path.join(_SNAPSHOT_DIR, self.quests.data['current_day']), t['uid'])
+        except Exception as e:
+            print(f'[Quests] snapshot error: {e}')
+            return None
+        self.quests.set_task_snapshot(t['uid'], path)
+        return path
 
     def _quest_reroll(self, uid: str):
         err = self.quests.reroll(uid)
@@ -3742,8 +3862,9 @@ class App:
 # ─── 設定對話框 ───────────────────────────────────────────────────────────
 class SettingsDialog(tk.Toplevel):
 
-    def __init__(self, parent, settings: dict, callback):
+    def __init__(self, parent, settings: dict, callback, quests=None):
         super().__init__(parent)
+        self._quests = quests          # 每日任務設定存在任務資料檔（QuestManager.settings）
         self.title(_tr('dialog.settings.title'))
         self.configure(bg=CARD)
         self.resizable(True, True)   # 允許縮放，內容再多也能拉大
@@ -3932,6 +4053,10 @@ class SettingsDialog(tk.Toplevel):
         tk.Label(f_sketch, text='金鑰與路徑僅存於本機設定檔，不會上傳或進入 git', font=FS, fg=TEXTD, bg=CARD,
                  wraplength=280, justify='left').grid(row=7, column=0, sticky='w', pady=(2, 0))
 
+        # ── 每日任務 (左欄) ──
+        if self._quests is not None:
+            self._build_quest_settings(left_col)
+
         # ── 2. 主題配色 (右欄) ──
         f_theme = tk.LabelFrame(right_col, text=_tr('dialog.settings.grp_theme'), font=FH, fg=ACCENT, bg=CARD, bd=1, relief='solid', padx=10, pady=8)
         f_theme.pack(fill='x', pady=(0, 10))
@@ -4088,6 +4213,16 @@ class SettingsDialog(tk.Toplevel):
         self.combo_br_key.grid(row=1, column=1, sticky='w', pady=4)
 
         self._on_preset_change()
+
+        # 依縮放倍率與內容決定大小：可捲動區的內層寬度不會自動撐開視窗，
+        # 原本依螢幕寬度猜的尺寸在 150% 縮放下會把右欄裁掉
+        self.update_idletasks()
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        need_w = min(inner.winfo_reqwidth() + vsb.winfo_reqwidth() + px(self, 8), int(sw * 0.92))
+        w = max(need_w, px(self, 680))
+        h = min(max(dialog_height, px(self, 640)), int(sh * 0.9))
+        self.minsize(need_w, px(self, 420))
+        self.geometry(f'{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2)}')
         self.wait_window()
 
     def _choose_path(self):
@@ -4102,6 +4237,71 @@ class SettingsDialog(tk.Toplevel):
         p = filedialog.askdirectory(title=_tr('dialog.settings.video_dir'))
         if p:
             self.var_tl_out.set(os.path.normpath(p))
+
+    def _build_quest_settings(self, parent):
+        qs = self._quests.settings
+        f = tk.LabelFrame(parent, text=_tr('dialog.settings.grp_quests', '每日任務'), font=FH, fg=ACCENT, bg=CARD,
+                          bd=1, relief='solid', padx=10, pady=8)
+        f.pack(fill='x', pady=(10, 0))
+        self.var_q_enabled = tk.BooleanVar(value=bool(qs.get('enabled', True)))
+        tk.Checkbutton(f, text=_tr('dialog.settings.q_enabled', '啟用每日任務（主畫面顯示今日任務卡）'),
+                       variable=self.var_q_enabled, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2,
+                       activebackground=CARD, activeforeground=TEXT, anchor='w').grid(row=0, column=0, columnspan=2, sticky='w')
+
+        def spin(row, label, key, lo, hi, unit, default=0, cell=None):
+            """一列：標籤 + 數字框 + 單位；cell 指定時把數字框與單位放進該框（同列多個數字框用）"""
+            if cell is None:
+                tk.Label(f, text=label, font=FB, fg=TEXT, bg=CARD, anchor='w').grid(row=row, column=0, sticky='w', pady=3)
+                cell = tk.Frame(f, bg=CARD)
+                cell.grid(row=row, column=1, sticky='w')
+            var = tk.IntVar(value=int(qs.get(key, default)))
+            tk.Spinbox(cell, from_=lo, to=hi, textvariable=var, width=5, font=FB, bg=CARD2, fg=TEXT,
+                       buttonbackground=CARD2, insertbackground=TEXT, relief='flat').pack(side='left')
+            tk.Label(cell, text=unit, font=FS, fg=TEXTD, bg=CARD).pack(side='left', padx=(4, 8))
+            return var
+
+        tk.Label(f, text=_tr('dialog.settings.q_count', '每日任務數'), font=FB, fg=TEXT, bg=CARD,
+                 anchor='w').grid(row=1, column=0, sticky='w', pady=3)
+        count_cell = tk.Frame(f, bg=CARD)
+        count_cell.grid(row=1, column=1, sticky='w')
+        self.var_q_min = spin(1, '', 'count_min', 1, 5, '～', default=1, cell=count_cell)
+        self.var_q_max = spin(1, '', 'count_max', 1, 5, _tr('dialog.settings.q_unit_items', '項'), default=3,
+                              cell=count_cell)
+        self.var_q_budget = spin(2, _tr('dialog.settings.q_budget', '每日時間預算'), 'budget_minutes', 10, 600,
+                                 _tr('dialog.settings.q_unit_min', '分鐘'), default=60)
+        self.var_q_reset = spin(3, _tr('dialog.settings.q_reset', '換日時間'), 'reset_hour', 0, 23,
+                                _tr('dialog.settings.q_unit_hour', '點（之前算前一天）'), default=4)
+        self.var_q_reroll = spin(4, _tr('dialog.settings.q_reroll', '每日可換任務'), 'rerolls_per_day', 0, 5,
+                                 _tr('dialog.settings.q_unit_times', '次'), default=1)
+        self.var_q_rest = spin(5, _tr('dialog.settings.q_rest', '每週休息日'), 'rest_days_per_week', 0, 7,
+                               _tr('dialog.settings.q_unit_days', '天（不中斷連續天數）'), default=1)
+        self.var_q_snap = tk.BooleanVar(value=bool(qs.get('snapshot_on_checkin', True)))
+        tk.Checkbutton(f, text=_tr('dialog.settings.q_snapshot', '打卡時擷取 SAI2 畫布快照'),
+                       variable=self.var_q_snap, font=FB, fg=TEXT, bg=CARD, selectcolor=CARD2,
+                       activebackground=CARD, activeforeground=TEXT, anchor='w').grid(row=6, column=0, columnspan=2, sticky='w', pady=(4, 0))
+
+    def _apply_quest_settings(self) -> bool:
+        """驗證並寫回每日任務設定；不合法時提示並回傳 False（不關閉對話框）"""
+        try:
+            vals = {'count_min': self.var_q_min.get(), 'count_max': self.var_q_max.get(),
+                    'budget_minutes': self.var_q_budget.get(), 'reset_hour': self.var_q_reset.get(),
+                    'rerolls_per_day': self.var_q_reroll.get(), 'rest_days_per_week': self.var_q_rest.get()}
+        except (tk.TclError, ValueError):
+            messagebox.showwarning(_tr('dialog.settings.title'), _tr('dialog.settings.q_invalid', '每日任務的設定需為整數'), parent=self)
+            return False
+        limits = {'count_min': (1, 5), 'count_max': (1, 5), 'budget_minutes': (10, 600), 'reset_hour': (0, 23),
+                  'rerolls_per_day': (0, 5), 'rest_days_per_week': (0, 7)}
+        if any(not lo <= vals[k] <= hi for k, (lo, hi) in limits.items()) or vals['count_min'] > vals['count_max']:
+            messagebox.showwarning(_tr('dialog.settings.title'),
+                                   _tr('dialog.settings.q_range', '每日任務設定超出範圍（任務數下限不可大於上限）'), parent=self)
+            return False
+        qs = self._quests.settings
+        qs.update(vals)
+        qs['enabled'] = bool(self.var_q_enabled.get())
+        qs['snapshot_on_checkin'] = bool(self.var_q_snap.get())
+        self._quests.mark_dirty()
+        self._quests.save(force=True)
+        return True
 
     def _choose_sketch_dir(self):
         p = filedialog.askdirectory(title='選擇速寫參考圖預設資料夾', parent=self)
@@ -4205,6 +4405,9 @@ class SettingsDialog(tk.Toplevel):
         selected_q_name = self.var_q_name.get()
         q_code = self.quality_map.get(selected_q_name, 'standard')
         self._settings['timelapse_quality'] = q_code
+
+        if self._quests is not None and not self._apply_quest_settings():
+            return
 
         # Save 速寫練習設定
         self._settings['sketch_unsplash_key'] = self.var_unsplash.get().strip()

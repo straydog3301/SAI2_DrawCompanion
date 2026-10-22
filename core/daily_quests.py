@@ -117,6 +117,7 @@ DEFAULT_SETTINGS = {
     'rerolls_per_day': 1,
     'weekly_focus': '',       # 本週主修技能 id（'' = 無）
     'rest_days_per_week': 1,  # 每週可請假（不中斷連續天數）的天數
+    'snapshot_on_checkin': True,  # 打卡時擷取 SAI2 畫布縮圖，作為作品紀錄
 }
 
 WARMUP_MAX_MINUTES = 15           # 熱身：≤15 分的速寫
@@ -125,6 +126,8 @@ NEGLECT_MAX_FACTOR = 3.0
 FOCUS_FACTOR = 2.0
 REPEAT_YESTERDAY_FACTOR = 0.3
 UNLIMITED_SKETCH_MIN_SECONDS = 30  # 不限時速寫：停留滿 30 秒才算一張
+SKETCH_ALLOWED_INTERVALS = (30, 60, 90, 120, 300, 600)   # 與速寫視窗的間隔選項一致（任務不用「不限時」）
+MAX_TEMPLATE_NAME = 40
 
 
 def est_minutes(tpl: dict) -> float:
@@ -254,6 +257,7 @@ class QuestManager:
         d.setdefault('active_study', None)
         d.setdefault('current_day', None)
         d.setdefault('lesson_progress', {})
+        d.setdefault('file_tags', {})     # 作品檔案 key → 技能權重
         return d
 
     def mark_dirty(self):
@@ -418,6 +422,14 @@ class QuestManager:
                 del seen[:-30]   # 只記最近 30 張
         self.mark_dirty()
 
+    def set_task_snapshot(self, uid: str, path: str, day_key: str | None = None):
+        """記錄打卡快照路徑（day_key 省略時為今天的任務）"""
+        tasks = self.data['days'].get(day_key, {}).get('tasks', []) if day_key else self.today_tasks()
+        t = next((x for x in tasks if x['uid'] == uid), None)
+        if t is not None:
+            t['snapshot'] = path
+            self.mark_dirty()
+
     def _advance_lesson(self, t: dict, rating: int | None) -> str | None:
         """打卡後依自評推進學習路徑；回傳下一課 id（未推進時回傳 None）"""
         les = study_lessons.lesson(t['params'].get('lesson_id', ''))
@@ -553,13 +565,20 @@ class QuestManager:
             return True
         return False
 
-    def tick(self, draw_delta: float, now: datetime | None = None) -> list[dict]:
-        """主程式每秒呼叫：draw_delta = 這段期間 SAI2 的動筆秒數。回傳剛達標的任務。"""
+    def tick(self, draw_delta: float, now: datetime | None = None,
+             current_file: str | None = None) -> list[dict]:
+        """主程式每秒呼叫：draw_delta = 這段期間 SAI2 的動筆秒數；current_file = 追蹤器目前的檔案。
+        回傳剛達標的任務。"""
         self.ensure_today(now)
         if draw_delta <= 0:
             return []
         ready = []
         study_uid = self.data.get('active_study')
+        tags = self.file_tags(current_file) if current_file else {}
+        if tags and not study_uid:
+            # 平常畫已標記技能的作品：動筆時間計入技能。研究計時中略過，那段時間打卡時已算進研究任務
+            self._log(self.day_key(now), source='file', task_uid=None, topic=current_file,
+                      skills=tags, seconds=draw_delta, count=0)
         for t in self.today_tasks():
             if t['status'] not in ('active', 'ready'):
                 continue
@@ -606,6 +625,144 @@ class QuestManager:
         if not t or t['status'] not in ('active', 'ready') or n <= 0:
             return []
         return [t] if self._set_progress(t, t['progress'] + int(n)) else []
+
+    # ── 範本與技能管理 ────────────────────────────────────────────────────
+    def is_builtin_template(self, tid: str) -> bool:
+        return any(t['id'] == tid for t in DEFAULT_TEMPLATES)
+
+    def validate_template(self, tpl: dict) -> str | None:
+        """檢查範本內容；合法回傳 None，否則回傳原因"""
+        name = (tpl.get('name') or '').strip()
+        if not name:
+            return '請輸入名稱'
+        if len(name) > MAX_TEMPLATE_NAME:
+            return f'名稱最多 {MAX_TEMPLATE_NAME} 個字'
+        mode = tpl.get('mode')
+        if mode not in MODES:
+            return '請選擇練習方式'
+        skills = tpl.get('skills') or {}
+        if any(not self.skill(sid) for sid in skills) or any(w <= 0 for w in skills.values()):
+            return '技能設定不正確'
+        try:
+            if not 0.1 <= float(tpl.get('weight', 1.0)) <= 5:
+                return '權重需介於 0.1～5'
+        except (TypeError, ValueError):
+            return '權重需介於 0.1～5'
+        p = tpl.get('params') or {}
+
+        def rng(key, lo, hi, label):
+            v = p.get(key)
+            if not isinstance(v, (int, float)) or not lo <= v <= hi:
+                return f'{label}需介於 {lo}～{hi}'
+            return None
+
+        if mode == 'sketch':
+            if not (p.get('topic') or '').strip():
+                return '請選擇速寫題目'
+            if p.get('interval') not in SKETCH_ALLOWED_INTERVALS:
+                return '每張秒數不正確'
+            return rng('count', 1, 200, '張數')
+        if mode == 'study':
+            if p.get('path'):
+                return None if study_lessons.path(p['path']) else '學習路徑不存在'
+            return rng('minutes', 5, 240, '分鐘數')
+        if mode in ('drill', 'thumbnail'):
+            return rng('count', 1, 999, '次數') or rng('est_minutes', 1, 240, '預估分鐘')
+        if mode == 'draw_time':
+            return rng('minutes', 5, 600, '分鐘數')
+        return None
+
+    def _clean_template(self, tpl: dict) -> dict:
+        keep = {'sketch': ('topic', 'count', 'interval'), 'study': ('path', 'minutes'),
+                'drill': ('count', 'est_minutes'), 'thumbnail': ('count', 'est_minutes'),
+                'draw_time': ('minutes',)}[tpl['mode']]
+        params = {k: v for k, v in (tpl.get('params') or {}).items() if k in keep and v not in (None, '')}
+        return {'mode': tpl['mode'], 'name': tpl['name'].strip(), 'skills': dict(tpl.get('skills') or {}),
+                'params': params, 'weight': float(tpl.get('weight', 1.0)),
+                'enabled': bool(tpl.get('enabled', True))}
+
+    def add_template(self, tpl: dict) -> tuple[str | None, str | None]:
+        """新增自訂範本，回傳 (id, 錯誤)"""
+        err = self.validate_template(tpl)
+        if err:
+            return None, err
+        new = self._clean_template(tpl)
+        new['id'] = 'u_' + uuid.uuid4().hex[:8]
+        self.data['templates'].append(new)
+        self.mark_dirty()
+        return new['id'], None
+
+    def update_template(self, tid: str, tpl: dict) -> str | None:
+        cur = self.template(tid)
+        if not cur:
+            return '找不到範本'
+        err = self.validate_template(tpl)
+        if err:
+            return err
+        cur.update(self._clean_template(tpl))
+        self.mark_dirty()
+        return None
+
+    def set_template_enabled(self, tid: str, on: bool):
+        t = self.template(tid)
+        if t:
+            t['enabled'] = bool(on)
+            self.mark_dirty()
+
+    def delete_template(self, tid: str) -> str | None:
+        """刪除自訂範本；內建範本只能停用（刪了下次啟動也會依版本規則補回）"""
+        if self.is_builtin_template(tid):
+            return '內建範本無法刪除，可以改為停用'
+        before = len(self.data['templates'])
+        self.data['templates'] = [t for t in self.data['templates'] if t.get('id') != tid]
+        if len(self.data['templates']) == before:
+            return '找不到範本'
+        self.mark_dirty()
+        return None
+
+    def add_skill(self, name: str, icon: str = '⭐') -> tuple[str | None, str | None]:
+        name = (name or '').strip()
+        if not name:
+            return None, '請輸入技能名稱'
+        if len(name) > 12:
+            return None, '技能名稱最多 12 個字'
+        if any(s['name'] == name for s in self.data['skills']):
+            return None, '已有同名技能'
+        sid = 'u_' + uuid.uuid4().hex[:8]
+        self.data['skills'].append({'id': sid, 'name': name, 'icon': (icon or '⭐').strip()[:2],
+                                    'subtopics': [], 'builtin': False})
+        self.mark_dirty()
+        return sid, None
+
+    def delete_skill(self, sid: str) -> str | None:
+        s = self.skill(sid)
+        if not s:
+            return '找不到技能'
+        if s.get('builtin') or any(d['id'] == sid for d in DEFAULT_SKILLS):
+            return '內建技能無法刪除'
+        users = [t['name'] for t in self.data['templates'] if sid in (t.get('skills') or {})]
+        if users:
+            return '仍有任務範本使用此技能：' + '、'.join(users[:3])
+        self.data['skills'] = [x for x in self.data['skills'] if x['id'] != sid]
+        for key in [k for k, v in self.data['file_tags'].items() if sid in v]:
+            self.set_file_tags(key, [x for x in self.data['file_tags'][key] if x != sid])
+        if self.settings.get('weekly_focus') == sid:
+            self.settings['weekly_focus'] = ''
+        self.mark_dirty()
+        return None
+
+    # ── 作品檔案技能標籤 ──────────────────────────────────────────────────
+    def file_tags(self, file_key: str) -> dict[str, float]:
+        return dict(self.data['file_tags'].get(file_key, {}))
+
+    def set_file_tags(self, file_key: str, skill_ids: list[str]):
+        """設定作品檔案的技能標籤（平均分配權重）；清空即移除"""
+        valid = [sid for sid in dict.fromkeys(skill_ids) if self.skill(sid)]
+        if valid:
+            self.data['file_tags'][file_key] = {sid: round(1.0 / len(valid), 4) for sid in valid}
+        else:
+            self.data['file_tags'].pop(file_key, None)
+        self.mark_dirty()
 
     def start_study(self, uid: str) -> bool:
         t = self.task(uid)

@@ -8,14 +8,25 @@ growth_view.py - 主視窗「🎯 成長」頁籤（Tk 介面，1.x 的簡單版
 
 from __future__ import annotations
 
+import os
 import tkinter as tk
 from datetime import datetime
 
+from PIL import Image, ImageTk
+
 from core import growth as G
+from core.i18n import _tr
 from ui_kit import ScrollFrame, blend, px
 
-WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']
-STATUS_TEXT = {'done': '✓ 已打卡', 'ready': '可打卡', 'active': '未完成', 'expired': '已過期'}
+
+
+def _weekdays() -> list[str]:
+    return _tr('ui.growth.weekdays', '一,二,三,四,五,六,日').split(',')
+
+
+def _status_text(status: str) -> str:
+    return {'done': _tr('ui.quest.done', '✓ 已打卡'), 'ready': _tr('ui.growth.st_ready', '可打卡'),
+            'active': _tr('ui.growth.st_active', '未完成'), 'expired': _tr('ui.quest.expired', '已過期')}.get(status, status or '')
 
 
 class GrowthView(tk.Frame):
@@ -64,7 +75,7 @@ class GrowthView(tk.Frame):
             self._build_calendar()
             self._build_skills()
         except Exception as e:      # 統計出錯不應讓整個頁籤空白
-            tk.Label(self.body, text=f'⚠ 成長資料讀取失敗：{e}', font=self.t['FB'], fg=self.t['YELLOW'],
+            tk.Label(self.body, text=_tr('ui.growth.load_error', '⚠ 成長資料讀取失敗：{err}', err=e), font=self.t['FB'], fg=self.t['YELLOW'],
                      bg=self.t['BG']).pack(anchor='w')
             print(f'[Growth] refresh error: {e}')
 
@@ -77,12 +88,13 @@ class GrowthView(tk.Frame):
         left = tk.Frame(top, bg=t['CARD'])
         left.pack(side='left', fill='x', expand=True)
         streak = q.streak()
-        tk.Label(left, text=f'🔥 連續 {streak} 天', font=t['FT'], fg=t['YELLOW'] if streak else t['TEXT'],
+        tk.Label(left, text=_tr('ui.quest.streak', '🔥 連續 {n} 天', n=streak), font=t['FT'], fg=t['YELLOW'] if streak else t['TEXT'],
                  bg=t['CARD'], anchor='w').pack(fill='x')
-        parts = [f'最長 {q.longest_streak()} 天', f'近 30 天練習 {G.fmt_hours(self._recent_practice_seconds())}']
+        parts = [_tr('ui.growth.longest', '最長 {n} 天', n=q.longest_streak()),
+                 _tr('ui.growth.recent_practice', '近 30 天練習 {t}', t=G.fmt_hours(self._recent_practice_seconds()))]
         if self.draw_seconds:
             try:
-                parts.append(f'繪圖 {G.fmt_hours(self.draw_seconds(30))}')
+                parts.append(_tr('ui.growth.recent_draw', '繪圖 {t}', t=G.fmt_hours(self.draw_seconds(30))))
             except Exception:
                 pass
         tk.Label(left, text='　·　'.join(parts), font=t['FS'], fg=t['TEXTD'], bg=t['CARD'],
@@ -93,16 +105,16 @@ class GrowthView(tk.Frame):
         today = q.day_key()
         quota, used = q.rest_quota(), q.rest_used_in_week(today)
         if q.is_rest(today):
-            self.btn(right, '↩ 取消今天請假', t['CARD2'], t['ACCH'], lambda: self._cancel_rest(today),
+            self.btn(right, _tr('ui.growth.cancel_rest_today', '↩ 取消今天請假'), t['CARD2'], t['ACCH'], lambda: self._cancel_rest(today),
                      font=t['FS'], pady=2).pack(anchor='e')
         else:
             err = q.can_rest(today)
-            b = self.btn(right, f'💤 今天請假（本週剩 {max(0, quota - used)} 天）', t['CARD2'], t['ACCH'],
+            b = self.btn(right, _tr('ui.growth.take_rest', '💤 今天請假（本週剩 {n} 天）', n=max(0, quota - used)), t['CARD2'], t['ACCH'],
                          lambda: self._take_rest(today), font=t['FS'], pady=2)
             b.pack(anchor='e')
             if err:
                 b.config(state='disabled', text='💤 ' + err)
-        tk.Label(right, text='請假日不會中斷連續天數', font=t['FS'], fg=t['TEXTD'], bg=t['CARD']).pack(anchor='e')
+        tk.Label(right, text=_tr('ui.growth.rest_hint', '請假日不會中斷連續天數'), font=t['FS'], fg=t['TEXTD'], bg=t['CARD']).pack(anchor='e')
 
     def _recent_practice_seconds(self) -> float:
         cards = G.skill_cards(self.app.quests)
@@ -115,13 +127,13 @@ class GrowthView(tk.Frame):
             self.app.var_status.set(f'⚠ {err}')
         else:
             self.app.quests.save(force=True)
-            self.app.var_status.set('💤 今天設為休息日，連續天數不會中斷')
+            self.app.var_status.set(_tr('ui.growth.rest_set', '💤 已設為休息日，連續天數不會中斷'))
         self._after_change()
 
     def _cancel_rest(self, key):
         if self.app.quests.cancel_rest(key):
             self.app.quests.save(force=True)
-            self.app.var_status.set('已取消休息日')
+            self.app.var_status.set(_tr('ui.growth.rest_cancelled', '已取消休息日'))
         self._after_change()
 
     def _after_change(self):
@@ -138,7 +150,7 @@ class GrowthView(tk.Frame):
         c = self._card()
         hdr = tk.Frame(c, bg=t['CARD'])
         hdr.pack(fill='x')
-        tk.Label(hdr, text=f'📅 {self.year} 年 {self.month} 月', font=t['FH'], fg=t['TEXT'],
+        tk.Label(hdr, text=_tr('ui.growth.month_title', '📅 {y} 年 {m} 月', y=self.year, m=self.month), font=t['FH'], fg=t['TEXT'],
                  bg=t['CARD']).pack(side='left')
         self.btn(hdr, '▶', t['CARD2'], t['ACCH'], lambda: self._shift_month(1), font=t['FS'], pady=1
                  ).pack(side='right')
@@ -148,7 +160,7 @@ class GrowthView(tk.Frame):
         grid = tk.Frame(c, bg=t['CARD'])
         grid.pack(pady=(px(self, 8), px(self, 4)))
         cell = px(self, 34)
-        for i, wd in enumerate(WEEKDAYS):
+        for i, wd in enumerate(_weekdays()):
             tk.Label(grid, text=wd, font=t['FS'], fg=t['TEXTD'], bg=t['CARD'], width=4).grid(row=0, column=i)
         for r, week in enumerate(cal['weeks'], start=1):
             for col, d in enumerate(week):
@@ -161,12 +173,12 @@ class GrowthView(tk.Frame):
 
         legend = tk.Frame(c, bg=t['CARD'])
         legend.pack(fill='x')
-        tk.Label(legend, text='少', font=t['FS'], fg=t['TEXTD'], bg=t['CARD']).pack(side='left')
+        tk.Label(legend, text=_tr('ui.growth.legend_less', '少'), font=t['FS'], fg=t['TEXTD'], bg=t['CARD']).pack(side='left')
         for n in range(4):
             tk.Frame(legend, width=px(self, 12), height=px(self, 12), bg=self._heat(n)).pack(side='left', padx=1)
-        tk.Label(legend, text='多　💤 休息日', font=t['FS'], fg=t['TEXTD'], bg=t['CARD']).pack(side='left')
-        tk.Label(legend, text=f"本月打卡 {cal['done_days']} 天 · 休息 {cal['rest_days']} 天 · "
-                              f"練習 {G.fmt_hours(cal['practice_seconds'])}",
+        tk.Label(legend, text=_tr('ui.growth.legend_more', '多　💤 休息日'), font=t['FS'], fg=t['TEXTD'], bg=t['CARD']).pack(side='left')
+        tk.Label(legend, text=_tr('ui.growth.month_summary', '本月打卡 {done} 天 · 休息 {rest} 天 · 練習 {t}',
+                                  done=cal['done_days'], rest=cal['rest_days'], t=G.fmt_hours(cal['practice_seconds'])),
                  font=t['FS'], fg=t['TEXTD'], bg=t['CARD']).pack(side='right')
 
     def _heat(self, done: int) -> str:
@@ -200,52 +212,70 @@ class GrowthView(tk.Frame):
         t, q = self.t, self.app.quests
         det = G.day_detail(q, key)
         win = tk.Toplevel(self)
-        win.title(f'{key} 的練習')
+        win.title(_tr('ui.growth.day_title', '{day} 的練習', day=key))
         win.configure(bg=t['CARD'], padx=px(self, 16), pady=px(self, 12))
         win.transient(self.winfo_toplevel())
         head = f"📅 {key}"
         if det['rest']:
-            head += '　💤 休息日'
+            head += '　' + _tr('ui.growth.rest_day', '💤 休息日')
         tk.Label(win, text=head, font=t['FH'], fg=t['TEXT'], bg=t['CARD'], anchor='w').pack(fill='x')
-        tk.Label(win, text=f"打卡 {det['done']}/{det['total']} 項 · 練習 {G.fmt_hours(det['practice_seconds'])}",
+        tk.Label(win, text=_tr('ui.growth.day_summary', '打卡 {done}/{total} 項 · 練習 {t}', done=det['done'],
+                               total=det['total'], t=G.fmt_hours(det['practice_seconds'])),
                  font=t['FS'], fg=t['TEXTD'], bg=t['CARD'], anchor='w').pack(fill='x', pady=(2, 8))
         if not det['tasks']:
-            tk.Label(win, text='這天沒有任務紀錄', font=t['FB'], fg=t['TEXTD'], bg=t['CARD']).pack(anchor='w')
+            tk.Label(win, text=_tr('ui.growth.day_empty', '這天沒有任務紀錄'), font=t['FB'], fg=t['TEXTD'], bg=t['CARD']).pack(anchor='w')
         for it in det['tasks']:
             row = tk.Frame(win, bg=t['CARD2'], padx=px(self, 8), pady=px(self, 5))
             row.pack(fill='x', pady=(0, 4))
-            status = STATUS_TEXT.get(it['status'], it['status'] or '')
+            status = _status_text(it['status'])
             if it['self_reported']:
-                status += '（自行回報）'
+                status += _tr('ui.quest.self_reported', '（自行回報）')
             tk.Label(row, text=f"{it['icon']} {it['name']}", font=t['FB'], fg=t['TEXT'], bg=t['CARD2'],
                      anchor='w').pack(fill='x')
             line = '　'.join(x for x in (it['skills'], it['progress'], status,
-                                         f"自評 {it['rating']}/5" if it['rating'] else '') if x)
+                                         _tr('ui.growth.rating', '自評 {r}/5', r=it['rating']) if it['rating'] else '') if x)
             tk.Label(row, text=line, font=t['FS'], fg=t['GREEN'] if it['status'] == 'done' else t['TEXTD'],
                      bg=t['CARD2'], anchor='w').pack(fill='x')
             for extra in (f"💬 {it['note']}" if it['note'] else '', f"🖼 {it['ref_title']}" if it['ref_title'] else ''):
                 if extra:
                     tk.Label(row, text=extra, font=t['FS'], fg=t['TEXT'], bg=t['CARD2'], anchor='w',
                              justify='left', wraplength=px(self, 380)).pack(fill='x')
+            if it['snapshot'] and os.path.isfile(it['snapshot']):
+                self._thumb(row, it['snapshot'], win)
         actions = tk.Frame(win, bg=t['CARD'])
         actions.pack(fill='x', pady=(8, 0))
         if det['rest']:
-            self.btn(actions, '↩ 取消休息日', t['CARD2'], t['ACCH'],
+            self.btn(actions, _tr('ui.growth.cancel_rest', '↩ 取消休息日'), t['CARD2'], t['ACCH'],
                      lambda: (self._cancel_rest(key), win.destroy()), font=t['FS'], pady=2).pack(side='left')
         elif q.can_rest(key) is None:
-            self.btn(actions, '💤 補請這天休息', t['CARD2'], t['ACCH'],
+            self.btn(actions, _tr('ui.growth.retro_rest', '💤 補請這天休息'), t['CARD2'], t['ACCH'],
                      lambda: (self._take_rest(key), win.destroy()), font=t['FS'], pady=2).pack(side='left')
-        self.btn(actions, '關閉', t['CARD2'], t['BORDER'], win.destroy, font=t['FS'], pady=2).pack(side='right')
+        self.btn(actions, _tr('dialog.close', '關閉'), t['CARD2'], t['BORDER'], win.destroy, font=t['FS'], pady=2).pack(side='right')
         win.update_idletasks()
         top = self.winfo_toplevel()
         win.geometry(f'+{top.winfo_rootx() + px(self, 30)}+{top.winfo_rooty() + px(self, 80)}')
+
+    def _thumb(self, parent, path: str, holder):
+        """打卡快照縮圖；點擊以系統看圖程式開啟原檔"""
+        try:
+            with Image.open(path) as im:
+                im = im.convert('RGB')
+                im.thumbnail((px(self, 240), px(self, 170)), Image.LANCZOS)
+                photo = ImageTk.PhotoImage(im)
+        except Exception as e:
+            print(f'[Growth] snapshot load error: {e}')
+            return
+        holder._photos = getattr(holder, '_photos', []) + [photo]   # 保留參照，避免被回收
+        lbl = tk.Label(parent, image=photo, bg=self.t['CARD2'], cursor='hand2')
+        lbl.pack(anchor='w', pady=(4, 0))
+        lbl.bind('<Button-1>', lambda _e: os.startfile(path))
 
     # ── 技能卡 ────────────────────────────────────────────────────────
     def _build_skills(self):
         t = self.t
         cards = G.skill_cards(self.app.quests)
-        c = self._card('🎨 技能卡')
-        tk.Label(c, text='依實際投入時數升級：入門 10h → 基礎 30h → 進階 100h → 熟練 300h → 精通 1000h',
+        c = self._card(_tr('ui.growth.skills_title', '🎨 技能卡'))
+        tk.Label(c, text=_tr('ui.growth.skills_hint', '依實際投入時數升級：入門 10h → 基礎 30h → 進階 100h → 熟練 300h → 精通 1000h'),
                  font=t['FS'], fg=t['TEXTD'], bg=t['CARD'], anchor='w', justify='left',
                  wraplength=px(self, 480)).pack(fill='x', pady=(2, 6))
         for card in cards:
@@ -265,39 +295,40 @@ class GrowthView(tk.Frame):
         tk.Label(line1, text=f" {ms['name']} ", font=t['FS'], fg='white',
                  bg=t['ACCENT'] if ms['level'] else t['BORDER']).pack(side='left', padx=(6, 0))
         if card['focus']:
-            tk.Label(line1, text='⭐ 本週主修', font=t['FS'], fg=t['YELLOW'], bg=t['CARD2']).pack(side='left', padx=6)
-        focus_txt = '取消主修' if card['focus'] else '☆ 設為主修'
+            tk.Label(line1, text=_tr('ui.growth.focus', '⭐ 本週主修'), font=t['FS'], fg=t['YELLOW'], bg=t['CARD2']).pack(side='left', padx=6)
+        focus_txt = _tr('ui.growth.unfocus', '取消主修') if card['focus'] else _tr('ui.growth.set_focus', '☆ 設為主修')
         self.btn(line1, focus_txt, t['CARD2'], t['ACCH'], lambda sid=card['id']: self._toggle_focus(sid),
                  font=t['FS'], pady=0, padx=4).pack(side='right')
-        tk.Label(line1, text=f"累積 {G.fmt_hours(card['total_seconds'])}", font=t['FS'], fg=t['TEXT'],
+        tk.Label(line1, text=_tr('ui.growth.total', '累積 {t}', t=G.fmt_hours(card['total_seconds'])), font=t['FS'], fg=t['TEXT'],
                  bg=t['CARD2']).pack(side='right', padx=(0, 8))
 
         self._bar(row, ms['progress'], t['ACCENT']).pack(fill='x', pady=(px(self, 4), px(self, 2)))
         if ms['next_name']:
             left_h = max(0.0, ms['ceil'] - ms['hours'])
-            goal = f"距「{ms['next_name']}」還差 {left_h:.1f} 小時"
+            goal = _tr('ui.growth.to_next', '距「{name}」還差 {h} 小時', name=ms['next_name'], h=f'{left_h:.1f}')
         else:
-            goal = '已達最高等級'
+            goal = _tr('ui.growth.max_level', '已達最高等級')
         line2 = tk.Frame(row, bg=t['CARD2'])
         line2.pack(fill='x')
         tk.Label(line2, text=goal, font=t['FS'], fg=t['TEXTD'], bg=t['CARD2']).pack(side='left')
         self._sparkline(line2, card['series']).pack(side='right')
-        tk.Label(line2, text=f"近 30 天 {G.fmt_hours(card['recent_seconds'])}　近 14 天：", font=t['FS'],
+        tk.Label(line2, text=_tr('ui.growth.recent', '近 30 天 {t}　近 14 天：', t=G.fmt_hours(card['recent_seconds'])), font=t['FS'],
                  fg=t['TEXTD'], bg=t['CARD2']).pack(side='right')
 
         info = []
         p = card['path']
         if p:
-            info.append(f"📘 課程 {p['index'] + 1}/{p['total']}：Lv{p['current_level']} {p['current_name']}"
-                        + ('（已全數通過）' if p['completed'] else ''))
+            info.append(_tr('ui.growth.path', '📘 課程 {i}/{n}：Lv{level} {name}', i=p['index'] + 1, n=p['total'],
+                            level=p['current_level'], name=p['current_name'])
+                        + (_tr('ui.growth.path_done', '（已全數通過）') if p['completed'] else ''))
         else:
-            info.append('📘 以反覆練習為主')
+            info.append(_tr('ui.growth.no_path', '📘 以反覆練習為主'))
         if card['ratings']:
-            info.append('自評 ' + ' '.join(str(r) for r in card['ratings']))
+            info.append(_tr('ui.growth.ratings', '自評 {r}', r=' '.join(str(r) for r in card['ratings'])))
         if card['idle_days'] is None:
-            info.append('尚未開始')
+            info.append(_tr('ui.growth.not_started', '尚未開始'))
         elif card['idle']:
-            info.append(f"⚠ {card['idle_days']} 天未練")
+            info.append(_tr('ui.growth.idle', '⚠ {n} 天未練', n=card['idle_days']))
         tk.Label(row, text='　·　'.join(info), font=t['FS'],
                  fg=t['YELLOW'] if card['idle'] and card['idle_days'] is not None else t['TEXTD'],
                  bg=t['CARD2'], anchor='w', justify='left', wraplength=px(self, 470)).pack(fill='x', pady=(2, 0))
@@ -324,7 +355,8 @@ class GrowthView(tk.Frame):
         q.save(force=True)
         skill = q.skill(sid)
         if q.settings['weekly_focus']:
-            self.app.var_status.set(f"⭐ 本週主修：{skill['name'] if skill else sid}（之後的課表會優先排這項技能）")
+            self.app.var_status.set(_tr('ui.growth.focus_set', '⭐ 本週主修：{name}（之後的課表會優先排這項技能）',
+                                        name=skill['name'] if skill else sid))
         else:
-            self.app.var_status.set('已取消本週主修')
+            self.app.var_status.set(_tr('ui.growth.focus_cleared', '已取消本週主修'))
         self.refresh()

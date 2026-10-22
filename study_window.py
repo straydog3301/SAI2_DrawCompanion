@@ -18,10 +18,11 @@ import webbrowser
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-from PIL import Image, ImageTk, ImageOps, ImageDraw, ImageChops
+from PIL import Image, ImageTk, ImageOps, ImageDraw
 
 from core import study_lessons, study_refs
 from core.psd_writer import write_blank_psd
+from core.snapshots import capture_sai2_canvas
 from ui_kit import px, fit_window, bind_wraplength
 
 # ─── 樣式（與筆刷工坊一致的深色配色）───────────────────────────────────────
@@ -103,30 +104,6 @@ def extract_palette(img: Image.Image, n: int = PALETTE_SIZE) -> list[tuple[int, 
     pal = q.getpalette() or []
     counts = sorted(q.getcolors() or [], reverse=True)
     return [tuple(pal[i * 3:i * 3 + 3]) for _c, i in counts][:n]
-
-
-def trim_workspace(img: Image.Image) -> Image.Image:
-    """裁掉 SAI2 畫布視窗四周的單色工作區（以左上角顏色為背景）"""
-    rgb = img.convert('RGB')
-    bg = rgb.getpixel((2, 2))
-    diff = ImageChops.difference(rgb, Image.new('RGB', rgb.size, bg)).convert('L')
-    box = diff.point(lambda v: 255 if v > 18 else 0).getbbox()
-    if not box:
-        return rgb
-    bw, bh = box[2] - box[0], box[3] - box[1]
-    if bw * bh < rgb.size[0] * rgb.size[1] * 0.05:
-        return rgb   # 裁切結果過小，多半是誤判，保留原圖
-    return rgb.crop(box)
-
-
-def capture_sai2_canvas() -> Image.Image | None:
-    """擷取 SAI2 畫布視窗（沿用縮時錄影的視窗尋找與 GDI 擷取）"""
-    from core.timelapse import find_canvas_hwnd, capture_window_gdi
-    hwnd = find_canvas_hwnd(os.getpid())
-    if not hwnd:
-        return None
-    img = capture_window_gdi(hwnd)
-    return trim_workspace(img) if img is not None else None
 
 
 def _btn(parent, text, cmd, bg=CARD2, hbg=CARD3, fg=TEXT, font=FT_NORM, **kw):
