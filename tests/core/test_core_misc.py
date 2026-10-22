@@ -43,4 +43,23 @@ try:
     check(False, 'invalid size must raise')
 except ValueError:
     check(True)
+
+# 畫布擷取裁切：模擬 SAI2 實際的畫布視窗（深色外框、顏色接近工作區的捲軸＋箭頭、捲軸邊線）
+from PIL import Image, ImageDraw  # noqa: E402
+from core.snapshots import trim_workspace  # noqa: E402
+W, H = 1600, 1000
+shot = Image.new('RGB', (W, H), (61, 65, 80))
+dr = ImageDraw.Draw(shot)
+dr.rectangle((0, 0, W - 1, H - 1), outline=(23, 23, 28), width=3)
+dr.rectangle((W - 26, 0, W - 1, H - 1), fill=(58, 61, 75))                    # 直捲軸
+dr.rectangle((0, H - 26, W - 1, H - 1), fill=(58, 61, 75))                    # 橫捲軸
+dr.line((W - 27, 0, W - 27, H), fill=(23, 23, 28))
+dr.line((0, H - 27, W, H - 27), fill=(23, 23, 28))
+dr.polygon([(W - 18, H - 40), (W - 8, H - 40), (W - 13, H - 34)], fill=(200, 200, 210))   # 捲軸箭頭
+dr.rectangle((W - 24, 200, W - 4, 600), fill=(90, 95, 112))                   # 捲軸滑塊
+dr.rectangle((500, 300, 1099, 749), fill=(255, 255, 255))                     # 600x450 畫布
+dr.ellipse((600, 400, 800, 600), fill=(160, 90, 70))
+cut = trim_workspace(shot)
+check(cut.size == (600, 450), f'trim ignores frame + scrollbars: {cut.size}')
+check(trim_workspace(Image.new('RGB', (300, 200), (61, 65, 80))).size == (300, 200), 'empty workspace kept')
 done()
