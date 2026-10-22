@@ -22,13 +22,31 @@
 | `growth.py` | 成長統計（技能卡、里程碑、月曆、單日明細），唯讀 |
 | `snapshots.py` | SAI2 畫布擷取（裁掉工作區）與打卡快照縮圖 |
 | `psd_writer.py` | 產生空白 PSD 練習畫布 |
+| `single_instance.py` | 2.0：具名 Mutex 單一實例 |
+| `sai2_launcher.py` | 2.0：在 SAI2 開檔的統一流程（先確認 / 啟動 SAI2，再以拖放交檔） |
+| `settings2.py` | 2.0：設定檔 `drawcompanion2_settings.json`（第一次從 1.x 設定帶入共用值） |
+| `hotkeys.py` | 2.0：快捷鍵字串解析、與 1.x 預設的衝突檢查 |
+| `companion.py` | 2.0：常駐服務（追蹤、任務進度、最近開啟、1.x 執行中時暫停記錄） |
+| `pet_pack.py` / `pet_builtin.py` | 2.0：寵物角色包（PNG / GIF / APNG / WebP / 精靈圖）、內建角色「墨墨」 |
+| `pet_state.py` | 2.0：寵物狀態與休息提醒 |
+| `file_paths.py` | 由追蹤紀錄的檔案 key 反推實際路徑（自 1.x main.py 移入） |
+| `sketch_source.py` | 速寫圖源（本機 / Unsplash / Pexels 網址池）、倒數計張與歷史（自 1.x main.py 移入） |
+| `study_tools.py` | 臨摹研究的影像工具、分段計時、練習畫布（自 1.x study_window.py 移入） |
+| `autostart.py` | 2.0：開機啟動（HKCU Run）、1.x 監視器捷徑偵測與移除 |
 
 ### 介面（Tk，1.x）
 `main.py`（主視窗、速寫視窗、設定）、`study_window.py`、`brush_studio.py`、`liquify_helper.py`、
 `growth_view.py`（成長頁籤）、`quest_manager_window.py`（任務與技能管理）、`ui_kit.py`（DPI 縮放換算、依內容決定視窗大小、捲動容器）。
 
+### 介面（PySide6，2.0 開發中）
+`drawcompanion2.py`（進入點）、`ui2/app.py`（常駐主程式、系統匣、單一實例交接）、`ui2/pet_window.py`、`ui2/bubble.py`、
+`ui2/quick_panel.py`（快捷面板與共用的任務清單 `QuestList`）、`ui2/ref_window.py`（參考小窗：研究 / 速寫、穿透、比對、膠囊、打卡側滑面板）、
+`ui2/main_window.py`（主視窗：控制中心與設定合一，左側欄切換）、`ui2/settings_pages.py`（設定頁）、
+`ui2/widgets.py`（共用元件：開關、設定列、卡片、統計塊、步進器…）、`ui2/theme.py`（色票與樣式表）、`ui2/icons.py`、`ui2/winutil.py`。
+相依套件見 `requirements2.txt`；開發時用 `python drawcompanion2.py --data-dir <暫存資料夾>`，不碰真正的紀錄。
+
 ## 資料相容
-所有資料檔都在 `APP_DIR`，2.0 直接讀取同一批檔案，使用者紀錄不需轉換：
+所有資料檔都在 `APP_DIR`，2.0 直接讀取同一批檔案，使用者紀錄不需轉換（1.x 執行中時 2.0 暫停記錄，避免兩邊同時寫入）：
 `sai2_draw_time.json`、`sai2_timer_settings.json`、`daily_quests.json`（含 `schema` 版本號）、`checkin_snapshots/`、
 `brush_studio_settings.json`、`sai2_pending_brushes.json`、`study_refs_cache/`、`sai2_settings_backup/`。
 

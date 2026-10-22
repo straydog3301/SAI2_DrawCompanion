@@ -36,6 +36,13 @@ sai2_settings_backup/
 watcher_out.log
 pythonw_error.log
 
+# 2.0 (drawcompanion2.py)
+drawcompanion2_settings.json
+drawcompanion2_settings.json.tmp
+drawcompanion2_pet_pos.json
+pets/
+snapshots/
+
 # Operating System
 Thumbs.db
 ehthumbs.db

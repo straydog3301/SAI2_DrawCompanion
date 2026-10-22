@@ -16,7 +16,7 @@ import time
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TIMEOUT = {'core': 180, 'ui': 240, 'network': 900}
+TIMEOUT = {'core': 180, 'ui': 240, 'ui2': 240, 'network': 900}
 
 
 def run(group: str) -> list[tuple[str, bool, str]]:
@@ -40,7 +40,7 @@ def run(group: str) -> list[tuple[str, bool, str]]:
 
 def main():
     args = set(sys.argv[1:])
-    groups = ['core'] if '--core' in args else ['core', 'ui']
+    groups = ['core'] if '--core' in args else ['core', 'ui', 'ui2']
     if '--network' in args:
         groups.append('network')
     results = [r for g in groups for r in run(g)]
