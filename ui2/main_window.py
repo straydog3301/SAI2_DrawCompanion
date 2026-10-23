@@ -402,6 +402,13 @@ class MainWindow(QWidget):
             box.addWidget(label('這張畫布還沒存檔，存檔後才會記錄時間', 'warn'))
         box.addWidget(label(f'本次動筆 {_fmt_min(st.session_draw)}　今天 {_fmt_min(st.today_draw)}', 'caption'))
 
+    def on_tracking_changed(self):
+        """1.x 開啟 / 關閉：每日任務頁的唯讀狀態跟著更新（顯示中就重建，否則下次打開時重建）"""
+        if self.current == '每日任務':
+            self._rebuild('每日任務')
+        else:
+            self._built.discard('每日任務')
+
     def _rebuild(self, name):
         self._built.discard(name)
         self._build(name)

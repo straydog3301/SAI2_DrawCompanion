@@ -42,10 +42,11 @@ def params_text(tpl: dict) -> str:
 
 
 class QuestsPage(QWidget):
+    q = property(lambda self: self.ctl.service.quests)
+
     def __init__(self, ctl):
         super().__init__()
         self.ctl = ctl
-        self.q = ctl.service.quests
         self.filter = 'all'
         self.editing = None            # 正在編輯的範本 id；'new' = 新增
         lay = QVBoxLayout(self)

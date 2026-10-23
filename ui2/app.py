@@ -196,6 +196,8 @@ class CompanionApp(QObject):
         if 'legacy_resumed' in res.events:
             self.say('1.x 已關閉，2.0 繼續記錄。', important=False)
         if 'exe_found' in res.events:
+        if self._main is not None and ({'legacy_paused', 'legacy_resumed'} & set(res.events)):
+            self._main.on_tracking_changed()
             self.opener.exe_path = self.settings.get('sai2_exe', '')
         if st.unsaved_file and st.drawing and st.unsaved_file not in self._reminded_unsaved:
             self._reminded_unsaved.add(st.unsaved_file)

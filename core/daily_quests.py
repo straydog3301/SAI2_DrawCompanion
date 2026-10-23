@@ -186,6 +186,11 @@ class QuestManager:
         if self._upgrade_study_tasks():
             self._dirty = True
 
+    def reload(self):
+        """重新讀取檔案（例如 1.x 剛改過），沿用同一個物件，持有這個物件的畫面不會變成改到舊資料"""
+        self._dirty = False
+        self.load()
+
     # 舊版內建範本名稱 → 新名稱（使用者沒改過名稱時才更新）
     _RENAMED_BUILTINS = {'t_st_color': ('色彩臨摹', '色彩研究'), 't_st_value': ('明度研究', '明暗研究')}
 

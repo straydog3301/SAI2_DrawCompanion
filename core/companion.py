@@ -107,7 +107,12 @@ class CompanionService:
         self._stop_tracking()
 
     def _start_tracking(self):
-        self.quests = self._quests_factory(self.settings.quests_path)    # 重新讀取（1.x 可能剛改過）
+        # 重新讀取（1.x 可能剛改過）。沿用同一個物件：主視窗、參考小窗手上的任務物件才不會變成過期的那份，
+        # 否則在那些畫面的修改（例如重新啟用每日任務）會被這裡的舊資料覆蓋
+        if self.quests is not None and hasattr(self.quests, 'reload'):
+            self.quests.reload()
+        else:
+            self.quests = self._quests_factory(self.settings.quests_path)
         self.quests.ensure_today()
         self._day = self.quests.data.get('current_day')
         self.tracker = self._tracker_factory(

@@ -172,6 +172,7 @@ check(r.status.drawing and r.status.today_draw == 120.0, 'drawing detected from 
 if dt:
     check(svc.quests.task(dt[0]['uid'])['progress'] >= 30, 'draw_time progress accumulates')
 check([f['name'] for f in svc.recent_files(5)] == ['B.psd', 'A.psd'], 'recent files sorted, unseen skipped')
+held = svc.quests
 legacy['on'] = True
 clk2.t += companion.LEGACY_CHECK_SEC
 r = svc.tick()
@@ -181,6 +182,19 @@ legacy['on'] = False
 clk2.t += companion.LEGACY_CHECK_SEC
 r = svc.tick()
 check('legacy_resumed' in r.events and svc.tracker.running, 'resume after 1.x exits')
+check(svc.quests is held, 'resume reloads into the same quest object (open pages keep a valid reference)')
+held.settings['enabled'] = False            # 例：在已開著的每日任務頁關閉再打開
+held.mark_dirty()
+held.save(force=True)
+held.settings['enabled'] = True
+held.mark_dirty()
+held.save(force=True)
+svc.tracker.counter += 5
+clk2.t += 1
+svc.tick()
+svc.quests.save(force=True)
+check(json.load(open(s3.quests_path, encoding='utf-8'))['settings']['enabled'] is True,
+      'change made through the held object survives the service save')
 drill = next((t for t in svc.today_tasks() if t['mode'] in ('drill', 'thumbnail')), None)
 if drill:
     check(svc.go(drill['uid'])[0] == 'need_count', 'count task asks for number')
