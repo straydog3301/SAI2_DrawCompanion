@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
@@ -13,6 +14,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QMenu, QPushButton, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
+from core import slots
 from core.daily_quests import QuestManager
 from ui2 import theme
 from ui2.icons import icon
@@ -21,15 +23,6 @@ from ui2.widgets import ProgressBar, Stepper
 PANEL_W = 380
 SHADOW = 18
 
-SLOT_INFO = {
-    'sketch': ('速寫', '開始一輪速寫（用上次的題目與間隔）'),
-    'study': ('研究', '繼續今天的研究任務'),
-    'snapshot': ('快照', '擷取 SAI2 畫布存成圖片'),
-    'record': ('錄影', '縮時錄影會在第三階段加入'),
-    'works': ('作品', '打開最近作品所在的資料夾'),
-    'open_sai2': ('SAI2', '開啟或切換到 SAI2'),
-}
-READY_SLOTS = ('sketch', 'study', 'snapshot', 'works', 'open_sai2')
 
 
 def _label(text, **props):
@@ -79,6 +72,7 @@ class QuickPanel(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.ctl = ctl                       # CompanionApp：提供服務與動作
         self.quest_list = None
+        self.hidden_at = 0.0          # 點面板外面（例如點寵物）會先自動收起，記下時間避免馬上又被打開
         outer = QVBoxLayout(self)
         outer.setContentsMargins(SHADOW, SHADOW, SHADOW, SHADOW)
         self.card = QFrame()
@@ -112,25 +106,29 @@ class QuickPanel(QWidget):
         self.card_lay.addWidget(self.content)
 
     def refresh(self):
+        # 每次重繪都重設外框顏色，換主題後才會跟著變
+        self.card.setStyleSheet(f'QFrame#card{{background:{theme.SURFACE};border:1px solid {theme.BORDER};border-radius:18px;}}')
         self._clear()
         svc = self.ctl.service
         st = self.ctl.last_status
-        blocks = self.ctl.settings.get('panel.blocks', [])
+        blocks = slots.normalize_blocks(self.ctl.settings.get('panel.blocks', []))
+        self.quest_list = None
         if svc.paused:
             warn = _label('偵測到 1.x 正在執行，2.0 暫停記錄（避免重複計時）。關閉 1.x 後會自動繼續。', warn=True)
             warn.setWordWrap(True)
             self.body.addWidget(warn)
-        if 'progress' in blocks:
-            self.body.addLayout(self._header(st))
-        if 'quests' in blocks and svc.quests is not None and svc.quests.settings.get('enabled', True):
-            self.quest_list = QuestList(self.ctl)
-            self.quest_list.changed.connect(self._relayout)
-            self.quest_list.request_hide.connect(self.hide)
-            self.body.addWidget(self.quest_list)
-        if 'recent' in blocks:
-            self.body.addLayout(self._recent())
-        if 'slots' in blocks:
-            self.body.addLayout(self._slots())
+        for block in blocks:                  # 依設定的順序排列
+            if block == 'progress':
+                self.body.addLayout(self._header(st))
+            elif block == 'quests' and svc.quests is not None and svc.quests.settings.get('enabled', True):
+                self.quest_list = QuestList(self.ctl)
+                self.quest_list.changed.connect(self._relayout)
+                self.quest_list.request_hide.connect(self.hide)
+                self.body.addWidget(self.quest_list)
+            elif block == 'recent':
+                self.body.addLayout(self._recent())
+            elif block == 'slots':
+                self.body.addLayout(self._slots())
         self.body.addWidget(self._footer())
         self.card.adjustSize()
         self.adjustSize()
@@ -153,6 +151,8 @@ class QuickPanel(QWidget):
             sub += f'　正在畫：{st.current_file.split(" _ ")[-1]}'
         elif not st.sai2_running and st.tracking:
             sub += '　SAI2 未開啟'
+        if st.recording:
+            sub += '　● 錄影中' if st.rec_file else '　錄影待命'
         s = _label(sub, muted=True)
         s.setWordWrap(True)
         col.addWidget(s)
@@ -187,7 +187,7 @@ class QuickPanel(QWidget):
             b.setIcon(icon('file', theme.ACCENT_TEXT))
             b.setIconSize(QSize(18, 18))
             b.setStyleSheet(f'QPushButton{{text-align:left;background:{theme.SURFACE2};border:none;border-radius:10px;'
-                            f'padding:8px;font-size:12px;}}QPushButton:hover{{background:#2a2933;}}')
+                            f'padding:8px;font-size:12px;}}QPushButton:hover{{background:{theme.HOVER};}}')
             b.setToolTip(f'在 SAI2 開啟 {r["name"]}')
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, k=r['key']: (self.hide(), self.ctl.open_recent(k)))
@@ -201,19 +201,23 @@ class QuickPanel(QWidget):
         lay.addLayout(self._section('快捷'))
         row = QHBoxLayout()
         row.setSpacing(6)
-        for key in self.ctl.settings.get('panel.slots', [])[:6]:
-            name, tip = SLOT_INFO.get(key, (key, ''))
+        for key in slots.normalize_slots(self.ctl.settings.get('panel.slots', [])):
+            if key is None:
+                continue
+            name, ic, tip = slots.describe(key)
             b = QToolButton()
             b.setText(name)
             b.setProperty('slot', True)
             b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)      # 圖示在上、文字在下，窄按鈕也不擠
-            b.setIcon(icon(key if key in ('sketch', 'study', 'snapshot', 'record', 'works', 'open_sai2') else 'more'))
+            on = key == 'record' and bool(self.ctl.settings.get('timelapse.enabled'))
+            b.setIcon(icon(ic, theme.DANGER if on else theme.ICON))
+            if on:
+                b.setText('錄影中')
             b.setIconSize(QSize(20, 20))
             b.setFixedHeight(60)
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             b.setCursor(Qt.PointingHandCursor)
             b.setToolTip(tip)
-            b.setEnabled(key in READY_SLOTS)
             b.clicked.connect(lambda _=False, k=key: (self.hide(), self.ctl.run_slot(k)))
             row.addWidget(b)
         lay.addLayout(row)
@@ -229,7 +233,7 @@ class QuickPanel(QWidget):
                 ('隱藏 30 分', 'hide', self.ctl.hide_for_a_while, True, '')):
             b = QPushButton(text)
             b.setProperty('flat', True)
-            b.setIcon(icon(ic, '#c9c7d6', 16))
+            b.setIcon(icon(ic, theme.NAV_TEXT, 16))
             b.setEnabled(enabled)
             b.setToolTip(tip)
             if fn:
@@ -255,6 +259,10 @@ class QuickPanel(QWidget):
     def _relayout(self):
         if self.isVisible():
             QTimer.singleShot(0, lambda: (self.card.adjustSize(), self.adjustSize(), self.place()))
+
+    def hideEvent(self, e):
+        self.hidden_at = time.monotonic()
+        super().hideEvent(e)
 
     def popup(self):
         self.refresh()
@@ -343,7 +351,7 @@ class QuestList(QWidget):
         tile.setAlignment(Qt.AlignCenter)
         color = theme.SUCCESS if done else (theme.ACCENT_TEXT if doing or t['status'] == 'ready' else theme.MUTED)
         tile.setPixmap(icon(self.MODE_ICONS.get(t['mode'], 'check') if not done else 'check', color, 18).pixmap(18, 18))
-        tile.setStyleSheet(f'background:{"#16291e" if done else theme.SURFACE3};border-radius:10px;')
+        tile.setStyleSheet(f'background:{theme.OK_SOFT if done else theme.SURFACE3};border-radius:10px;')
         row.addWidget(tile)
         col = QVBoxLayout()
         col.setSpacing(4)

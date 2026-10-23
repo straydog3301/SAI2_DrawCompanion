@@ -34,6 +34,8 @@ PATHS = {
     'opacity': 'M12 2.7l5.7 5.7a8 8 0 1 1-11.4 0z',
     'minimize': 'M5 12h14',
     'prev': 'M15 18l-6-6 6-6',
+    'up': 'M18 15l-6-6-6 6',
+    'down': 'M6 9l6 6 6-6',
     'next': 'M9 18l6-6-6-6',
     'pause': 'M7 5h3v14H7zM14 5h3v14h-3z',
     'canvas': 'M4 4h16v16H4zM12 8v8M8 12h8',
@@ -43,8 +45,13 @@ PATHS = {
 }
 
 
+def icon(name: str, color: str | None = None, size: int = 20, width: float = 1.8) -> QIcon:
+    from ui2 import theme
+    return _icon(name, color or theme.ICON, size, width)
+
+
 @lru_cache(maxsize=256)
-def icon(name: str, color: str = '#e6e4ef', size: int = 20, width: float = 1.8) -> QIcon:
+def _icon(name: str, color: str, size: int, width: float) -> QIcon:
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="{color}" '
            f'stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round"><path d="{PATHS[name]}"/></svg>')
     r = QSvgRenderer(QByteArray(svg.encode()))

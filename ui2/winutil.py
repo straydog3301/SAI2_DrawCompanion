@@ -158,3 +158,20 @@ def set_dark_titlebar(hwnd: int, on: bool = True):
         ctypes.windll.dwmapi.DwmSetWindowAttribute(wt.HWND(hwnd), 20, ctypes.byref(val), ctypes.sizeof(val))
     except (OSError, AttributeError):
         pass
+
+
+def _colorref(hex_color: str) -> int:
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    return b << 16 | g << 8 | r
+
+
+def set_frame_colors(hwnd: int, border: str | None = None, caption: str | None = None, text: str | None = None):
+    """Windows 11 的視窗外框、標題列、標題文字顏色（DWMWA_BORDER_COLOR / CAPTION_COLOR / TEXT_COLOR）；舊版 Windows 會忽略"""
+    for attr, color in ((34, border), (35, caption), (36, text)):
+        if not color:
+            continue
+        try:
+            val = ctypes.c_uint(_colorref(color))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(wt.HWND(hwnd), attr, ctypes.byref(val), ctypes.sizeof(val))
+        except (OSError, AttributeError):
+            pass

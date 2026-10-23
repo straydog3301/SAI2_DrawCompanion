@@ -8,10 +8,11 @@ import webbrowser
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QSlider,
-                               QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QMenu,
+                               QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget)
 
 from core import hotkeys, pet_pack
+from ui2 import theme
 from ui2.pet_window import to_pixmap
 from ui2.widgets import Card, PageHeader, Segmented, SettingGroup, Stepper, ToggleSwitch, button, label
 
@@ -104,6 +105,48 @@ def general_page(ctl) -> QWidget:
     lang.setFixedWidth(150)
     g.row('語言', '英文、日文會在 2.0 收尾階段加入', lang)
     lay.addWidget(g)
+
+    g = SettingGroup('備份與分享', '把主題、寵物角色、快捷面板、規則、快捷鍵打包成一個檔案；本機的資料夾路徑不會匯出')
+    keys = ToggleSwitch(False)
+    g.row('匯出時包含圖庫 API 金鑰', '只給自己備份時再打開；分享給別人時請關閉', keys)
+    box = QWidget()
+    row = QHBoxLayout(box)
+    row.setContentsMargins(0, 0, 0, 0)
+    exp = button('匯出設定…', ic='file')
+    imp = button('匯入設定…', ic='works')
+    row.addWidget(exp)
+    row.addWidget(imp)
+    g.row('設定檔', '匯入時會合併設定，角色包以新名稱加入，不會覆蓋現有的', box)
+
+    def do_export():
+        from core import backup
+        from datetime import datetime
+        path, _ = QFileDialog.getSaveFileName(w, '匯出設定', os.path.join(os.path.expanduser('~'), 'Desktop',
+                                              f'DrawCompanion設定_{datetime.now():%Y%m%d}.zip'), '設定檔 (*.zip)')
+        if not path:
+            return
+        try:
+            info = backup.export_bundle(ctl.settings, path, include_secrets=keys.isChecked())
+        except OSError as e:
+            ctl.say(f'匯出失敗：{e}')
+            return
+        ctl.say(f"已匯出設定（含 {info['pets']} 個角色）。", actions=[('開啟資料夾', lambda: os.startfile(os.path.dirname(path)))])
+
+    def do_import():
+        from core import backup
+        path, _ = QFileDialog.getOpenFileName(w, '匯入設定', '', '設定檔 (*.zip)')
+        if not path:
+            return
+        try:
+            info = backup.import_bundle(ctl.settings, path)
+        except (ValueError, OSError) as e:
+            ctl.say(f'匯入失敗：{e}')
+            return
+        ctl.reload_settings()
+        ctl.say(f"設定匯入完成（新增 {len(info['pets'])} 個角色）。", important=False)
+    exp.clicked.connect(do_export)
+    imp.clicked.connect(do_import)
+    lay.addWidget(g)
     lay.addStretch(1)
     return w
 
@@ -117,7 +160,7 @@ class PetPage(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(24)
-        head = PageHeader('寵物', '換成自己畫的角色：在角色資料夾放一個資料夾，裡面放 idle.png、drawing.gif 這類以狀態命名的圖檔')
+        head = PageHeader('寵物', '換成自己畫的角色：建立新角色並指定各狀態的圖檔，或匯入別人分享的角色包')
         folder = button('角色資料夾', ic='works')
         folder.clicked.connect(self._open_pets_dir)
         head.actions.addWidget(folder)
@@ -159,11 +202,43 @@ class PetPage(QWidget):
         card.lay.addWidget(fmt)
         lay.addWidget(card)
 
+        # 角色工作室
+        self.studio = Card('角色工作室', '每個狀態可以放不同的動畫；沒有設定的狀態會沿用其他狀態')
+        imp = button('匯入角色包', 'ghost', ic='works')
+        imp.clicked.connect(self._import_menu)
+        new = button('建立新角色', ic='canvas')
+        new.clicked.connect(lambda: self.new_form.setVisible(not self.new_form.isVisible()))
+        self.studio.head.addWidget(imp)
+        self.studio.head.addWidget(new)
+        self.new_form = QWidget()
+        nf = QHBoxLayout(self.new_form)
+        nf.setContentsMargins(0, 0, 0, 0)
+        self.new_name = QLineEdit()
+        self.new_name.setPlaceholderText('角色名稱')
+        self.new_idle = ''
+        self.new_pick = button('選擇「待命」圖檔…')
+        self.new_pick.clicked.connect(self._pick_new_idle)
+        create = button('建立', 'primary')
+        create.clicked.connect(self._create_pack)
+        nf.addWidget(self.new_name, 1)
+        nf.addWidget(self.new_pick)
+        nf.addWidget(create)
+        self.new_form.hide()
+        self.studio.lay.addWidget(self.new_form)
+        self.studio_body = QVBoxLayout()
+        self.studio_body.setSpacing(0)
+        self.studio.lay.addLayout(self.studio_body)
+        lay.addWidget(self.studio)
+
         g = SettingGroup('外觀')
         g.row('大小', '', self._slider('pet.size', 48, 256, lambda v: f'{v} px', True))
         g.row('透明度', '', self._slider('pet.opacity', 20, 100, lambda v: f'{v}%', False, scale=100))
         g.row('動筆時變半透明', '畫圖時寵物不會擋住視線', _toggle(ctl, 'pet.fade_when_drawing', self._apply))
         g.row('拖曳放開時貼齊螢幕邊緣', '', _toggle(ctl, 'pet.snap_edges', self._apply))
+        g.row('內建角色跟隨主題色', '「墨墨」的身體顏色換成目前的主色；自己的角色不受影響',
+              _toggle(ctl, 'pet.tint_builtin', lambda: (self._apply(True), self._reload_packs(), self._preview_state())))
+        g.row('寵物下方顯示計時與錄影開關', '本次動筆時間；紅點可開始／停止縮時錄影（取代 1.x 精簡模式）',
+              _toggle(ctl, 'pet.show_timer'))
         lay.addWidget(g)
 
         g = SettingGroup('提醒')
@@ -182,6 +257,7 @@ class PetPage(QWidget):
         reload_btn.clicked.connect(lambda: (self._reload_packs(), self._preview_state()))
         self.state_combo.currentIndexChanged.connect(lambda *_: self._preview_state())
         self._preview_state()
+        self._refresh_studio()
 
     def _slider(self, key, lo, hi, fmt, reload_frames, scale=1):
         w = QWidget()
@@ -209,7 +285,7 @@ class PetPage(QWidget):
         self.ctl.apply_pet_settings(reload_frames=reload_frames)
 
     def _reload_packs(self):
-        self.packs = pet_pack.list_packs(self.s.pets_dir)
+        self.packs = pet_pack.list_packs(self.s.pets_dir, self.ctl.pet_tint())
         cur = self.s.get('pet.pack', '')
         self.pack_combo.blockSignals(True)
         self.pack_combo.clear()
@@ -231,6 +307,190 @@ class PetPage(QWidget):
         self.s.save()
         self._apply(True)
         self._preview_state()
+        self._refresh_studio()
+
+    # ── 角色工作室 ──
+    def _current_pack(self):
+        return self.packs[self.pack_combo.currentIndex()]
+
+    def _after_edit(self, select: str | None = None):
+        if select is not None:
+            self.s.set('pet.pack', select)
+            self.s.save()
+        self._reload_packs()
+        self._apply(True)
+        self._preview_state()
+        self._refresh_studio()
+
+    def _refresh_studio(self):
+        lay = self.studio_body
+        while lay.count():
+            it = lay.takeAt(0)
+            w = it.widget()
+            if w:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
+        pack = self._current_pack()
+        if pack.builtin:
+            lay.addWidget(label('內建角色「墨墨」不能修改。按「建立新角色」用自己畫的圖，或匯入角色包。', 'muted'))
+            return
+        for i, st in enumerate(pet_pack.STATES):
+            if i:
+                line = QFrame()
+                line.setProperty('divider', True)
+                line.setFixedHeight(1)
+                lay.addWidget(line)
+            lay.addWidget(self._state_row(pack, st))
+        actions = QHBoxLayout()
+        ren = QLineEdit(pack.name)
+        ren.setPlaceholderText('角色名稱')
+        ren.editingFinished.connect(lambda: self._rename(pack, ren.text()))
+        actions.addWidget(label('名稱', 'caption'))
+        actions.addWidget(ren, 1)
+        folder = button('開啟資料夾', 'ghost', ic='works')
+        folder.clicked.connect(lambda: os.startfile(pack.folder))
+        actions.addWidget(folder)
+        delete = button('刪除角色', 'ghost')
+        delete.setStyleSheet(f'color:{theme.DANGER};')
+        confirm = button('確定刪除', 'primary')
+        confirm.setStyleSheet('background:#b91c1c;')
+        confirm.hide()
+        delete.clicked.connect(lambda: (delete.hide(), confirm.show()))
+        confirm.clicked.connect(lambda: self._delete_pack(pack))
+        actions.addWidget(delete)
+        actions.addWidget(confirm)
+        holder = QWidget()
+        holder.setLayout(actions)
+        actions.setContentsMargins(0, 14, 0, 0)
+        lay.addWidget(holder)
+
+    def _state_row(self, pack, st):
+        w = QWidget()
+        row = QHBoxLayout(w)
+        row.setContentsMargins(4, 10, 4, 10)
+        row.setSpacing(12)
+        name = label(pet_pack.STATE_LABELS[st], 'body', wrap=False)
+        name.setFixedWidth(64)
+        row.addWidget(name)
+        spec = pack.states.get(st)
+        if spec:
+            text = spec['file']
+            if spec.get('frames'):
+                text += f"（精靈圖 {spec['frames']} 格・{spec.get('fps') or 12:g} fps）"
+            info = label(text, 'muted', wrap=False)
+        else:
+            info = label(f"沿用「{pet_pack.STATE_LABELS[pack.resolve(st)]}」", 'caption', wrap=False)
+        row.addWidget(info, 1)
+        if spec and spec['file'].lower().endswith('.png'):
+            fr = QSpinBox()
+            fr.setRange(1, pet_pack.MAX_FRAMES)
+            fr.setValue(int(spec.get('frames') or 1))
+            fr.setPrefix('格數 ')
+            fr.setToolTip('橫排精靈圖的格數；1 = 單張圖')
+            fr.setFixedWidth(110)
+            fr.editingFinished.connect(lambda f=fr: self._set_frames(pack, st, f.value()))
+            row.addWidget(fr)
+        see = button('預覽', 'ghost')
+        see.clicked.connect(lambda: self.state_combo.setCurrentIndex(pet_pack.STATES.index(st)))
+        row.addWidget(see)
+        pick = button('換圖' if spec else '指定圖檔')
+        pick.clicked.connect(lambda: self._pick_state(pack, st))
+        row.addWidget(pick)
+        if spec and st != 'idle':
+            clr = button('清除', 'ghost')
+            clr.clicked.connect(lambda: self._clear_state(pack, st))
+            row.addWidget(clr)
+        return w
+
+    def _ask_image(self, title):
+        path, _ = QFileDialog.getOpenFileName(self, title, '', '圖片 (*.png *.apng *.gif *.webp)')
+        return path
+
+    def _pick_state(self, pack, st):
+        path = self._ask_image(f'選擇「{pet_pack.STATE_LABELS[st]}」的圖檔')
+        if not path:
+            return
+        try:
+            pet_pack.set_state(pack.folder, st, path)
+        except (ValueError, OSError) as e:
+            self.ctl.say(str(e))
+            return
+        self.state_combo.setCurrentIndex(pet_pack.STATES.index(st))
+        self._after_edit()
+
+    def _set_frames(self, pack, st, n):
+        try:
+            pet_pack.set_state(pack.folder, st, frames=n)
+        except (ValueError, OSError) as e:
+            self.ctl.say(str(e))
+            return
+        self._after_edit()
+
+    def _clear_state(self, pack, st):
+        try:
+            pet_pack.clear_state(pack.folder, st)
+        except (ValueError, OSError) as e:
+            self.ctl.say(str(e))
+            return
+        self._after_edit()
+
+    def _rename(self, pack, name):
+        if name.strip() and name.strip() != pack.name:
+            pet_pack.rename_pack(pack.folder, name)
+            self._after_edit()
+
+    def _delete_pack(self, pack):
+        try:
+            pet_pack.delete_pack(self.s.pets_dir, pack.pack_id)
+        except (ValueError, OSError) as e:
+            self.ctl.say(str(e))
+            return
+        self.ctl.say(f'已刪除角色「{pack.name}」。', important=False)
+        self._after_edit('')
+
+    def _pick_new_idle(self):
+        path = self._ask_image('選擇「待命」的圖檔（之後可以再加其他狀態）')
+        if path:
+            self.new_idle = path
+            self.new_pick.setText(os.path.basename(path))
+
+    def _create_pack(self):
+        if not self.new_idle:
+            self.ctl.say('請先選擇「待命」的圖檔。')
+            return
+        try:
+            pid = pet_pack.create_pack(self.s.pets_dir, self.new_name.text() or '我的角色', self.new_idle)
+        except (ValueError, OSError) as e:
+            self.ctl.say(str(e))
+            return
+        self.new_form.hide()
+        self.new_name.clear()
+        self.new_idle = ''
+        self.new_pick.setText('選擇「待命」圖檔…')
+        self.ctl.say('角色建立好了！接著可以替其他狀態指定圖檔。', important=False)
+        self._after_edit(pid)
+
+    def _import_menu(self):
+        m = QMenu(self)
+        m.addAction('從 zip 檔匯入…', lambda: self._import(True))
+        m.addAction('從資料夾匯入…', lambda: self._import(False))
+        m.exec(self.cursor().pos())
+
+    def _import(self, from_zip):
+        if from_zip:
+            src, _ = QFileDialog.getOpenFileName(self, '選擇角色包', '', '角色包 (*.zip)')
+        else:
+            src = QFileDialog.getExistingDirectory(self, '選擇角色資料夾')
+        if not src:
+            return
+        try:
+            pid = pet_pack.import_pack(src, self.s.pets_dir)
+        except (ValueError, OSError) as e:
+            self.ctl.say(f'匯入失敗：{e}')
+            return
+        self.ctl.say('角色包匯入完成，已經換上了！', important=False)
+        self._after_edit(pid)
 
     def _preview_state(self):
         p = self.packs[self.pack_combo.currentIndex()]
@@ -262,6 +522,381 @@ class PetPage(QWidget):
     def _open_pets_dir(self):
         os.makedirs(self.s.pets_dir, exist_ok=True)
         os.startfile(self.s.pets_dir)
+
+
+# ── 快捷面板 ──
+class PanelPage(QWidget):
+    """快捷面板的區塊順序與開關、6 格快捷按鈕（內建或自訂動作）"""
+
+    def __init__(self, ctl):
+        super().__init__()
+        from core import slots as SL
+        self.SL = SL
+        self.ctl = ctl
+        self.s = ctl.settings
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(24)
+        lay.addWidget(PageHeader('快捷面板', '點寵物出現的面板：要顯示哪些區塊、順序，以及 6 格快捷按鈕要做什麼'))
+        self.blocks_group = SettingGroup('區塊', '用箭頭調整順序；關閉的區塊不會顯示')
+        lay.addWidget(self.blocks_group)
+        g = SettingGroup('最近開啟')
+        g.row('顯示幾個檔案', '', _spin(ctl, 'panel.recent_count', 2, 8, ' 個', int))
+        lay.addWidget(g)
+        self.slots_group = SettingGroup('快捷按鈕', '每格可以是內建功能，或開啟檔案／資料夾、執行程式、開網址')
+        lay.addWidget(self.slots_group)
+        lay.addStretch(1)
+        self._build_blocks()
+        self._build_slots()
+
+    def _clear_group(self, g):
+        while g.inner.count():
+            w = g.inner.takeAt(0).widget()
+            if w:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
+        g._rows = 0
+
+    def _build_blocks(self):
+        self._clear_group(self.blocks_group)
+        order, on = self._order()
+        for i, b in enumerate(order):
+            box = QWidget()
+            row = QHBoxLayout(box)
+            row.setContentsMargins(0, 0, 0, 0)
+            up = button('', 'ghost', ic='up', tip='往上')
+            up.setEnabled(i > 0)
+            down = button('', 'ghost', ic='down', tip='往下')
+            down.setEnabled(i < len(order) - 1)
+            up.clicked.connect(lambda _=False, k=b: self._move(k, -1))
+            down.clicked.connect(lambda _=False, k=b: self._move(k, 1))
+            t = ToggleSwitch(b in on)
+            t.toggled.connect(lambda v, k=b: self._toggle_block(k, v))
+            row.addWidget(up)
+            row.addWidget(down)
+            row.addSpacing(8)
+            row.addWidget(t)
+            self.blocks_group.row(self.SL.BLOCKS[b], '', box)
+
+    def _save_blocks(self, order, on):
+        self.s.set('panel.blocks', [b for b in order if b in on])
+        self.s.save()
+
+    def _move(self, key, delta):
+        order, on = self._order()
+        i = order.index(key)
+        j = max(0, min(len(order) - 1, i + delta))
+        order[i], order[j] = order[j], order[i]
+        self.s.set('panel.block_order', order)
+        self._save_blocks(order, on)
+        self._build_blocks()
+
+    def _toggle_block(self, key, v):
+        order, on = self._order()
+        (on.add if v else on.discard)(key)
+        self._save_blocks(order, on)
+
+    def _order(self):
+        """(全部區塊的排列順序, 開著的區塊)；關閉的區塊也要記住位置，重新打開時回到原處"""
+        on = self.SL.normalize_blocks(self.s.get('panel.blocks', []))
+        saved =[b for b in (self.s.get('panel.block_order') or []) if b in self.SL.BLOCKS]
+        base = saved or (on + [b for b in self.SL.BLOCKS if b not in on])
+        order = base + [b for b in self.SL.BLOCKS if b not in base]
+        return order, set(on)
+
+    def _build_slots(self):
+        self._clear_group(self.slots_group)
+        entries = self.SL.normalize_slots(self.s.get('panel.slots', []))
+        for i, e in enumerate(entries):
+            self.slots_group.add(self._slot_row(i, e))
+
+    def _slot_row(self, i, entry):
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(18, 12, 18, 12)
+        lay.setSpacing(8)
+        top = QHBoxLayout()
+        top.addWidget(label(f'第 {i + 1} 格', 'body', wrap=False))
+        top.addStretch(1)
+        kind = QComboBox()
+        kind.setMinimumWidth(200)
+        kind.addItem('（空）', None)
+        for k, (text, _ic, _tip) in self.SL.BUILTIN.items():
+            kind.addItem(text if k != 'open_sai2' else '開啟 SAI2', k)
+        for k, (text, _ic) in self.SL.CUSTOM.items():
+            kind.addItem(f'自訂：{text}', f'custom:{k}')
+        cur = entry if isinstance(entry, str) or entry is None else f"custom:{entry.get('type')}"
+        kind.setCurrentIndex(max(0, kind.findData(cur)))
+        top.addWidget(kind)
+        lay.addLayout(top)
+        note = label('', 'warn')
+        note.hide()
+        if isinstance(entry, dict):
+            form = QHBoxLayout()
+            name = QLineEdit(entry.get('label', ''))
+            name.setPlaceholderText('按鈕文字（最多 6 字）')
+            name.setMaxLength(6)
+            name.setFixedWidth(150)
+            target = QLineEdit(entry.get('target', ''))
+            target.setPlaceholderText({'url': 'https://…', 'program': '程式路徑（.exe）', 'path': '檔案或資料夾路徑'}[entry['type']])
+            form.addWidget(name)
+            form.addWidget(target, 1)
+            if entry['type'] != 'url':
+                pick = button('瀏覽…')
+                pick.clicked.connect(lambda: self._browse(entry['type'], target))
+                form.addWidget(pick)
+            lay.addLayout(form)
+            args = None
+            if entry['type'] == 'program':
+                args = QLineEdit(entry.get('args', ''))
+                args.setPlaceholderText('啟動參數（可留白）')
+                lay.addWidget(args)
+
+            def save_custom():
+                new = {'type': entry['type'], 'label': name.text().strip(), 'target': target.text().strip()}
+                if args is not None:
+                    new['args'] = args.text().strip()
+                err = self.SL.validate(new)
+                note.setText(err or '')
+                note.setVisible(bool(err))
+                self._set_slot(i, new, rebuild=False)
+            for ed in (name, target) + ((args,) if args is not None else ()):
+                ed.editingFinished.connect(save_custom)
+        lay.addWidget(note)
+        kind.currentIndexChanged.connect(lambda _i: self._kind_changed(i, kind.currentData()))
+        return w
+
+    def _browse(self, kind, target):
+        if kind == 'path':
+            path = QFileDialog.getExistingDirectory(self, '選擇資料夾', target.text())
+            if not path:
+                path, _ = QFileDialog.getOpenFileName(self, '或選擇檔案', target.text())
+        else:
+            path, _ = QFileDialog.getOpenFileName(self, '選擇程式', target.text(), '程式 (*.exe *.bat *.cmd *.lnk)')
+        if path:
+            target.setText(os.path.normpath(path))
+            target.editingFinished.emit()
+
+    def _kind_changed(self, i, data):
+        if isinstance(data, str) and data.startswith('custom:'):
+            entry = {'type': data.split(':', 1)[1], 'label': '', 'target': ''}
+        else:
+            entry = data
+        self._set_slot(i, entry, rebuild=True)
+
+    def _set_slot(self, i, entry, rebuild):
+        entries = self.SL.normalize_slots(self.s.get('panel.slots', []))
+        entries[i] = entry
+        self.s.set('panel.slots', entries)
+        self.s.save()
+        if rebuild:
+            self._build_slots()
+
+
+# ── 規則 ──
+class RulesPage(QWidget):
+    def __init__(self, ctl):
+        super().__init__()
+        from core import rules as R
+        self.R = R
+        self.ctl = ctl
+        self.s = ctl.settings
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(24)
+        head = PageHeader('規則', '讓 DrawCompanion 自動做事：如果發生某件事，就執行某個動作')
+        ex = button('加入範例', 'ghost', ic='canvas')
+        ex.clicked.connect(self._add_examples)
+        add = button('新增規則', 'primary', ic='canvas')
+        add.clicked.connect(self._add)
+        head.actions.addWidget(ex)
+        head.actions.addWidget(add)
+        lay.addWidget(head)
+        self.group = SettingGroup('我的規則', '休息提醒在「寵物」頁設定；這裡的規則會另外執行。1.x 執行中時規則暫停')
+        lay.addWidget(self.group)
+        lay.addStretch(1)
+        self._build()
+
+    def _rules(self):
+        return list(self.s.get('rules', []) or [])
+
+    def _save(self, rules):
+        self.s.set('rules', rules)
+        self.s.save()
+
+    def _build(self):
+        g = self.group
+        while g.inner.count():
+            w = g.inner.takeAt(0).widget()
+            if w:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
+        g._rows = 0
+        rules = self._rules()
+        if not rules:
+            empty = QWidget()
+            el = QVBoxLayout(empty)
+            el.setContentsMargins(18, 18, 18, 18)
+            el.addWidget(label('還沒有規則。按「新增規則」，或「加入範例」看看可以怎麼用。', 'muted'))
+            g.add(empty)
+        for r in rules:
+            g.add(self._row(r))
+
+    def _value_widget(self, kind, value, placeholder, choices=None):
+        if kind == 'int':
+            w = QSpinBox()
+            w.setRange(1, 600)
+            w.setValue(int(value or 60))
+            w.setSuffix(' 分')
+            w.setFixedWidth(110)
+            return w, lambda: w.value(), w.editingFinished
+        if kind == 'choice':
+            w = QComboBox()
+            for k, text in (choices or {}).items():
+                w.addItem(text, k)
+            w.setCurrentIndex(max(0, w.findData(value)))
+            return w, lambda: w.currentData(), w.currentIndexChanged
+        if kind in ('text', 'time'):
+            w = QLineEdit('' if value is None else str(value))
+            w.setPlaceholderText(placeholder)
+            if kind == 'time':
+                w.setFixedWidth(90)
+            return w, lambda: w.text().strip(), w.editingFinished
+        return None, lambda: '', None
+
+    def _row(self, rule):
+        R = self.R
+        rule = R.normalize(rule)
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(18, 14, 18, 14)
+        lay.setSpacing(8)
+        line1 = QHBoxLayout()
+        on = ToggleSwitch(rule.get('enabled', True))
+        line1.addWidget(on)
+        line1.addWidget(label('如果', 'muted', wrap=False))
+        tcombo = QComboBox()
+        for k, (text, _p, _k) in R.TRIGGERS.items():
+            tcombo.addItem(text, k)
+        tcombo.setCurrentIndex(max(0, tcombo.findData(rule['trigger']['type'])))
+        line1.addWidget(tcombo)
+        tdef = R.TRIGGERS[rule['trigger']['type']]
+        tval, tget, tsig = self._value_widget(tdef[2], rule['trigger'].get('value'), tdef[1])
+        if tval:
+            line1.addWidget(tval)
+        line1.addStretch(1)
+        delete = button('', 'ghost', ic='close', tip='刪除這條規則')
+        line1.addWidget(delete)
+        lay.addLayout(line1)
+
+        rows = []                                  # [(類型下拉, 取值, 原本的動作)]
+        acts = rule['actions']
+        for i, act in enumerate(acts):
+            line = QHBoxLayout()
+            line.addSpacing(52)
+            line.addWidget(label('就' if i == 0 else '並且', 'muted', wrap=False))
+            acombo = QComboBox()
+            for k, (text, _p, _k) in R.ACTIONS.items():
+                acombo.addItem(text, k)
+            acombo.setCurrentIndex(max(0, acombo.findData(act['type'])))
+            line.addWidget(acombo)
+            adef = R.ACTIONS[act['type']]
+            aval, aget, asig = self._value_widget(adef[2], act.get('value'), adef[1], R.PET_ACTIONS)
+            if aval:
+                line.addWidget(aval, 1)
+            else:
+                line.addStretch(1)
+            if len(acts) > 1:
+                rm = button('', 'ghost', ic='minimize', tip='移除這個動作')
+                rm.clicked.connect(lambda _=False, idx=i: save(rebuild=True, drop=idx))
+                line.addWidget(rm)
+            lay.addLayout(line)
+            rows.append((acombo, aget, act, asig))
+        more = QHBoxLayout()
+        more.addSpacing(52)
+        add_act = button('＋ 再加一個動作', 'link')
+        add_act.setToolTip('例如寵物說話的同時做動作')
+        add_act.clicked.connect(lambda: save(rebuild=True, add=True))
+        more.addWidget(add_act)
+        more.addStretch(1)
+        lay.addLayout(more)
+        note = label('', 'warn')
+        lay.addWidget(note)
+
+        def save(rebuild=False, add=False, drop=None):
+            nt = tcombo.currentData()
+            tv = tget() if nt == rule['trigger']['type'] else (60 if nt == 'draw_minutes' else '')
+            new_acts = []
+            for i, (combo, getter, orig, _sig) in enumerate(rows):
+                if i == drop:
+                    continue
+                na = combo.currentData()
+                if na == orig['type']:
+                    val = getter()
+                else:
+                    val = 'cheer' if na == 'pet' else ''
+                new_acts.append({'type': na, 'value': val})
+            if add:
+                new_acts.append({'type': 'pet', 'value': 'cheer'})
+            new = {'id': rule['id'], 'enabled': on.isChecked(), 'trigger': {'type': nt, 'value': tv}, 'actions': new_acts}
+            err = R.validate(new)
+            note.setText(err or '')
+            note.setVisible(bool(err))
+            self._save([new if x.get('id') == rule['id'] else x for x in self._rules()])
+            if rebuild:
+                self._build()
+        on.toggled.connect(lambda _v: save())
+        tcombo.currentIndexChanged.connect(lambda _i: save(True))
+        if tsig is not None:
+            tsig.connect(lambda *_: save())
+        for combo, _g, _o, sig in rows:
+            combo.currentIndexChanged.connect(lambda _i: save(True))
+            if sig is not None:
+                sig.connect(lambda *_: save())
+        delete.clicked.connect(lambda: (self._save([x for x in self._rules() if x.get('id') != rule['id']]), self._build()))
+        err = R.validate(rule)
+        note.setText(err or '')
+        note.setVisible(bool(err))
+        return w
+
+    def _add(self):
+        self._save(self._rules() + [self.R.new_rule()])
+        self._build()
+
+    def _add_examples(self):
+        have = {self.R.describe(r) for r in self._rules()}
+        add = [self.R.new_rule(e['trigger'], e['actions']) for e in self.R.EXAMPLES]
+        self._save(self._rules() + [r for r in add if self.R.describe(r) not in have])
+        self._build()
+
+
+# ── 外觀 ──
+def appearance_page(ctl) -> QWidget:
+    w, lay = _page('外觀', '主色與深淺色會套用到主視窗、快捷面板與設定；參考小窗固定深色，疊在畫布上比較不刺眼')
+    g = SettingGroup('主題')
+    swatches = QWidget()
+    row = QHBoxLayout(swatches)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(10)
+    cur = ctl.settings.get('theme.accent', 'purple')
+    for key, (name, acc, _b, _h, _t) in theme.ACCENTS.items():
+        b = QPushButton()
+        b.setFixedSize(32, 32)
+        b.setToolTip(name)
+        b.setCursor(Qt.PointingHandCursor)
+        ring = theme.TEXT if key == cur else 'transparent'
+        b.setStyleSheet(f'QPushButton{{background:{acc};border-radius:16px;border:3px solid {ring};padding:0;}}')
+        b.clicked.connect(lambda _=False, k=key: ctl.set_theme(accent=k))
+        row.addWidget(b)
+    g.row('主色', '按鈕、選取、進度條的顏色', swatches)
+    seg = Segmented(list(theme.MODES.items()), ctl.settings.get('theme.mode', 'dark'))
+    seg.changed.connect(lambda v: ctl.set_theme(mode=v))
+    g.row('深色／淺色', '「跟隨 Windows」會依系統的應用程式模式切換', seg)
+    lay.addWidget(g)
+    lay.addStretch(1)
+    return w
 
 
 # ── 參考圖來源 ──
@@ -318,7 +953,7 @@ class HotkeysPage(QWidget):
         reset.clicked.connect(self._reset)
         head.actions.addWidget(reset)
         lay.addWidget(head)
-        groups = [('寵物與面板', ('panel', 'toggle_pet', 'open_sai2', 'snapshot')),
+        groups = [('寵物與面板', ('panel', 'toggle_pet', 'open_sai2', 'snapshot', 'record_toggle')),
                   ('參考小窗', ('ref_toggle', 'click_through', 'compare')),
                   ('速寫', ('sketch_next', 'sketch_pause'))]
         self.edits, self.rows = {}, {}
@@ -370,4 +1005,3 @@ class HotkeysPage(QWidget):
         conf = hotkeys.conflicts(self.s.get('hotkeys', {}))
         for action, row in self.rows.items():
             row.set_note(conf.get(action) or failed.get(action, ''))
-

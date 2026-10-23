@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import threading
+import time
 from datetime import datetime
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -88,6 +89,8 @@ class CompanionApp(QObject):
         super().__init__()
         self.qapp = qapp
         self.settings = settings
+        theme.apply(settings.get('theme.accent', 'purple'), settings.get('theme.mode', 'dark'))
+        qapp.setStyleSheet(theme.QSS)
         self.service = CompanionService(settings, exe_finder=self._find_exe)
         self.brain = PetBrain(settings.get('pet.rest_minutes', 50), settings.get('pet.night_sleep', False))
         self.backend = Win32Backend()
@@ -97,7 +100,12 @@ class CompanionApp(QObject):
         self._frames: dict[str, list] = {}
         self._pet_state = None
         self._reminded_unsaved: set[str] = set()
+        from core.rules import RuleEngine
+        self.rules = RuleEngine()
+        self._rule_events: set[str] = set()
         self._main = None
+        self.export_state = (None, '')       # 影片合成：(百分比, 訊息)
+        self._quitting = False
         self.ref_win = None
         self.open_done.connect(self._on_open_done)
         self.work_done.connect(lambda fn: fn())
@@ -106,9 +114,14 @@ class CompanionApp(QObject):
         self.bubble = Bubble()
         self.bubble.anchor = self.pet
         self.panel = QuickPanel(self)
-        self.pet.clicked.connect(self.toggle_panel)
+        self.pet.clicked.connect(self._pet_clicked)
+        from ui2.status_capsule import StatusCapsule
+        self.capsule = StatusCapsule()
+        self.capsule.anchor = self.pet
+        self.capsule.open_panel.connect(self.toggle_panel)
+        self.capsule.toggle_record.connect(lambda: self.run_slot('record'))
         self.pet.menu_requested.connect(self._pet_menu)
-        self.pet.moved.connect(lambda: self.bubble.isVisible() and self.bubble.reposition())
+        self.pet.moved.connect(self._pet_moved)
 
         self.hub = winutil.HotkeyHub(qapp)
         self.hub.triggered.connect(self._on_hotkey)
@@ -190,10 +203,15 @@ class CompanionApp(QObject):
             self.say(f'「{st.unsaved_file}」還沒存檔，存檔後畫圖時間才會被記錄。')
         if res.ready:
             self.on_ready(res.ready)
+            self._rule_events.add('quest_ready')
+        self._run_rules(st)
+        for pct, msg in res.export:
+            self._on_export(pct, msg)
         if res.events and self.panel.isVisible():
             self.panel.refresh()
         self._set_pet_state(state)
         self._apply_opacity()
+        self._update_capsule(st)
 
     def _heal(self):
         if QApplication.activePopupWidget() is not None:
@@ -203,6 +221,8 @@ class CompanionApp(QObject):
             self.ref_win.heal_topmost()
         if self.bubble.isVisible():
             winutil.force_topmost(winutil.hwnd_of(self.bubble))
+        if self.capsule.isVisible():
+            winutil.force_topmost(winutil.hwnd_of(self.capsule))
 
     # ── 寵物 ──
     def _dpr(self) -> float:
@@ -257,11 +277,14 @@ class CompanionApp(QObject):
         self.brain.night_sleep = bool(self.settings.get('pet.night_sleep', False))
         self.pet.snap_edges = bool(self.settings.get('pet.snap_edges', False))
         if reload_frames or self._pack is None:
-            self._pack = pet_pack.find_pack(self.settings.pets_dir, self.settings.get('pet.pack', ''))
+            self._pack = pet_pack.find_pack(self.settings.pets_dir, self.settings.get('pet.pack', ''), self.pet_tint())
             self._frames.clear()
             if self._pet_state:
                 self._set_pet_state(self._pet_state, force=True)
         self._apply_opacity()
+
+    def pet_tint(self) -> str | None:
+        return theme.PET_BODY if self.settings.get('pet.tint_builtin', True) else None
 
     def _pet_menu(self, pos):
         m = QMenu()
@@ -282,16 +305,40 @@ class CompanionApp(QObject):
     def hide_for_a_while(self):
         self.panel.hide()
         self.bubble.hide()
+        self.capsule.hide()
         self.pet.hide()
         self._unhide_timer.start(HIDE_MINUTES * 60 * 1000)
         self._tray.showMessage('DrawCompanion', f'寵物先躲起來 {HIDE_MINUTES} 分鐘，點系統匣圖示可以叫回來。',
                                QSystemTrayIcon.Information, 4000)
 
     def _tray_icon(self) -> QIcon:
-        img = pet_pack.builtin_pack().frames('idle', 64)[0][0]
+        img = pet_pack.builtin_pack(self.pet_tint()).frames('idle', 64)[0][0]
         return QIcon(to_pixmap(img))
 
     # ── 面板與泡泡 ──
+    def _pet_moved(self):
+        if self.bubble.isVisible():
+            self.bubble.reposition()
+        if self.capsule.isVisible():
+            self.capsule.reposition()
+
+    def _pet_clicked(self):
+        # 面板開著時點寵物：面板會因為「點到外面」先自己收起，這時不要再打開，達成「再點一次就關閉」
+        if not self.panel.isVisible() and time.monotonic() - self.panel.hidden_at < 0.35:
+            return
+        self.toggle_panel()
+
+    def _update_capsule(self, st):
+        show = (bool(self.settings.get('pet.show_timer', True)) and self.pet.isVisible()
+                and (st.sai2_running or not st.tracking))
+        if show:
+            self.capsule.set_status(st)
+            if not self.capsule.isVisible():
+                self.capsule.reposition()
+                self.capsule.show()
+        elif self.capsule.isVisible():
+            self.capsule.hide()
+
     def toggle_panel(self):
         if self.panel.isVisible():
             self.panel.hide()
@@ -329,7 +376,40 @@ class CompanionApp(QObject):
         if self.panel.quest_list is not None:
             self.panel.quest_list._open_inline(uid, 'checkin')
 
+    # ── 規則 ──
+    def _run_rules(self, st):
+        events, self._rule_events = self._rule_events, set()
+        if self.service.paused:
+            return
+        ctx = {'now': datetime.now(), 'sai2_running': st.sai2_running, 'drawing': st.drawing,
+               'current_file': st.current_file, 'events': events}
+        for act in self.rules.evaluate(self.settings.get('rules', []) or [], ctx):
+            self.run_rule_action(act)
+
+    def run_rule_action(self, act: dict):
+        t, v = act.get('type'), act.get('value')
+        if t == 'bubble':
+            self.say(str(v))
+        elif t == 'pet':
+            self.brain.trigger(v, 8 if v in ('rest', 'sleep') else None)
+        elif t == 'open_sketch':
+            if self.ref_win is None:
+                self.open_ref('sketch', None)
+        elif t == 'open_study':
+            if self.ref_win is None:
+                self.run_slot('study')
+        elif t in ('record_on', 'record_off'):
+            if bool(self.settings.get('timelapse.enabled')) != (t == 'record_on'):
+                self.set_recording(t == 'record_on')
+        elif t == 'snapshot':
+            self.run_slot('snapshot')
+        elif t == 'open_url':
+            self.run_slot({'type': 'url', 'label': '', 'target': str(v)})
+        elif t == 'open_path':
+            self.run_slot({'type': 'path', 'label': '', 'target': str(v)})
+
     def on_checked_in(self, uid: str):
+        self._rule_events.add('checkin')
         t = self.service.quests.task(uid)
         self.brain.trigger('cheer')
         msg = f'已打卡「{t["name"]}」，連續 {self.service.quests.streak()} 天！'
@@ -442,7 +522,51 @@ class CompanionApp(QObject):
         t = next((t for t in q.today_tasks() if t['mode'] == 'study' and t['status'] in ('active', 'ready')), None)
         return t['uid'] if t else None
 
-    def run_slot(self, key: str):
+    # ── 縮時錄影 ──
+    def set_recording(self, on: bool):
+        if self.service.paused:
+            self.say('1.x 正在執行，2.0 暫停中，無法開始錄影。')
+            return
+        self.service.set_recording(on)
+        if on:
+            from core.timelapse import find_ffmpeg
+            msg = '縮時錄影開始：開啟作品並動筆就會錄下來，所有檔案關閉時自動合成影片。'
+            if not find_ffmpeg():
+                msg += '\n（找不到 ffmpeg，影片無法合成，請先安裝）'
+            self.say(msg, important=False)
+        else:
+            self.say('縮時錄影已停止，正在合成影片。' if self.service.exporting_count() else '縮時錄影已停止。',
+                     important=False)
+        if self.panel.isVisible():
+            self.panel.refresh()
+
+    def _on_export(self, pct: int, msg: str):
+        self.export_state = (pct, msg)
+        videos = self.settings.videos_dir
+        if pct >= 100:
+            self.export_state = (None, msg)
+            self.brain.trigger('cheer')
+            self.say('縮時影片完成了！', actions=[('開啟資料夾', lambda: os.startfile(videos))])
+        elif pct == 0 and ('失敗' in msg or '錯誤' in msg or 'fail' in msg.lower() or 'error' in msg.lower()):
+            self.export_state = (None, msg)
+            self.say(f'影片合成失敗：{msg}')
+
+    def run_slot(self, key):
+        if isinstance(key, dict):
+            from core import slots
+            err = slots.run_custom(key)
+            if err:
+                self.say(f'無法執行「{slots.describe(key)[0]}」：{err}', actions=[('設定', lambda: self.open_settings('快捷面板'))])
+            return
+        if key == 'main':
+            self.open_main('今日')
+            return
+        if key == 'growth':
+            self.open_main('成長')
+            return
+        if key == 'record':
+            self.set_recording(not bool(self.settings.get('timelapse.enabled')))
+            return
         if key == 'sketch':
             self.open_ref('sketch', None)
             return
@@ -507,6 +631,37 @@ class CompanionApp(QObject):
             self._main = MainWindow(self)
         self._main.show_page(page)
 
+    def set_theme(self, accent: str | None = None, mode: str | None = None):
+        if accent:
+            self.settings.set('theme.accent', accent)
+        if mode:
+            self.settings.set('theme.mode', mode)
+        self.settings.save()
+        theme.apply(self.settings.get('theme.accent', 'purple'), self.settings.get('theme.mode', 'dark'))
+        self.qapp.setStyleSheet(theme.QSS)
+        self.apply_pet_settings(reload_frames=True)          # 內建角色跟著換色
+        self._tray.setIcon(self._tray_icon())
+        if self.ref_win is not None:
+            self.ref_win.setStyleSheet(theme.QSS + 'QWidget{background:transparent;}')
+        if self._main is not None:            # 主視窗重新建立，讓所有元件用新的色票
+            page = self._main.current or '外觀'
+            geo = self._main.geometry()
+            self._main.close()
+            self._main.deleteLater()
+            self._main = None
+            self.open_main(page)
+            self._main.setGeometry(geo)
+        if self.panel.isVisible():
+            self.panel.refresh()
+
+    def reload_settings(self):
+        """匯入設定後重新套用：主題、寵物、快捷鍵、錄影設定"""
+        self.apply_pet_settings(reload_frames=True)
+        self.apply_hotkeys()
+        self.service.apply_recorder_settings()
+        self.opener.exe_path = self.settings.get('sai2_exe', '') or self.opener.exe_path
+        self.set_theme()
+
     def open_control_center(self, page: str = '今日'):
         self.open_main(page)
 
@@ -540,11 +695,14 @@ class CompanionApp(QObject):
             if self.pet.isVisible():
                 self.panel.hide()
                 self.bubble.hide()
+                self.capsule.hide()
                 self.pet.hide()
             else:
                 self.show_pet()
         elif action in ('open_sai2', 'snapshot'):
             self.run_slot(action)
+        elif action == 'record_toggle':
+            self.run_slot('record')
         elif action == 'ref_toggle':
             if self.ref_win is not None:
                 self.ref_win.toggle_visible()
@@ -582,12 +740,31 @@ class CompanionApp(QObject):
             self.toggle_panel() if not self.panel.isVisible() else None
 
     def quit(self):
+        if self._quitting:
+            return
+        self._quitting = True
         self._tick_timer.stop()
         if self.ref_win is not None:
             self.ref_win.close()
-        self.service.stop()
+        self.service.stop()                  # 停止錄影時會把正在錄的檔案送去合成
         self.settings.save()
         self.hub.close()
+        if self.service.exporting_count():
+            # 影片還在合成：先收起畫面，合成完再結束（直接結束會留下半成品）
+            for w in (self.panel, self.bubble, self.capsule, self.pet, self._main):
+                if w is not None:
+                    w.hide()
+            self._tray.showMessage('DrawCompanion', '縮時影片合成中，完成後會自動結束。', QSystemTrayIcon.Information, 5000)
+            self._wait_export = QTimer(self, interval=1000, timeout=self._finish_quit)
+            self._wait_export.start()
+            return
+        self._finish_quit()
+
+    def _finish_quit(self):
+        if self.service.exporting_count():
+            return
+        if getattr(self, '_wait_export', None) is not None:
+            self._wait_export.stop()
         self._tray.hide()
         self.qapp.quit()
 

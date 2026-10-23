@@ -92,7 +92,7 @@ texts = [b.text() for b in p.findChildren(QPushButton)]
 check(any('立繪.psd' in t for t in texts), f'recent file listed {texts}')
 check(any(t in ('開始', '繼續', '打卡') for t in texts), 'quest buttons')
 slots = {b.text(): b.isEnabled() for b in p.findChildren(QToolButton) if b.property('slot')}
-check(slots.get('快照') and slots.get('SAI2') and slots.get('速寫') and not slots.get('錄影'), f'slot availability {slots}')
+check(slots.get('快照') and slots.get('SAI2') and slots.get('速寫') and slots.get('錄影'), f'slot availability {slots}')
 check('22 / 60 分' in ' '.join(lb.text() for lb in p.findChildren(QLabel)), 'today progress header')
 
 q = ctl.service.quests
@@ -164,7 +164,7 @@ failed = ctl.apply_hotkeys()
 check(isinstance(failed, dict) and 'panel' not in failed, f'hotkeys registered {failed}')
 ctl.open_control_center()
 check(mw.current == '今日' and mw.nav['今日'].isChecked(), 'control center is the same window')
-check(not mw.nav['課程'].isEnabled(), 'later pages disabled')
+check(all(b.isEnabled() for b in mw.nav.values()), 'all pages available (stage 3)')
 mw.close()
 
 # 隱藏一陣子

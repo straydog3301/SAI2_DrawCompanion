@@ -75,7 +75,7 @@ class ImageView(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.fillRect(self.rect(), QColor('#15151b'))
         if self.pm is None:
-            p.setPen(QColor(theme.MUTED))
+            p.setPen(QColor('#a3a1b3'))
             p.drawText(self.rect().adjusted(12, 12, -12, -12), Qt.AlignCenter | Qt.TextWordWrap, self.message or '載入中…')
             return
         r = self.image_rect()
@@ -131,14 +131,14 @@ class InfoBar(QWidget):
         f.setPixelSize(12)
         p.setFont(f)
         if self.hint:
-            p.setPen(QColor(theme.ACCENT_TEXT))
+            p.setPen(QColor('#c4b5fd'))
             p.drawText(QRect(10, 3, self.width() - 20, INFO_H - 3), Qt.AlignVCenter | Qt.AlignLeft,
                        p.fontMetrics().elidedText(self.hint, Qt.ElideRight, self.width() - 20))
             return
-        p.setPen(QColor(theme.WARNING if self.warn else theme.TEXT))
+        p.setPen(QColor('#fbbf6a' if self.warn else '#f2f1f6'))       # 資訊列固定深色底
         p.drawText(QRect(10, 3, self.width() - 80, INFO_H - 3), Qt.AlignVCenter | Qt.AlignLeft,
                    p.fontMetrics().elidedText(self.left, Qt.ElideRight, self.width() - 90))
-        p.setPen(QColor(theme.ACCENT_TEXT))
+        p.setPen(QColor('#c4b5fd'))
         p.drawText(QRect(self.width() - 80, 3, 70, INFO_H - 3), Qt.AlignVCenter | Qt.AlignRight, self.right)
 
     def mouseReleaseEvent(self, _e):
@@ -550,6 +550,7 @@ class RefWindow(QWidget):
     def showEvent(self, e):
         super().showEvent(e)
         winutil.set_round_corners(winutil.hwnd_of(self))
+        winutil.set_frame_colors(winutil.hwnd_of(self), border=theme.ACCENT)
 
     # ── 穿透、透明度、膠囊 ──
     def set_click_through(self, on: bool):

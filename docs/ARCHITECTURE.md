@@ -32,6 +32,11 @@
 | `file_paths.py` | 由追蹤紀錄的檔案 key 反推實際路徑（自 1.x main.py 移入） |
 | `sketch_source.py` | 速寫圖源（本機 / Unsplash / Pexels 網址池）、倒數計張與歷史（自 1.x main.py 移入） |
 | `study_tools.py` | 臨摹研究的影像工具、分段計時、練習畫布（自 1.x study_window.py 移入） |
+| `stats.py` | 動筆時間統計圖資料（週／月／三個月／半年／一年／至今，自 1.x main.py 移入） |
+| `works.py` | 作品清單：分組、排序、搜尋、影片資料夾、課程歷次紀錄 |
+| `slots.py` | 2.0：快捷面板的區塊與快捷按鈕（內建動作、開啟檔案／資料夾、執行程式、開網址） |
+| `rules.py` | 2.0：「如果…就…」規則引擎（固定的觸發條件與動作清單） |
+| `backup.py` | 2.0：整套設定與角色包的匯出／匯入（不匯出本機路徑，金鑰預設不匯出） |
 | `autostart.py` | 2.0：開機啟動（HKCU Run）、1.x 監視器捷徑偵測與移除 |
 
 ### 介面（Tk，1.x）
@@ -41,7 +46,9 @@
 ### 介面（PySide6，2.0 開發中）
 `drawcompanion2.py`（進入點）、`ui2/app.py`（常駐主程式、系統匣、單一實例交接）、`ui2/pet_window.py`、`ui2/bubble.py`、
 `ui2/quick_panel.py`（快捷面板與共用的任務清單 `QuestList`）、`ui2/ref_window.py`（參考小窗：研究 / 速寫、穿透、比對、膠囊、打卡側滑面板）、
-`ui2/main_window.py`（主視窗：控制中心與設定合一，左側欄切換）、`ui2/settings_pages.py`（設定頁）、
+`ui2/main_window.py`（主視窗：控制中心與設定合一，左側欄切換）、`ui2/pages_more.py`（成長、課程、作品、工具頁）、
+`ui2/charts.py`（長條圖、走勢、月曆熱度）、`ui2/settings_pages.py`（設定頁：一般、寵物工作室、快捷面板、規則、外觀…）、
+`ui2/quests_page.py`（每日任務課表、範本、技能管理）、`ui2/status_capsule.py`（寵物下方的計時與錄影開關）、
 `ui2/widgets.py`（共用元件：開關、設定列、卡片、統計塊、步進器…）、`ui2/theme.py`（色票與樣式表）、`ui2/icons.py`、`ui2/winutil.py`。
 相依套件見 `requirements2.txt`；開發時用 `python drawcompanion2.py --data-dir <暫存資料夾>`，不碰真正的紀錄。
 

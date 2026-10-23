@@ -22,9 +22,10 @@ from ui2.quick_panel import QuestList
 from ui2.widgets import Card, Chip, NavButton, PageHeader, ProgressBar, StatTile, button, label
 
 LATER = '即將推出'
-NAV_MAIN = [('今日', 'home', ''), ('練習', 'sketch', ''), ('課程', 'study', LATER), ('成長', 'flame', LATER),
-            ('作品', 'works', LATER), ('工具', 'record', LATER)]
-NAV_SETTINGS = [('一般', 'settings'), ('寵物', 'play'), ('參考圖來源', 'image'), ('快捷鍵', 'grid')]
+NAV_MAIN = [('今日', 'home', ''), ('練習', 'sketch', ''), ('課程', 'study', ''), ('成長', 'flame', ''),
+            ('作品', 'works', ''), ('工具', 'record', '')]
+NAV_SETTINGS = [('一般', 'settings'), ('寵物', 'play'), ('快捷面板', 'canvas'), ('每日任務', 'check'), ('規則', 'refresh'),
+                ('外觀', 'opacity'), ('參考圖來源', 'image'), ('快捷鍵', 'grid')]
 SETTINGS_ALIASES = {'設定': '一般'}
 CONTENT_MAX_W = 1080
 
@@ -55,7 +56,7 @@ class WeekBars(QWidget):
             h = max(6, int((self.height() - 26) * sec / top))
             bw = min(28, cw * 0.5)
             x = int(i * cw + cw / 2 - bw / 2)
-            color = theme.ACCENT if d == today else ('#4c3d7a' if sec > 0 else '#24232c')
+            color = theme.ACCENT if d == today else (theme.BAR if sec > 0 else theme.TRACK)
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(color))
             p.drawRoundedRect(QRect(x, self.height() - 22 - h, int(bw), h), 6, 6)
@@ -102,16 +103,35 @@ class MainWindow(QWidget):
 
     # ── 側欄 ──
     def _sidebar(self) -> QWidget:
+        outer = QWidget()
+        outer.setObjectName('sidebar')
+        outer.setFixedWidth(236)
+        ol = QVBoxLayout(outer)
+        ol.setContentsMargins(0, 0, 0, 0)
+        ol.setSpacing(0)
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sc.viewport().setObjectName('svp')
+        sc.viewport().setStyleSheet(f'QWidget#svp{{background:{theme.SIDEBAR};}}')
         side = QWidget()
-        side.setObjectName('sidebar')
-        side.setFixedWidth(236)
+        side.setObjectName('svp')
+        side.setStyleSheet(f'QWidget#svp{{background:{theme.SIDEBAR};}}')
+        sc.setWidget(side)
+        ol.addWidget(sc, 1)
         lay = QVBoxLayout(side)
         lay.setContentsMargins(14, 20, 14, 16)
         lay.setSpacing(4)
         brand = QHBoxLayout()
         brand.setContentsMargins(6, 0, 0, 14)
         logo = QLabel()
-        img = pet_pack.builtin_pack().frames('idle', 72)[0][0]
+        pack = getattr(self.ctl, '_pack', None)
+        if pack is None or pack.builtin:
+            pack = pet_pack.builtin_pack(self.ctl.pet_tint() if hasattr(self.ctl, 'pet_tint') else None)
+        try:
+            img = pack.frames('idle', 72)[0][0]           # 側欄圖示用目前的角色（內建角色會跟隨主題色）
+        except Exception:
+            img = pet_pack.builtin_pack().frames('idle', 72)[0][0]
         pm = to_pixmap(img)
         pm.setDevicePixelRatio(2)
         logo.setPixmap(pm)
@@ -135,8 +155,11 @@ class MainWindow(QWidget):
         lay.addStretch(1)
         self.status_chip = Chip('', 'neutral')
         self.status_chip.setWordWrap(True)
-        lay.addWidget(self.status_chip)
-        return side
+        foot = QVBoxLayout()
+        foot.setContentsMargins(14, 8, 14, 14)
+        foot.addWidget(self.status_chip)
+        ol.addLayout(foot)
+        return outer
 
     def _add_nav(self, lay, name, ic, badge):
         b = NavButton(f'  {name}', ic, badge)
@@ -180,10 +203,16 @@ class MainWindow(QWidget):
 
     def showEvent(self, e):
         super().showEvent(e)
-        winutil.set_dark_titlebar(winutil.hwnd_of(self))
+        self.apply_frame()
+
+    def apply_frame(self):
+        """視窗外框用主色、標題列用側欄底色，讓主題色在視窗邊緣就看得到"""
+        hwnd = winutil.hwnd_of(self)
+        winutil.set_dark_titlebar(hwnd, not theme.IS_LIGHT)
+        winutil.set_frame_colors(hwnd, border=theme.ACCENT, caption=theme.SIDEBAR, text=theme.TEXT)
 
     def _build(self, name):
-        dynamic = name in ('今日', '練習')
+        dynamic = name in ('今日', '練習', '課程', '成長', '作品', '工具')
         if name in self._built and not dynamic:
             return
         holder = self.pages[name]
@@ -193,14 +222,30 @@ class MainWindow(QWidget):
         lay = QVBoxLayout(holder)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(24)
-        from ui2 import settings_pages as SP
+        from ui2 import pages_more as PM, quests_page as QP, settings_pages as SP
         builders = {'今日': self._today, '練習': self._practice,
+                    '課程': lambda l: l.addWidget(PM.CoursesPage(self.ctl)),
+                    '成長': lambda l: l.addWidget(PM.GrowthPage(self.ctl)),
+                    '作品': lambda l: l.addWidget(PM.WorksPage(self.ctl)),
+                    '工具': lambda l: l.addWidget(self._tools_page(PM)),
                     '一般': lambda l: l.addWidget(SP.general_page(self.ctl)),
                     '寵物': lambda l: l.addWidget(SP.PetPage(self.ctl)),
+                    '快捷面板': lambda l: l.addWidget(SP.PanelPage(self.ctl)),
+                    '每日任務': lambda l: l.addWidget(QP.QuestsPage(self.ctl)),
+                    '規則': lambda l: l.addWidget(SP.RulesPage(self.ctl)),
+                    '外觀': lambda l: l.addWidget(SP.appearance_page(self.ctl)),
                     '參考圖來源': lambda l: l.addWidget(SP.sources_page(self.ctl)),
                     '快捷鍵': lambda l: l.addWidget(SP.HotkeysPage(self.ctl))}
         builders.get(name, lambda l: l.addWidget(label(LATER, 'muted')))(lay)
         self._built.add(name)
+
+    def _tools_page(self, PM):
+        self.tools_page = PM.ToolsPage(self.ctl)
+        return self.tools_page
+
+    def page_widget(self, name: str, cls_name: str):
+        """測試與其他元件取得某頁的主要元件"""
+        return next((w for w in self.pages[name].findChildren(QWidget) if type(w).__name__ == cls_name), None)
 
     def _live(self):
         if not self.isVisible():
@@ -209,6 +254,11 @@ class MainWindow(QWidget):
         self._update_status_chip()
         if self.current == '今日' and getattr(self, '_status_card', None) is not None:
             self._fill_status()
+        if self.current == '工具' and getattr(self, 'tools_page', None) is not None:
+            try:
+                self.tools_page.refresh()
+            except RuntimeError:
+                self.tools_page = None
 
     def closeEvent(self, e):
         self._timer.stop()

@@ -220,7 +220,7 @@ check(ctl.ref_win is not None and ctl.ref_win.kind == 'study' and len(q.today_ta
 cc._study_path('value')
 check(len(q.today_tasks()) == before + 1, 'reuses today study task for same path')
 ctl.ref_win.close()
-check(not cc.nav['課程'].isEnabled() and cc.nav['練習'].isEnabled(), 'later pages disabled')
+check(all(b.isEnabled() for b in cc.nav.values()), 'all pages available (stage 3)')
 ctl.open_settings('參考圖來源')
 pump(200)
 labels = ' '.join(lb.text() for lb in cc.pages['參考圖來源'].findChildren(QLabel))

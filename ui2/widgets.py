@@ -32,7 +32,7 @@ def button(text: str = '', kind: str = 'secondary', ic: str | None = None, tip: 
     b.setProperty('kind', kind)
     b.setCursor(Qt.PointingHandCursor)
     if ic:
-        color = '#ffffff' if kind == 'primary' else ('#c4b5fd' if kind == 'link' else '#e6e4ef')
+        color = '#ffffff' if kind == 'primary' else (theme.ACCENT_TEXT if kind == 'link' else theme.ICON)
         b.setIcon(icon(ic, color, 18))
         b.setIconSize(QSize(18, 18))
     if tip:
@@ -75,13 +75,13 @@ class ToggleSwitch(QAbstractButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         on = QColor(theme.ACCENT_BTN)
-        off = QColor('#3a3946')
+        off = QColor(theme.TRACK if theme.IS_LIGHT else '#3a3946')
         track = QColor(
             int(off.red() + (on.red() - off.red()) * self._pos),
             int(off.green() + (on.green() - off.green()) * self._pos),
             int(off.blue() + (on.blue() - off.blue()) * self._pos))
         if not self.isEnabled():
-            track = QColor('#2a2933')
+            track = QColor(theme.TRACK)
         p.setPen(Qt.NoPen)
         p.setBrush(track)
         p.drawRoundedRect(QRectF(0, 2, 44, 20), 10, 10)
@@ -204,7 +204,7 @@ class ProgressBar(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         r = self.height() / 2
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor('#2a2933'))
+        p.setBrush(QColor(theme.TRACK))
         p.drawRoundedRect(QRectF(self.rect()), r, r)
         w = self.width() * max(0.0, min(1.0, self.ratio))
         if w > 0:
@@ -242,7 +242,7 @@ class NavButton(QPushButton):
         self.setProperty('nav', True)
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setIcon(icon(ic, '#c9c7d6', 18))
+        self.setIcon(icon(ic, theme.NAV_TEXT, 18))
         self.setIconSize(QSize(18, 18))
         self.badge = badge
         if badge:
@@ -260,9 +260,9 @@ class NavButton(QPushButton):
             w = p.fontMetrics().horizontalAdvance(self.badge) + 12
             r = QRectF(self.width() - w - 10, (self.height() - 18) / 2, w, 18)
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor('#24232c'))
+            p.setBrush(QColor(theme.SURFACE3))
             p.drawRoundedRect(r, 9, 9)
-            p.setPen(QColor('#8a8899'))
+            p.setPen(QColor(theme.SUBTLE))
             p.drawText(r, Qt.AlignCenter, self.badge)
 
 
