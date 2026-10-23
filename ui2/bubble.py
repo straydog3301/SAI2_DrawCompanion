@@ -70,7 +70,7 @@ class BubbleBody(QWidget):
             b.setCursor(Qt.PointingHandCursor)
             b.setStyleSheet(
                 'QPushButton{border:none;border-radius:8px;padding:5px 12px;font-size:12px;'
-                + (f'background:{theme.ACCENT};color:white;}}' if i == 0 else f'background:#e4e1d8;color:{INK};}}'))
+                + (f'background:{theme.ACCENT_BTN};color:white;}}' if i == 0 else f'background:#e4e1d8;color:{INK};}}'))
             b.clicked.connect(lambda _=False, f=fn: (on_click() if on_click else None, f()))
             self.buttons.addWidget(b)
         self.buttons.addStretch(1)

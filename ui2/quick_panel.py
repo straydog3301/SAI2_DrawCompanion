@@ -11,10 +11,11 @@ from datetime import datetime
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
-from PySide6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QComboBox, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QMenu, QPushButton, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
-from core import slots
+from core import data_text as DT
+from core import onboarding, slots
 from core.daily_quests import QuestManager
 from ui2 import theme
 from ui2.icons import icon
@@ -41,6 +42,57 @@ def _rel_time(iso: str) -> str:
     if d <= 0:
         return t.strftime('%H:%M')
     return '昨天' if d == 1 else f'{d} 天前'
+
+
+class PracticeCard(QFrame):
+    """第一次打開面板時的「30 秒調整你的練習」（§16）：每天想練多久、想加強什麼，可略過"""
+
+    def __init__(self, ctl, done):
+        super().__init__()
+        from ui2.widgets import Segmented
+        self.ctl = ctl
+        self._done = done
+        q = ctl.service.quests
+        self.setObjectName('practiceCard')
+        self.setStyleSheet(f'QFrame#practiceCard{{background:{theme.SURFACE2};border:1px solid {theme.ACCENT};'
+                           f'border-radius:14px;}}')
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(8)
+        lay.addWidget(_label('30 秒調整你的練習', h2=True))
+        tip = _label('決定每天排多少任務；之後隨時可以在設定改', muted=True)
+        tip.setWordWrap(True)
+        lay.addWidget(tip)
+        lay.addWidget(_label('每天想練多久', section=True))
+        cur = onboarding._nearest(float(q.settings.get('budget_minutes', 60)))
+        self.minutes = Segmented([(str(m), f'{m} 分') for m in onboarding.PRACTICE_MINUTES], str(cur))
+        self.minutes.setAccessibleName('每天想練多久')
+        lay.addWidget(self.minutes)
+        lay.addWidget(_label('想加強什麼', section=True))
+        self.focus = QComboBox()
+        self.focus.setAccessibleName('想加強的技能')
+        for sid, name in onboarding.focus_choices(q):
+            self.focus.addItem(name, sid)
+        self.focus.setCurrentIndex(max(0, self.focus.findData(q.settings.get('weekly_focus', ''))))
+        lay.addWidget(self.focus)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        skip = QPushButton('略過')
+        skip.setProperty('kind', 'ghost')
+        skip.setCursor(Qt.PointingHandCursor)
+        skip.clicked.connect(lambda: self._done(False, False))
+        ok = QPushButton('套用')
+        ok.setProperty('kind', 'primary')
+        ok.setCursor(Qt.PointingHandCursor)
+        ok.clicked.connect(self._apply)
+        row.addWidget(skip)
+        row.addWidget(ok)
+        lay.addLayout(row)
+
+    def _apply(self):
+        q = self.ctl.service.quests
+        regen = onboarding.apply_practice(q, int(self.minutes.value), self.focus.currentData() or '')
+        self._done(True, regen)
 
 
 class ProgressRing(QWidget):
@@ -117,6 +169,8 @@ class QuickPanel(QWidget):
             warn = _label('偵測到 1.x 正在執行，2.0 暫停記錄（避免重複計時）。關閉 1.x 後會自動繼續。', warn=True)
             warn.setWordWrap(True)
             self.body.addWidget(warn)
+        elif onboarding.show_practice_card(self.ctl.settings, svc.quests):
+            self.body.addWidget(PracticeCard(self.ctl, self._practice_done))
         for block in blocks:                  # 依設定的順序排列
             if block == 'progress':
                 self.body.addLayout(self._header(st))
@@ -132,6 +186,17 @@ class QuickPanel(QWidget):
         self.body.addWidget(self._footer())
         self.card.adjustSize()
         self.adjustSize()
+
+    def _practice_done(self, applied: bool, regenerated: bool):
+        s = self.ctl.settings
+        s.mark_prompted(onboarding.KEY_PRACTICE)
+        s.save()
+        if applied:
+            self.ctl.say('好，今天的任務已經照你的選擇排好了。' if regenerated
+                         else '記下了，明天起的任務會照你的選擇排。', important=False)
+        else:
+            self.ctl.say('之後想調整，可以到 設定 → 每日任務。', important=False)
+        self.refresh()
 
     def _header(self, st):
         row = QHBoxLayout()
@@ -355,7 +420,7 @@ class QuestList(QWidget):
         row.addWidget(tile)
         col = QVBoxLayout()
         col.setSpacing(4)
-        name = _label(t['name'])
+        name = _label(DT.task_name(t))
         name.setStyleSheet('font-size:13px;font-weight:600;' if not done else f'font-size:13px;color:{theme.MUTED};')
         col.addWidget(name)
         line = QHBoxLayout()
@@ -509,7 +574,7 @@ class QuestList(QWidget):
         tasks = [t for t in self.ctl.service.today_tasks() if t['status'] == 'active' and t['progress'] == 0]
         m = QMenu(self)
         for t in tasks:
-            m.addAction(t['name']).triggered.connect(lambda _=False, u=t['uid']: self._reroll(u))
+            m.addAction(DT.task_name(t)).triggered.connect(lambda _=False, u=t['uid']: self._reroll(u))
         if not tasks:
             m.addAction('沒有可以換的任務（已開始的不能換）').setEnabled(False)
         m.exec(self.cursor().pos())

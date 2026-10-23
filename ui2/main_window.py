@@ -14,6 +14,7 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QMenu,
                                QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
+from core import data_text as DT
 from core import growth, pet_pack, sketch_source as SK
 from core.daily_quests import MODES
 from ui2 import theme, winutil
@@ -100,6 +101,9 @@ class MainWindow(QWidget):
         self._built: set[str] = set()
         self.current = None
         self._timer = QTimer(self, interval=5000, timeout=self._live)
+        from PySide6.QtGui import QKeySequence, QShortcut
+        for seq, step in (('Ctrl+Tab', 1), ('Ctrl+Shift+Tab', -1), ('Ctrl+PgDown', 1), ('Ctrl+PgUp', -1)):
+            QShortcut(QKeySequence(seq), self, activated=lambda s=step: self.cycle_page(s))
 
     # ── 側欄 ──
     def _sidebar(self) -> QWidget:
@@ -163,10 +167,30 @@ class MainWindow(QWidget):
 
     def _add_nav(self, lay, name, ic, badge):
         b = NavButton(f'  {name}', ic, badge)
+        b.setAccessibleName(name)
+        b.installEventFilter(self)                   # 上下鍵在側欄移動
         b.clicked.connect(lambda _=False, n=name: self.show_page(n))
         self.nav_group.addButton(b)
         self.nav[name] = b
         lay.addWidget(b)
+
+    def _nav_order(self) -> list[str]:
+        return [n for n in self.page_index if self.nav[n].isEnabled()]
+
+    def cycle_page(self, step: int, focus_nav: bool = False):
+        order = self._nav_order()
+        i = order.index(self.current) if self.current in order else 0
+        name = order[(i + step) % len(order)]
+        self.show_page(name)
+        if focus_nav:
+            self.nav[name].setFocus(Qt.TabFocusReason)
+
+    def eventFilter(self, obj, ev):
+        from PySide6.QtCore import QEvent
+        if ev.type() == QEvent.KeyPress and isinstance(obj, NavButton) and ev.key() in (Qt.Key_Up, Qt.Key_Down):
+            self.cycle_page(-1 if ev.key() == Qt.Key_Up else 1, focus_nav=True)
+            return True
+        return super().eventFilter(obj, ev)
 
     def _update_status_chip(self):
         st = self.ctl.last_status
@@ -428,7 +452,7 @@ class MainWindow(QWidget):
         m = QMenu(self)
         for tpl in q.addable_templates():
             mode = MODES.get(tpl['mode'], {})
-            m.addAction(f"{tpl['name']}　（{mode.get('name', '')}）",
+            m.addAction(f"{DT.template_name(tpl)}　（{DT.mode_name(tpl['mode'])}）",
                         lambda tid=tpl['id']: (q.add_today(tid), q.save(force=True), ql.refresh()))
         if m.isEmpty():
             m.addAction('沒有可加入的任務').setEnabled(False)
@@ -459,7 +483,7 @@ class MainWindow(QWidget):
 
     def _path_card(self, sk, prog):
         c = Card(padding=18, spacing=8)
-        c.lay.addWidget(label(sk['name'], 'h2'))
+        c.lay.addWidget(label(DT.skill_name(sk), 'h2'))
         if prog['completed']:
             c.lay.addWidget(Chip('全部完成', 'ok'), 0, Qt.AlignLeft)
         else:

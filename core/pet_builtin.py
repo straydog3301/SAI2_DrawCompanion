@@ -30,26 +30,46 @@ class _Pen:
     def p(self, *xy):
         return [v * self.k for v in xy]
 
+    def _draw(self, fill):
+        """半透明的顏色要疊在下面的圖上（ImageDraw 直接取代像素，反光、腮紅會變成透明的洞）"""
+        if len(fill) == 4 and fill[3] < 255:
+            layer = Image.new('RGBA', self.img.size, (0, 0, 0, 0))
+            return layer, ImageDraw.Draw(layer)
+        return None, self.d
+
+    def _merge(self, layer):
+        if layer is not None:
+            self.img.alpha_composite(layer)
+
     def ellipse(self, cx, cy, rx, ry, fill):
-        self.d.ellipse(self.p(cx - rx, cy - ry, cx + rx, cy + ry), fill=fill)
+        layer, d = self._draw(fill)
+        d.ellipse(self.p(cx - rx, cy - ry, cx + rx, cy + ry), fill=fill)
+        self._merge(layer)
 
     def line(self, pts, fill, w):
-        self.d.line(self.p(*[v for pt in pts for v in pt]), fill=fill, width=max(1, int(w * self.k)), joint='curve')
+        layer, d = self._draw(fill)
+        d.line(self.p(*[v for pt in pts for v in pt]), fill=fill, width=max(1, int(w * self.k)), joint='curve')
         for x, y in (pts[0], pts[-1]):     # 圓頭
-            self.ellipse(x, y, w / 2, w / 2, fill)
+            d.ellipse(self.p(x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=fill)
+        self._merge(layer)
 
     def polygon(self, pts, fill):
-        self.d.polygon(self.p(*[v for pt in pts for v in pt]), fill=fill)
+        layer, d = self._draw(fill)
+        d.polygon(self.p(*[v for pt in pts for v in pt]), fill=fill)
+        self._merge(layer)
 
     def arc(self, cx, cy, r, start, end, fill, w):
-        self.d.arc(self.p(cx - r, cy - r, cx + r, cy + r), start, end, fill=fill, width=max(1, int(w * self.k)))
+        layer, d = self._draw(fill)
+        d.arc(self.p(cx - r, cy - r, cx + r, cy + r), start, end, fill=fill, width=max(1, int(w * self.k)))
+        self._merge(layer)
 
     def done(self, size: int) -> Image.Image:
         return self.img.resize((size, size), Image.LANCZOS)
 
 
-def _body(pen: _Pen, dx: float, dy: float, color, squash: float = 0.0):
-    pen.ellipse(60, 108, 30 - dy * 0.6, 5, (0, 0, 0, 60))                      # 影子（跳起來時變小）
+def _body(pen: _Pen, dx: float, dy: float, color, squash: float = 0.0, shadow: bool = True):
+    if shadow:
+        pen.ellipse(60, 108, 30 - dy * 0.6, 5, (0, 0, 0, 60))                  # 影子（跳起來時變小）
     pen.ellipse(60 + dx, 68 + dy, 40 + squash, 37 - squash, color)
     pen.polygon([(56 + dx, 34 + dy), (66 + dx, 18 + dy), (80 + dx, 15 + dy), (72 + dx, 24 + dy), (70 + dx, 34 + dy)], color)
     pen.arc(56 + dx, 66 + dy, 26, 200, 260, (255, 255, 255, 90), 4)           # 反光
@@ -135,6 +155,31 @@ def frame(state: str, i: int, size: int, body=BODY) -> Image.Image:
             r = 5 if k == 0 else 4
             pen.line([(zx - r, y - r), (zx + r, y - r), (zx - r, y + r), (zx + r, y + r)], (196, 181, 253, a), 2.4)
     return pen.done(size)
+
+
+ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+
+
+def icon(size: int, body=BODY) -> Image.Image:
+    """程式圖示（exe、視窗、工作列）：待命的墨墨，不含影子，裁掉留白後置中成正方形"""
+    big = max(256, size * 2)
+    pen = _Pen(big)
+    _body(pen, 0, 0, body, shadow=False)
+    _eyes_open(pen, 0, 0)
+    _mouth_smile(pen, 0, 0)
+    img = pen.done(big)
+    box = img.getchannel('A').point(lambda a: 255 if a > 8 else 0).getbbox()
+    img = img.crop(box)
+    side = int(max(img.size) * 1.04)                 # 四周留一點空間
+    sq = Image.new('RGBA', (side, side), (0, 0, 0, 0))
+    sq.paste(img, ((side - img.width) // 2, (side - img.height) // 2), img)
+    return sq.resize((size, size), Image.LANCZOS)
+
+
+def save_ico(path: str, body=BODY):
+    """多尺寸 .ico（打包 exe 用，見 DrawCompanion2.spec）"""
+    imgs = [icon(s, body) for s in ICON_SIZES]
+    imgs[-1].save(path, format='ICO', sizes=[(s, s) for s in ICON_SIZES], append_images=imgs[:-1])
 
 
 def parse_color(value) -> tuple:

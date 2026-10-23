@@ -17,18 +17,25 @@ ACCENTS = {
     'pink': ('粉紅', '#ec4899', '#be185d', '#9d174d', '#be185d'),
     'orange': ('橘', '#f97316', '#c2410c', '#9a3412', '#c2410c'),
 }
+# 一般文字至少 4.5:1（WCAG AA）的組合：(文字, 底色)；tests/ui2/test_accessibility.py 逐一檢查每個主題
+TEXT_PAIRS = [('TEXT', 'BG'), ('TEXT', 'CARD'), ('TEXT', 'SURFACE3'), ('TEXT', 'INPUT_BG'), ('TEXT', 'SELECT_BG'),
+              ('MUTED', 'BG'), ('MUTED', 'CARD'), ('MUTED', 'SURFACE2'), ('MUTED', 'SURFACE3'), ('SUBTLE', 'CARD'),
+              ('SUBTLE', 'SURFACE2'), ('ACCENT_TEXT', 'BG'), ('ACCENT_TEXT', 'CARD'), ('ACCENT_TEXT', 'ACCENT_SOFT'),
+              ('#ffffff', 'ACCENT_BTN'), ('#ffffff', 'ACCENT_BTN_HOVER'), ('WARNING', 'CARD'), ('WARNING', 'WARN_SOFT'),
+              ('SUCCESS', 'CARD'), ('SUCCESS', 'OK_SOFT'), ('DANGER', 'CARD'), ('NAV_TEXT', 'SIDEBAR'),
+              ('NAV_SELECTED_TEXT', 'NAV_SELECTED')]
 MODES = {'dark': '深色', 'light': '淺色', 'system': '跟隨 Windows'}
 
 DARK = dict(
     BG='#0e0e12', SIDEBAR='#121218', SURFACE='#16161c', CARD='#17171e', SURFACE2='#1d1c24', SURFACE3='#24232c',
-    BORDER='#26252f', DIVIDER='#22212a', TEXT='#f2f1f6', MUTED='#a3a1b3', SUBTLE='#77758a',
+    BORDER='#26252f', DIVIDER='#22212a', TEXT='#f2f1f6', MUTED='#a3a1b3', SUBTLE='#8a889e',
     SUCCESS='#86efac', WARNING='#fbbf6a', DANGER='#fca5a5', OK_SOFT='#16291e', WARN_SOFT='#2c2215',
     INPUT_BG='#1b1a22', INPUT_BORDER='#33323e', HOVER='#2e2d38', TRACK='#2a2933', ICON='#e6e4ef',
     NAV_TEXT='#c9c7d6', STRONG_TEXT='#ede9fe', DISABLED='#6b6979', SCROLL='#3a3946', HEAT0='#1d1c24',
 )
 LIGHT = dict(
     BG='#f5f4f8', SIDEBAR='#eeecf3', SURFACE='#ffffff', CARD='#ffffff', SURFACE2='#f3f2f7', SURFACE3='#e9e7f0',
-    BORDER='#e2e0ea', DIVIDER='#ebe9f1', TEXT='#1b1a22', MUTED='#5c5a6b', SUBTLE='#8a8899',
+    BORDER='#e2e0ea', DIVIDER='#ebe9f1', TEXT='#1b1a22', MUTED='#5c5a6b', SUBTLE='#6b697c',
     SUCCESS='#15803d', WARNING='#b45309', DANGER='#b91c1c', OK_SOFT='#dcfce7', WARN_SOFT='#fef3c7',
     INPUT_BG='#ffffff', INPUT_BORDER='#d4d1de', HOVER='#e2e0ea', TRACK='#dcd9e5', ICON='#3b3946',
     NAV_TEXT='#3b3946', STRONG_TEXT='#1b1a22', DISABLED='#a4a2b2', SCROLL='#cdcad8', HEAT0='#ebe9f1',
@@ -36,6 +43,7 @@ LIGHT = dict(
 
 IS_LIGHT = False
 ACCENT_KEY = 'purple'
+MOTION = True                 # False = 減少動態效果（開關不做滑動動畫）
 
 
 def _blend(a: str, b: str, t: float) -> str:
@@ -43,6 +51,23 @@ def _blend(a: str, b: str, t: float) -> str:
     ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
     cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
     return '#' + ''.join(f'{round(x + (y - x) * t):02x}' for x, y in zip(ca, cb))
+
+
+def _luminance(c: str) -> float:
+    ch = [int(c[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    ch = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in ch]
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+
+
+def contrast(a: str, b: str) -> float:
+    """WCAG 對比值（1～21）；一般文字至少 4.5"""
+    la, lb = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def on_color(bg: str, dark: str = '#1b1a22') -> str:
+    """放在 bg 上的文字用白色還是深色（取對比較高的）"""
+    return '#ffffff' if contrast('#ffffff', bg) >= contrast(dark, bg) else dark
 
 
 def system_is_light() -> bool:
@@ -71,9 +96,9 @@ def apply(accent: str = 'purple', mode: str = 'dark') -> str:
     g['SELECT_BG'] = _blend(pal['SURFACE2'], acc, 0.22 if light else 0.32)
     g['BAR'] = _blend(pal['CARD'], acc, 0.55 if light else 0.6)
     g['NAV_SELECTED'] = _blend(pal['SIDEBAR'], acc, 0.18 if light else 0.26)
-    g['NAV_SELECTED_TEXT'] = light_text if light else '#ffffff'
+    g['NAV_SELECTED_TEXT'] = _blend(light_text, '#000000', 0.2) if light else '#ffffff'   # 對比 ≥ 4.5
     g['PET_BODY'] = _blend(acc, '#2b2640', 0.18)       # 內建角色「墨墨」跟隨主色
-    g['HEAT'] = [pal['HEAT0'], _blend(pal['HEAT0'], acc, 0.3), _blend(pal['HEAT0'], acc, 0.6), acc]
+    g['HEAT'] = [pal['HEAT0'], _blend(pal['HEAT0'], btn, 0.3), _blend(pal['HEAT0'], btn, 0.6), btn]   # 深一階：格內數字才看得清楚
     g['QSS'] = build_qss()
     return g['QSS']
 
@@ -159,6 +184,10 @@ QMenu {{ background: {SURFACE2}; border: 1px solid {BORDER}; padding: 4px; }}
 QMenu::item {{ padding: 6px 18px; border-radius: 6px; }}
 QMenu::item:selected {{ background: {SELECT_BG}; }}
 QMenu::item:disabled {{ color: {DISABLED}; }}
+
+/* 鍵盤焦點（按鈕只在按 Tab 時取得焦點，見 ui2/a11y.py） */
+QPushButton:focus, QToolButton:focus {{ border: 2px solid {ACCENT_TEXT}; }}
+QSlider:focus {{ border: 1px dashed {ACCENT_TEXT}; border-radius: 4px; }}
 """
 
 

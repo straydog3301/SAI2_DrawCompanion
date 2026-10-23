@@ -23,7 +23,7 @@ from PySide6.QtGui import QAction, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QSystemTrayIcon
 
-from core import autostart, bubble_skin, hotkeys, pet_pack, study_lessons
+from core import autostart, bubble_skin, hotkeys, onboarding, pet_pack, study_lessons
 from core.companion import CompanionService
 from core.paths import APP_DIR
 from core.pet_state import PetBrain, PetInputs
@@ -90,7 +90,10 @@ class CompanionApp(QObject):
         self.qapp = qapp
         self.settings = settings
         theme.apply(settings.get('theme.accent', 'purple'), settings.get('theme.mode', 'dark'))
+        theme.MOTION = not settings.get('theme.reduce_motion', False)
         qapp.setStyleSheet(theme.QSS)
+        from ui2 import a11y
+        a11y.install(qapp)
         self.service = CompanionService(settings, exe_finder=self._find_exe)
         self.brain = PetBrain(rest_minutes=0)        # 休息提醒、夜間睡覺改用規則（core/rules.py）
         self.backend = Win32Backend()
@@ -129,6 +132,7 @@ class CompanionApp(QObject):
         self._hk_ids: dict[int, str] = {}
 
         self._tray = QSystemTrayIcon(self._tray_icon())
+        qapp.setWindowIcon(self._tray.icon())
         menu = QMenu()
         menu.addAction('快捷面板', self.toggle_panel)
         menu.addAction('控制中心', lambda: self.open_control_center())
@@ -180,9 +184,41 @@ class CompanionApp(QObject):
             return
         if self.service.paused:
             self.say('1.x 正在執行，2.0 先暫停記錄，避免重複計時。關閉 1.x 後會自動繼續。')
+        elif self._usage_prompt():
+            pass
         elif failed_hotkeys:
             self.say('有快捷鍵被其他程式佔用：' + '、'.join(hotkeys.ACTIONS[a][0] for a in failed_hotkeys)
                      + '。可以到設定修改。', actions=[('設定', lambda: self.open_settings('快捷鍵'))])
+
+    def _usage_prompt(self, now: datetime | None = None) -> bool:
+        """使用滿 3 天後各問一次（§16）：依實際動筆時間建議每日練習時間、要不要開機啟動。一次只問一件"""
+        s, q = self.settings, self.service.quests
+        if q is not None and q.settings.get('enabled', True) and onboarding.due_after_days(s, onboarding.KEY_TUNE, now):
+            s.mark_prompted(onboarding.KEY_TUNE)
+            s.save()
+            budget = float(q.settings.get('budget_minutes', 60))
+            new = onboarding.suggest_budget(self.service.daily_history(), budget, now, s.get('first_run_at', ''))
+            if new:
+                more = new > budget
+                self.say(f'這幾天平均每天畫得比 {int(budget)} 分鐘{"多" if more else "少"}，'
+                         f'要把每日練習時間改成 {new} 分鐘嗎？',
+                         actions=[(f'改成 {new} 分', lambda: self._set_budget(new)), ('維持', lambda: None)])
+                return True
+        if onboarding.due_after_days(s, onboarding.KEY_AUTOSTART, now) and not self.autostart_enabled():
+            s.mark_prompted(onboarding.KEY_AUTOSTART)
+            s.save()
+            self.say('要讓我開機就自動出現嗎？這樣不用每次手動打開，也不會漏記畫圖時間。',
+                     actions=[('開機啟動', lambda: (self.set_autostart(True), self.say('好，之後開機就會出現。', important=False))),
+                              ('不用', lambda: None)])
+            return True
+        return False
+
+    def _set_budget(self, minutes: int):
+        q = self.service.quests
+        q.settings['budget_minutes'] = int(minutes)
+        q.mark_dirty()
+        q.save(force=True)
+        self.say(f'每日練習時間改成 {minutes} 分鐘，明天起的任務會照這個排。', important=False)
 
     # ── 每秒 ──
     def _tick(self):
@@ -210,6 +246,8 @@ class CompanionApp(QObject):
         self._run_rules(st)
         for pct, msg in res.export:
             self._on_export(pct, msg)
+        if 'new_day' in res.events and not self.service.paused:
+            self._usage_prompt()
         if res.events and self.panel.isVisible():
             self.panel.refresh()
         self._set_pet_state(state)
@@ -313,8 +351,19 @@ class CompanionApp(QObject):
                                QSystemTrayIcon.Information, 4000)
 
     def _tray_icon(self) -> QIcon:
-        img = pet_pack.builtin_pack(self.pet_tint()).frames('idle', 64)[0][0]
-        return QIcon(to_pixmap(img))
+        """系統匣、視窗與工作列的圖示：墨墨（內建角色跟隨主題色時一起換色；exe 圖示固定預設色）"""
+        from core import pet_builtin
+        body = pet_builtin.parse_color(self.pet_tint())
+        ic = QIcon()
+        for size in (16, 20, 24, 32, 40, 48, 64, 128, 256):
+            ic.addPixmap(to_pixmap(pet_builtin.icon(size, body)))
+        return ic
+
+    def apply_app_icon(self):
+        ic = self._tray_icon()
+        self.qapp.setWindowIcon(ic)
+        if getattr(self, '_tray', None) is not None:
+            self._tray.setIcon(ic)
 
     # ── 面板與泡泡 ──
     def _pet_moved(self):
@@ -547,7 +596,14 @@ class CompanionApp(QObject):
         if pct >= 100:
             self.export_state = (None, msg)
             self.brain.trigger('cheer')
-            self.say('縮時影片完成了！', actions=[('開啟資料夾', lambda: os.startfile(videos))])
+            if not self.settings.was_prompted(onboarding.KEY_FIRST_VIDEO):
+                self.settings.mark_prompted(onboarding.KEY_FIRST_VIDEO)
+                self.settings.save()
+                self.say(f'第一部縮時影片完成了！影片放在：\n{videos}\n想放別的地方可以在「工具」頁更改。',
+                         actions=[('開啟資料夾', lambda: os.startfile(videos)), ('更改位置', lambda: self.open_main('工具'))],
+                         seconds=20)
+            else:
+                self.say('縮時影片完成了！', actions=[('開啟資料夾', lambda: os.startfile(videos))])
         elif pct == 0 and ('失敗' in msg or '錯誤' in msg or 'fail' in msg.lower() or 'error' in msg.lower()):
             self.export_state = (None, msg)
             self.say(f'影片合成失敗：{msg}')
@@ -641,7 +697,7 @@ class CompanionApp(QObject):
         theme.apply(self.settings.get('theme.accent', 'purple'), self.settings.get('theme.mode', 'dark'))
         self.qapp.setStyleSheet(theme.QSS)
         self.apply_pet_settings(reload_frames=True)          # 內建角色跟著換色
-        self._tray.setIcon(self._tray_icon())
+        self.apply_app_icon()
         if self.ref_win is not None:
             self.ref_win.setStyleSheet(theme.QSS + 'QWidget{background:transparent;}')
         if self._main is not None:            # 主視窗重新建立，讓所有元件用新的色票

@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout, QLineEdit, QPushButton,
                                QSpinBox, QVBoxLayout, QWidget)
 
+from core import data_text as DT
 from core import sketch_source as SK, study_lessons
 from core.daily_quests import MAX_TEMPLATE_NAME, MODES, SKETCH_ALLOWED_INTERVALS, est_minutes
 from ui2 import theme
@@ -68,7 +69,7 @@ class QuestsPage(QWidget):
         tpl_head = QHBoxLayout()
         tpl_head.addWidget(label('任務範本', 'section'))
         tpl_head.addStretch(1)
-        seg = Segmented([('all', '全部')] + [(k, v['name']) for k, v in MODES.items()], 'all')
+        seg = Segmented([('all', '全部')] + [(k, DT.mode_name(k)) for k in MODES], 'all')
         seg.changed.connect(self._set_filter)
         tpl_head.addWidget(seg)
         lay.addLayout(tpl_head)
@@ -156,8 +157,8 @@ class QuestsPage(QWidget):
         col = QVBoxLayout()
         col.setSpacing(3)
         top = QHBoxLayout()
-        top.addWidget(label(t['name'], 'body', wrap=False))
-        top.addWidget(Chip(MODES[t['mode']]['name'], 'accent'))
+        top.addWidget(label(DT.template_name(t), 'body', wrap=False))
+        top.addWidget(Chip(DT.mode_name(t['mode']), 'accent'))
         if not self.q.is_builtin_template(t['id']):
             top.addWidget(Chip('自訂', 'neutral'))
         top.addStretch(1)
@@ -215,7 +216,7 @@ class QuestsPage(QWidget):
         name.setPlaceholderText('例如「手部速寫 20 張」')
         mode = QComboBox()
         for k, v in MODES.items():
-            mode.addItem(v['name'], k)
+            mode.addItem(DT.mode_name(k), k)
         mode.setCurrentIndex(max(0, mode.findData(tpl['mode'])))
         mode.setEnabled(tid == 'new')
         weight = QDoubleSpinBox()
@@ -239,7 +240,7 @@ class QuestsPage(QWidget):
         chips.setSpacing(6)
         skill_btns = []
         for i, sk in enumerate(self.q.data['skills']):
-            b = QPushButton(sk['name'])
+            b = QPushButton(DT.skill_name(sk))
             b.setCheckable(True)
             b.setChecked(sk['id'] in (tpl.get('skills') or {}))
             b.setProperty('sid', sk['id'])
@@ -303,7 +304,7 @@ class QuestsPage(QWidget):
                 path.addItem('不用學習路徑（自選參考圖）', '')
                 for sk in self.q.data['skills']:
                     if study_lessons.path(sk['id']):
-                        path.addItem(f"學習路徑：{sk['name']}", sk['id'])
+                        path.addItem(f"學習路徑：{DT.skill_name(sk)}", sk['id'])
                 path.setCurrentIndex(max(0, path.findData(p.get('path', ''))))
                 params_box.addWidget(label('課程', 'caption'), 0, 0)
                 params_box.addWidget(path, 0, 1)
@@ -365,7 +366,7 @@ class QuestsPage(QWidget):
             w = QWidget()
             lay = QHBoxLayout(w)
             lay.setContentsMargins(18, 10, 18, 10)
-            lay.addWidget(label(f"{sk.get('icon', '')} {sk['name']}", 'body', wrap=False))
+            lay.addWidget(label(f"{sk.get('icon', '')} {DT.skill_name(sk)}", 'body', wrap=False))
             if sk.get('builtin', True) and not sk['id'].startswith('u_'):
                 lay.addWidget(Chip('內建', 'neutral'))
             lay.addStretch(1)

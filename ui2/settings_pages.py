@@ -8,7 +8,7 @@ import webbrowser
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QMenu,
+from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QMenu,
                                QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget)
 
 from core import bubble_skin, hotkeys, pet_pack
@@ -849,16 +849,26 @@ class RulesPage(QWidget):
         self.s.set('rules', rules)
         self.s.save()
 
-    def _scroll_bar(self):
+    def _scroll_area(self):
         from PySide6.QtWidgets import QScrollArea
         w = self.parentWidget()
         while w is not None and not isinstance(w, QScrollArea):
             w = w.parentWidget()
-        return w.verticalScrollBar() if w is not None else None
+        return w
+
+    def _scroll_bar(self):
+        sa = self._scroll_area()
+        return sa.verticalScrollBar() if sa is not None else None
 
     def _build(self):
-        bar = self._scroll_bar()
+        sa = self._scroll_area()
+        bar = sa.verticalScrollBar() if sa is not None else None
         keep = bar.value() if bar is not None else None
+        fw = QApplication.focusWidget()
+        if sa is not None and fw is not None and self.isAncestorOf(fw):
+            # 焦點所在的元件要被移除：先把焦點交給捲動區本身。否則 Qt 會自己挑下一個元件，
+            # 捲動區再捲過去讓它可見（常常捲回最上面）
+            sa.setFocus(Qt.OtherFocusReason)
         self.setUpdatesEnabled(False)
         try:
             self._rebuild()
@@ -866,8 +876,20 @@ class RulesPage(QWidget):
             if bar is not None:
                 self.layout().activate()          # 先算好新高度，捲軸範圍才不會把位置夾掉
                 bar.setValue(keep)
-                QTimer.singleShot(0, lambda: bar.setValue(keep))   # 焦點移動造成的自動捲動也還原
+                self._pin_scroll(bar, keep)
             self.setUpdatesEnabled(True)
+
+    def _pin_scroll(self, bar, keep: int):
+        """重排版面時捲動範圍會短暫縮成 0（位置被夾到最上面），之後才恢復；這段時間內範圍一恢復就把位置放回去"""
+        self._keep_scroll = keep
+        if getattr(self, '_pin_timer', None) is None:
+            # 同一個計時器重新計時：連續操作時，前一次的計時不會提早解除這一次的固定
+            self._pin_timer = QTimer(self, singleShot=True, interval=500,
+                                     timeout=lambda: setattr(self, '_keep_scroll', None))
+            bar.rangeChanged.connect(lambda _lo, hi: bar.setValue(self._keep_scroll)
+                                     if self._keep_scroll is not None and hi >= self._keep_scroll else None)
+        self._pin_timer.start()
+        QTimer.singleShot(0, lambda: bar.setValue(keep))
 
     def _rebuild(self):
         g = self.group
@@ -1038,6 +1060,13 @@ def appearance_page(ctl) -> QWidget:
     seg = Segmented(list(theme.MODES.items()), ctl.settings.get('theme.mode', 'dark'))
     seg.changed.connect(lambda v: ctl.set_theme(mode=v))
     g.row('深色／淺色', '「跟隨 Windows」會依系統的應用程式模式切換', seg)
+    lay.addWidget(g)
+    g = SettingGroup('無障礙', '主視窗可以用 Ctrl+Tab 切換頁面、Tab 移動到各個按鈕，側欄可以用上下鍵')
+
+    def motion(on):
+        theme.MOTION = not on
+    g.row('減少動態效果', '開關等元件不做滑動動畫', _toggle(ctl, 'theme.reduce_motion',
+                                                     lambda: motion(ctl.settings.get('theme.reduce_motion'))))
     lay.addWidget(g)
     lay.addStretch(1)
     return w

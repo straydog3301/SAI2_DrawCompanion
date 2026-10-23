@@ -172,7 +172,8 @@ rm = [x for x in rp.findChildren(QPushButton) if x.toolTip() == '移除這個動
 before = bar.value()
 rm[0].click()
 pump(150)
-check(abs(bar.value() - before) <= 2 or bar.value() == bar.maximum(), 'scroll kept after removing an action')
+check(abs(bar.value() - before) <= 2 or bar.value() == bar.maximum(),
+      f'scroll kept after removing an action ({before} → {bar.value()}, max {bar.maximum()})')
 
 mw.close()
 ctl.quit()

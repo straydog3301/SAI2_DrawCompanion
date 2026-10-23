@@ -154,13 +154,13 @@ class MonthGrid(QWidget):
                     p.setPen(QPen(QColor(theme.TEXT if cell['key'] == self.selected else theme.WARNING), 2))
                     p.setBrush(Qt.NoBrush)
                     p.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 9, 9)
-                p.setPen(QColor(theme.SUBTLE if cell['future'] else ('#ffffff' if level >= 2 else theme.TEXT)))
+                p.setPen(QColor(theme.SUBTLE if cell['future'] else (theme.on_color(color.name()) if level >= 2 else theme.TEXT)))
                 p.drawText(rect.adjusted(8, 6, -6, -6), Qt.AlignLeft | Qt.AlignTop, str(cell['day']))
                 if cell['rest'] and not cell['done']:
                     p.setPen(QColor(theme.ACCENT_TEXT))
                     p.drawText(rect.adjusted(6, 6, -8, -6), Qt.AlignRight | Qt.AlignBottom, '請假')
                 elif cell['done']:
-                    p.setPen(QColor('#ffffff' if level >= 2 else theme.ACCENT_TEXT))
+                    p.setPen(QColor(theme.on_color(color.name()) if level >= 2 else theme.ACCENT_TEXT))
                     p.drawText(rect.adjusted(6, 6, -8, -6), Qt.AlignRight | Qt.AlignBottom, f"✓{cell['done']}")
 
     def mouseReleaseEvent(self, e):

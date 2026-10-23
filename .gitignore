@@ -16,6 +16,7 @@ build/
 dist/
 videos/
 *.spec
+!DrawCompanion2.spec
 *.log
 *.exe
 

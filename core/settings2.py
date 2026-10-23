@@ -66,7 +66,7 @@ DEFAULTS: dict = {
          'actions': [{'type': 'bubble', 'value': '已經連續畫了 50 分鐘，起來喝口水、動一動吧'},
                      {'type': 'pet', 'value': 'rest'}]},
     ],
-    'theme': {'accent': 'purple', 'mode': 'dark'},
+    'theme': {'accent': 'purple', 'mode': 'dark', 'reduce_motion': False},
     'prompted': {},                       # 一次性提醒是否已出現過
     'first_run_at': '',
 }

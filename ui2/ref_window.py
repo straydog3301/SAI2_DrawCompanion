@@ -20,6 +20,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSizeGrip, QVBoxLayout, QWidget)
 
+from core import data_text as DT
 from core import sketch_source as SK, study_lessons, study_refs, study_tools as ST
 from core.daily_quests import PASS_RATING, QuestManager
 from ui2 import theme, winutil
@@ -1190,7 +1191,7 @@ class SketchMode:
     def info(self):
         s = self.session
         t = self.q.task(self.uid) if self.uid else None
-        left = f"{t['name']}　{QuestManager.progress_text(t)}" if t else f'本輪 {s.completed} 張'
+        left = f"{DT.task_name(t)}　{QuestManager.progress_text(t)}" if t else f'本輪 {s.completed} 張'
         if t and t['status'] == 'ready':
             left += '　已達標'
         if s.paused:

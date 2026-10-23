@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Property, QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractButton, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
                                QWidget)
 
@@ -64,6 +64,7 @@ class ToggleSwitch(QAbstractButton):
 
     def _animate(self, on):
         self._anim.stop()
+        self._anim.setDuration(140 if theme.MOTION else 0)
         self._anim.setStartValue(self._pos)
         self._anim.setEndValue(1.0 if on else 0.0)
         self._anim.start()
@@ -88,6 +89,10 @@ class ToggleSwitch(QAbstractButton):
         p.setBrush(QColor('#ffffff'))
         x = 3 + self._pos * 20
         p.drawEllipse(QRectF(x, 5, 14, 14))
+        if self.hasFocus():                          # 鍵盤焦點框
+            p.setPen(QPen(QColor(theme.ACCENT_TEXT), 2))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(QRectF(1, 1, 42, 22), 11, 11)
 
 
 class Card(QFrame):

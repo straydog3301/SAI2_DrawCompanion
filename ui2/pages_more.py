@@ -13,6 +13,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QScrollArea, QVBoxLayout, QWidget)
 
+from core import data_text as DT
 from core import growth, stats, study_lessons, works
 from core.daily_quests import QuestManager
 from ui2 import theme
@@ -236,7 +237,7 @@ class GrowthPage(QWidget):
         q.mark_dirty()
         q.save(force=True)
         skill = q.skill(sid)
-        self.ctl.say(f"本週主修：{skill['name']}，之後的課表會優先排這項技能" if q.settings['weekly_focus']
+        self.ctl.say(f"本週主修：{DT.skill_name(skill)}，之後的課表會優先排這項技能" if q.settings['weekly_focus']
                      else '已取消本週主修', important=False)
         self.ctl.open_main('成長')
 
@@ -263,7 +264,7 @@ class CoursesPage(QWidget):
         self.path_btns = {}
         for s in self.paths:
             prog = growth.path_progress(self.q, s['id'])
-            b = QPushButton(f"{s['name']}\n{prog['passed']}/{prog['total']} 課")
+            b = QPushButton(f"{DT.skill_name(s)}\n{prog['passed']}/{prog['total']} 課")
             b.setProperty('kind', 'ghost')
             b.setCheckable(True)
             b.setStyleSheet('QPushButton{text-align:left;padding:10px 14px;border-radius:12px;}'
@@ -544,7 +545,7 @@ class WorksPage(QWidget):
             grid.setSpacing(6)
             cur = set(q.file_tags(key))
             for i, sk in enumerate(q.data['skills']):
-                b = QPushButton(sk['name'])
+                b = QPushButton(DT.skill_name(sk))
                 b.setCheckable(True)
                 b.setChecked(sk['id'] in cur)
                 b.setEnabled(editable)

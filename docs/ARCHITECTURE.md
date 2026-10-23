@@ -38,6 +38,8 @@
 | `rules.py` | 2.0：「如果…就…」規則引擎（固定的觸發條件與動作清單，一條規則可有多個動作；休息提醒、夜間睡覺也是規則） |
 | `backup.py` | 2.0：整套設定、角色包與泡泡圖的匯出／匯入（不匯出本機路徑，金鑰預設不匯出） |
 | `bubble_skin.py` | 2.0：對話泡泡的自訂外觀（單張圖＋文字範圍，九宮格延伸） |
+| `onboarding.py` | 2.0：用到時才提醒（「30 秒調整你的練習」、使用 3 天後建議練習時間與開機啟動、第一部影片位置） |
+| `data_text.py` | 2.0：內建技能／範本／練習方式／課程以 id 對應翻譯表（`locales/data_<語言>.json`；目前只有繁中） |
 | `autostart.py` | 2.0：開機啟動（HKCU Run）、1.x 監視器捷徑偵測與移除 |
 
 ### 介面（Tk，1.x）
@@ -50,8 +52,9 @@
 `ui2/main_window.py`（主視窗：控制中心與設定合一，左側欄切換）、`ui2/pages_more.py`（成長、課程、作品、工具頁）、
 `ui2/charts.py`（長條圖、走勢、月曆熱度）、`ui2/settings_pages.py`（設定頁：一般、寵物工作室、快捷面板、規則、外觀…）、
 `ui2/quests_page.py`（每日任務課表、範本、技能管理）、`ui2/status_capsule.py`（寵物下方的計時與錄影開關）、
-`ui2/widgets.py`（共用元件：開關、設定列、卡片、統計塊、步進器…）、`ui2/theme.py`（色票與樣式表）、`ui2/icons.py`、`ui2/winutil.py`。
+`ui2/widgets.py`（共用元件：開關、設定列、卡片、統計塊、步進器…）、`ui2/theme.py`（色票與樣式表、WCAG 對比檢查）、`ui2/a11y.py`（鍵盤焦點、報讀名稱）、`ui2/icons.py`、`ui2/winutil.py`。
 相依套件見 `requirements2.txt`；開發時用 `python drawcompanion2.py --data-dir <暫存資料夾>`，不碰真正的紀錄。
+打包用 `build2.bat`（設定在 `DrawCompanion2.spec`，只帶用到的 Qt 模組），輸出 `DrawCompanion2.exe`；放在 1.x 的 exe 旁邊即共用同一份紀錄。
 
 ## 資料相容
 所有資料檔都在 `APP_DIR`，2.0 直接讀取同一批檔案，使用者紀錄不需轉換（1.x 執行中時 2.0 暫停記錄，避免兩邊同時寫入）：
