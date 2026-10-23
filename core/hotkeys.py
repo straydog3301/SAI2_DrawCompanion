@@ -33,6 +33,7 @@ ACTIONS = {
     'compare':    ('按住比對我的畫布', 'Ctrl+Alt+C'),
     'sketch_next': ('速寫：下一張', 'Ctrl+Alt+N'),
     'sketch_pause': ('速寫：暫停／繼續', 'Ctrl+Alt+P'),
+    'record_toggle': ('縮時錄影：開始／停止', ''),
 }
 
 # 1.x 會註冊的快捷鍵（預設值），設定頁提示衝突用

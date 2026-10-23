@@ -17,7 +17,7 @@ from core import hotkeys
 SETTINGS_FILE = 'drawcompanion2_settings.json'
 LEGACY_SETTINGS_FILE = 'sai2_timer_settings.json'
 
-SETTINGS_VERSION = 2
+SETTINGS_VERSION = 3
 
 DEFAULTS: dict = {
     'version': SETTINGS_VERSION,
@@ -37,6 +37,8 @@ DEFAULTS: dict = {
         'rest_minutes': 50,               # 連續動筆多久提醒休息（0 = 不提醒）
         'bubbles': 'important',           # all / important / off
         'night_sleep': False,             # 夜間（23～6 點）顯示睡覺
+        'show_timer': True,               # 寵物下方顯示本次動筆時間與錄影開關
+        'tint_builtin': True,             # 內建角色「墨墨」跟隨主題色
     },
     'panel': {
         'blocks': ['progress', 'quests', 'recent', 'slots'],
@@ -51,12 +53,17 @@ DEFAULTS: dict = {
     },
     'sketch': {'source': 'local', 'category': 'pose', 'custom_query': '', 'local_category': '',
                'interval': 60, 'grayscale': False},
-    'study': {'canvas_dir': '', 'canvas_side': 2000},   # canvas_side：練習畫布長邊（px）          # 空白 = 文件\SAI2 練習
+    'study': {'canvas_dir': '', 'canvas_side': 2000},   # canvas_dir 空白 = 文件\SAI2 練習；canvas_side：長邊 px
+    'timelapse': {'enabled': False, 'multiplier': 5, 'target': 'canvas', 'quality': 'standard', 'fps': 30,
+                  'output_dir': ''},      # output_dir 空白 = APP_DIR/videos
+    'works': {'groups': {}, 'sort': 'recent'},
     'ref': {                              # 參考小窗：位置與寬度依模式分別記住
         'sketch': {'w': 240, 'x': None, 'y': None},
         'study': {'w': 260, 'x': None, 'y': None},
         'through_opacity': 0.5,
     },
+    'rules': [],                          # 「如果…就…」規則（core/rules.py）
+    'theme': {'accent': 'purple', 'mode': 'dark'},
     'prompted': {},                       # 一次性提醒是否已出現過
     'first_run_at': '',
 }
@@ -70,7 +77,31 @@ _LEGACY_KEYS = {
     'sketch_category': 'sketch.category', 'sketch_custom_query': 'sketch.custom_query',
     'sketch_local_category': 'sketch.local_category', 'sketch_interval': 'sketch.interval',
     'sketch_grayscale': 'sketch.grayscale', 'study_canvas_dir': 'study.canvas_dir',
+    'timelapse_multiplier_str': 'timelapse.multiplier', 'timelapse_target_str': 'timelapse.target',
+    'timelapse_quality': 'timelapse.quality', 'timelapse_fps': 'timelapse.fps',
+    'timelapse_output_dir': 'timelapse.output_dir', 'custom_groups': 'works.groups',
 }
+TIMELAPSE_TARGETS = ('canvas', 'canvas_float', 'window', 'screen')
+
+
+def _legacy_value(key: str, value):
+    """1.x 的顯示字串轉成 2.0 的值（倍速「5x (167ms)」→ 5、舊版中文錄製範圍 → 代碼）"""
+    import re
+    if key == 'timelapse_multiplier_str':
+        m = re.match(r'^(\d+)x', str(value))
+        return int(m.group(1)) if m else 5
+    if key == 'timelapse_target_str':
+        v = str(value)
+        if v in TIMELAPSE_TARGETS:
+            return v
+        if '浮動' in v or 'float' in v.lower():
+            return 'canvas_float'
+        if '螢幕' in v or 'screen' in v.lower():
+            return 'screen'
+        if '視窗' in v or 'window' in v.lower():
+            return 'window'
+        return 'canvas'
+    return value
 
 
 def _flatten(d: dict, prefix: str = '') -> dict:
@@ -135,9 +166,10 @@ class Settings2:
             if k not in old:
                 continue
             dst = _LEGACY_KEYS[k]
-            if only_missing and self.get(dst) not in (None, '', DEFAULTS_FLAT.get(dst)):
+            cur = self.get(dst)
+            if only_missing and cur not in (None, '', {}) and cur != DEFAULTS_FLAT.get(dst):
                 continue
-            self.set(dst, old[k])
+            self.set(dst, _legacy_value(k, old[k]))
 
     def save(self):
         tmp = self.path + '.tmp'
@@ -168,6 +200,10 @@ class Settings2:
     @property
     def quests_path(self) -> str:
         return os.path.join(self.app_dir, 'daily_quests.json')
+
+    @property
+    def videos_dir(self) -> str:
+        return self.get('timelapse.output_dir') or os.path.join(self.app_dir, 'videos')
 
     @property
     def pets_dir(self) -> str:

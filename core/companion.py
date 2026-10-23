@@ -10,13 +10,14 @@ companion.py - 2.0 的常駐服務：繪圖追蹤、每日任務進度、與 1.x
 from __future__ import annotations
 
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from core.daily_quests import QuestManager
 from core.file_paths import display_name
-from core.tracker import DrawTracker
+from core.tracker import DrawTracker, extract_filename
 
 LEGACY_CHECK_SEC = 5.0
 EXE_REMEMBER_SEC = 30.0
@@ -57,6 +58,10 @@ class Status:
     budget_minutes: float = 60.0
     streak: int = 0
     rest_day: bool = False
+    recording: bool = False          # 縮時錄影開著
+    rec_file: str | None = None      # 正在錄的檔案
+    rec_frames: int = 0
+    exporting: int = 0               # 合成中的影片數
 
 
 @dataclass
@@ -64,11 +69,12 @@ class TickResult:
     status: Status
     ready: list = field(default_factory=list)       # 剛達標的任務
     events: list = field(default_factory=list)      # legacy_paused / legacy_resumed / new_day / exe_found
+    export: list = field(default_factory=list)      # 影片合成進度 [(百分比, 訊息)]
 
 
 class CompanionService:
     def __init__(self, settings, tracker_factory=DrawTracker, quests_factory=QuestManager,
-                 legacy_check=legacy_running, exe_finder=None, clock=time.monotonic):
+                 legacy_check=legacy_running, exe_finder=None, clock=time.monotonic, recorder_factory=None):
         self.settings = settings
         self._tracker_factory = tracker_factory
         self._quests_factory = quests_factory
@@ -82,6 +88,12 @@ class CompanionService:
         self._last_legacy = -1e9
         self._last_exe = -1e9
         self._day = None
+        self._recorder_factory = recorder_factory
+        self.recorder = None
+        self._old_recorders: list = []      # 停止後仍在合成影片的錄影器
+        self._rec_lock = threading.Lock()
+        self._rec_export: list = []
+        self._rec_frames = 0
 
     # ── 啟停 ──
     def start(self):
@@ -104,8 +116,10 @@ class CompanionService:
             track_unsaved=bool(self.settings.get('track_unsaved', False)))
         self.tracker.start()
         self._counter = None
+        self._start_recorder()
 
     def _stop_tracking(self):
+        self._stop_recorder()
         if self.tracker is not None:
             self.tracker.stop()
             self.tracker = None
@@ -156,6 +170,10 @@ class CompanionService:
             res.events.append('new_day')
         self.quests.save(force=bool(res.ready))
 
+        self._sync_recorder(state, st)
+        with self._rec_lock:
+            res.export, self._rec_export = self._rec_export, []
+
         if st.sai2_running and self._exe_finder and t - self._last_exe >= EXE_REMEMBER_SEC:
             self._last_exe = t
             exe = self._exe_finder()
@@ -164,6 +182,126 @@ class CompanionService:
                 self.settings.save()
                 res.events.append('exe_found')
         return res
+
+    # ── 縮時錄影 ──
+    def _start_recorder(self):
+        if self._recorder_factory is None:
+            from core.timelapse import TimelapseRecorder
+            factory = TimelapseRecorder
+        else:
+            factory = self._recorder_factory
+        cfg = self.settings.get('timelapse', {}) or {}
+        r = factory(output_dir=self.settings.videos_dir, fps=int(cfg.get('fps', 30)))
+        self.recorder = r
+        self.apply_recorder_settings()
+        r.needs_thumbnail = False
+
+        def matcher(title):
+            name = extract_filename(title or '')
+            return self.tracker.resolve_alias(name) if name and self.tracker is not None else None
+        r.file_matcher = matcher
+        r.on_frame_captured = lambda n, _thumb, _msg: setattr(self, '_rec_frames', n)
+        r.on_export_progress = self._on_export
+        r.start()
+
+    def _on_export(self, pct, msg):
+        with self._rec_lock:
+            self._rec_export.append((int(pct), str(msg)))
+
+    def apply_recorder_settings(self):
+        r = self.recorder
+        if r is None:
+            return
+        cfg = self.settings.get('timelapse', {}) or {}
+        r.output_dir = self.settings.videos_dir
+        r.fps = int(cfg.get('fps', 30))
+        r.multiplier = int(cfg.get('multiplier', 5))
+        r.target_mode = cfg.get('target', 'canvas')
+        r.quality_preset = cfg.get('quality', 'standard')
+        r.idle_timeout = float(self.settings.get('idle_timeout', 10.0))
+        r.enabled = bool(cfg.get('enabled', False))
+
+    def _stop_recorder(self):
+        if self.recorder is not None:
+            self.recorder.stop()               # 停止時會把正在錄的檔案送去合成
+            self._old_recorders.append(self.recorder)
+            self.recorder = None
+
+    def _sync_recorder(self, state: dict, st):
+        """與 1.x 相同：開始錄某個檔案後鎖定它，直到所有檔案關閉才停止並合成"""
+        r, tr = self.recorder, self.tracker
+        if r is None:
+            return
+        cur = state.get('current_file')
+        if r.enabled:
+            if tr.locked_file is None and cur is not None:
+                tr.locked_file = tr.resolve_alias(cur)
+        else:
+            tr.locked_file = None
+        if r.enabled and r.active_file is not None:
+            if cur is None:
+                r.switch_file(None)
+        else:
+            r.switch_file(cur)
+        st.recording = bool(r.enabled)
+        st.rec_file = r.active_file
+        st.rec_frames = r.frame_count if r.active_file else 0
+        st.exporting = self.exporting_count()
+
+    def set_recording(self, on: bool):
+        self.settings.set('timelapse.enabled', bool(on))
+        self.settings.save()
+        if self.recorder is not None:
+            self.recorder.enabled = bool(on)
+            if not on:
+                if self.tracker is not None:
+                    self.tracker.locked_file = None
+                self.recorder.switch_file(None)
+
+    def exporting_count(self) -> int:
+        n = 0
+        for r in [self.recorder] + self._old_recorders:
+            if r is not None:
+                n += sum(1 for t in list(r.export_threads) if t.is_alive())
+        self._old_recorders = [r for r in self._old_recorders if any(t.is_alive() for t in list(r.export_threads))]
+        return n
+
+    def recording_info(self) -> dict:
+        r = self.recorder
+        if r is None:
+            return {'available': False, 'enabled': bool(self.settings.get('timelapse.enabled')), 'active_file': None,
+                    'frames': 0, 'video_seconds': 0.0, 'exporting': self.exporting_count()}
+        dur = float(getattr(r, 'total_recorded_duration', 0.0) or 0.0)
+        mult = max(1, int(r.multiplier or 1))
+        return {'available': True, 'enabled': bool(r.enabled), 'active_file': r.active_file,
+                'frames': r.frame_count if r.active_file else 0, 'video_seconds': dur / mult,
+                'exporting': self.exporting_count()}
+
+    # ── 作品與統計（1.x 執行中時唯讀資料檔） ──
+    def _persisted(self) -> dict:
+        import json
+        try:
+            with open(self.settings.data_path, encoding='utf-8') as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def all_files(self) -> dict:
+        if self.tracker is not None:
+            return self.tracker.get_state().get('files', {})
+        return self._persisted().get('files', {})
+
+    def daily_history(self) -> dict:
+        if self.tracker is not None:
+            hist = self.tracker.daily_history()
+            hist[datetime.now().strftime('%Y-%m-%d')] = self.tracker.today_draw_seconds()
+            return hist
+        return self._persisted().get('daily_history', {})
+
+    def aliases_of(self, key: str) -> list[str]:
+        if self.tracker is None:
+            return []
+        return sorted(a for a, v in self.tracker._persist.get('aliases', {}).items() if v == key)
 
     # ── 最近開啟 ──
     def recent_files(self, n: int = 4) -> list[dict]:
@@ -199,10 +337,12 @@ class CompanionService:
         return out
 
     def study_task_for_path(self, skill: str) -> str | None:
-        """控制中心「練這一課」：今天已有該路徑的研究任務就沿用，沒有就加入一個"""
+        """控制中心「練這一課」：今天已有該路徑、同一堂課的研究任務就沿用，沒有就加入一個"""
         q = self.quests
+        cur = q.current_lesson(skill)
         for t in q.today_tasks():
-            if t['mode'] == 'study' and t['params'].get('path') == skill and t['status'] in ('active', 'ready'):
+            if (t['mode'] == 'study' and t['params'].get('path') == skill and t['status'] in ('active', 'ready')
+                    and (cur is None or t['params'].get('lesson_id') == cur['id'])):
                 return t['uid']
         tpl = next((x for x in q.data['templates'] if x['mode'] == 'study' and x.get('params', {}).get('path') == skill), None)
         if not tpl:
@@ -214,6 +354,17 @@ class CompanionService:
     # ── 任務 ──
     def today_tasks(self) -> list[dict]:
         return self.quests.today_tasks() if self.quests else []
+
+    def set_current_lesson(self, skill: str, lesson_id: str) -> bool:
+        """課程頁「改從這課開始」：把學習路徑的目前課程移到指定的課"""
+        from core import study_lessons
+        ids = [l['id'] for l in study_lessons.path(skill)]
+        if lesson_id not in ids or self.paused:
+            return False
+        self.quests.path_state(skill)['index'] = ids.index(lesson_id)
+        self.quests.mark_dirty()
+        self.quests.save(force=True)
+        return True
 
     def go(self, uid: str) -> tuple[str, str]:
         """按下任務的「開始 / 繼續」。回傳 (動作, 訊息)：

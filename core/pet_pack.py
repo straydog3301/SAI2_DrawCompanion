@@ -40,6 +40,7 @@ class PetPack:
     anchor: str = 'bottom-center'
     states: dict = field(default_factory=dict)   # state -> {'file', 'frames', 'fps', 'loop'}
     warnings: list = field(default_factory=list)
+    tint: str | None = None                  # 內建角色的身體顏色（跟隨主題色）
 
     @property
     def pack_id(self) -> str:
@@ -68,7 +69,7 @@ class PetPack:
         real = self.resolve(state)
         if self.builtin:
             from core import pet_builtin
-            return pet_builtin.frames(real, size)
+            return pet_builtin.frames(real, size, self.tint)
         spec = self.states[real]
         return decode(os.path.join(self.folder, spec['file']), size, spec.get('frames'), spec.get('fps'), self.anchor)
 
@@ -99,8 +100,8 @@ def decode(path: str, size: int, frames: int | None = None, fps: float | None = 
     return out
 
 
-def builtin_pack() -> PetPack:
-    return PetPack(folder='', name='墨墨（內建）', states={s: {'loop': s not in ONE_SHOT} for s in STATES})
+def builtin_pack(tint: str | None = None) -> PetPack:
+    return PetPack(folder='', name='墨墨（內建）', states={s: {'loop': s not in ONE_SHOT} for s in STATES}, tint=tint)
 
 
 def load_pack(folder: str) -> PetPack:
@@ -150,9 +151,9 @@ def load_pack(folder: str) -> PetPack:
     return pack
 
 
-def list_packs(pets_dir: str) -> list[PetPack]:
+def list_packs(pets_dir: str, tint: str | None = None) -> list[PetPack]:
     """內建角色＋ pets/ 底下可讀取的角色包"""
-    packs = [builtin_pack()]
+    packs = [builtin_pack(tint)]
     if os.path.isdir(pets_dir):
         for name in sorted(os.listdir(pets_dir)):
             folder = os.path.join(pets_dir, name)
@@ -164,7 +165,7 @@ def list_packs(pets_dir: str) -> list[PetPack]:
     return packs
 
 
-def find_pack(pets_dir: str, pack_id: str) -> PetPack:
+def find_pack(pets_dir: str, pack_id: str, tint: str | None = None) -> PetPack:
     if pack_id:
         folder = os.path.join(pets_dir, pack_id)
         if os.path.isdir(folder):
@@ -172,4 +173,183 @@ def find_pack(pets_dir: str, pack_id: str) -> PetPack:
                 return load_pack(folder)
             except (ValueError, OSError):
                 pass
-    return builtin_pack()
+    return builtin_pack(tint)
+
+
+# ─── 寵物工作室：建立、修改、匯入、刪除角色包 ─────────────────────────────
+
+MAX_IMPORT_BYTES = 80 * 1024 * 1024
+
+
+def safe_name(name: str) -> str:
+    bad = '\\/:*?"<>|'
+    out = ''.join('_' if c in bad else c for c in (name or '').strip()).strip(' .')
+    return out[:40] or 'my_pet'
+
+
+def _unique_dir(pets_dir: str, name: str) -> str:
+    base = os.path.join(pets_dir, safe_name(name))
+    path, n = base, 2
+    while os.path.exists(path):
+        path = f'{base}_{n}'
+        n += 1
+    return path
+
+
+def _write_manifest(folder: str, pack: PetPack):
+    data = {'name': pack.name, 'anchor': pack.anchor, 'states': {}}
+    for st, spec in pack.states.items():
+        item = {'file': spec['file']}
+        if spec.get('frames'):
+            item['frames'] = int(spec['frames'])
+            item['fps'] = float(spec.get('fps') or 12)
+        if 'loop' in spec and spec['loop'] != (st not in ONE_SHOT):
+            item['loop'] = bool(spec['loop'])
+        data['states'][st] = item
+    with open(os.path.join(folder, MANIFEST), 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _check_image(path: str):
+    if os.path.splitext(path)[1].lower() not in IMAGE_EXTS:
+        raise ValueError('只支援 PNG、APNG、GIF、WebP')
+    try:
+        with Image.open(path) as im:
+            im.verify()
+    except Exception as e:
+        raise ValueError(f'無法讀取圖檔：{e}')
+
+
+def create_pack(pets_dir: str, name: str, idle_src: str) -> str:
+    """建立新角色（至少要有「待命」圖），回傳 pack_id"""
+    _check_image(idle_src)
+    os.makedirs(pets_dir, exist_ok=True)
+    folder = _unique_dir(pets_dir, name)
+    os.makedirs(folder)
+    ext = os.path.splitext(idle_src)[1].lower()
+    import shutil
+    shutil.copy2(idle_src, os.path.join(folder, f'idle{ext}'))
+    _write_manifest(folder, PetPack(folder=folder, name=(name or '').strip() or os.path.basename(folder),
+                                    states={'idle': {'file': f'idle{ext}'}}))
+    return os.path.basename(folder)
+
+
+def set_state(folder: str, state: str, src: str | None = None, frames: int | None = None,
+              fps: float | None = None, loop: bool | None = None):
+    """指定某狀態的圖檔（複製進角色資料夾）或調整格數 / 速度 / 循環"""
+    import shutil
+    if state not in STATES:
+        raise ValueError(f'不認得的狀態：{state}')
+    pack = load_pack(folder)
+    spec = dict(pack.states.get(state) or {})
+    if src:
+        _check_image(src)
+        ext = os.path.splitext(src)[1].lower()
+        old = spec.get('file')
+        fn = f'{state}{ext}'
+        shutil.copy2(src, os.path.join(folder, fn))
+        if old and old != fn and os.path.isfile(os.path.join(folder, old)) and \
+                all(s.get('file') != old for k, s in pack.states.items() if k != state):
+            os.remove(os.path.join(folder, old))
+        spec = {'file': fn}
+    if not spec.get('file'):
+        raise ValueError('請先指定這個狀態的圖檔')
+    if frames is not None:
+        spec['frames'] = int(frames) if frames and frames > 1 else None
+        if spec['frames']:
+            spec['fps'] = float(fps or spec.get('fps') or 12)
+    elif fps is not None and spec.get('frames'):
+        spec['fps'] = float(fps)
+    if loop is not None:
+        spec['loop'] = bool(loop)
+    pack.states[state] = spec
+    _write_manifest(folder, pack)
+
+
+def clear_state(folder: str, state: str):
+    if state == 'idle':
+        raise ValueError('「待命」是必要的狀態，只能換圖不能清除')
+    pack = load_pack(folder)
+    spec = pack.states.pop(state, None)
+    if spec:
+        fn = spec.get('file')
+        if fn and all(s.get('file') != fn for s in pack.states.values()):
+            try:
+                os.remove(os.path.join(folder, fn))
+            except OSError:
+                pass
+    _write_manifest(folder, pack)
+
+
+def rename_pack(folder: str, name: str):
+    pack = load_pack(folder)
+    pack.name = (name or '').strip() or pack.name
+    _write_manifest(folder, pack)
+
+
+def _pack_root(path: str) -> str:
+    """角色包的根目錄：有 pet.json 或狀態圖檔的那一層（zip 常多包一層資料夾）"""
+    def looks_like(d):
+        names = [n.lower() for n in os.listdir(d)]
+        return MANIFEST in names or any(os.path.splitext(n)[0] in STATES and n.endswith(IMAGE_EXTS) for n in names)
+    if looks_like(path):
+        return path
+    subs = [os.path.join(path, n) for n in os.listdir(path) if os.path.isdir(os.path.join(path, n))]
+    if len(subs) == 1 and looks_like(subs[0]):
+        return subs[0]
+    raise ValueError('找不到角色包內容（需要 pet.json，或 idle.png 這類以狀態命名的圖檔）')
+
+
+def import_pack(src: str, pets_dir: str) -> str:
+    """從 zip 或資料夾匯入角色包，回傳 pack_id；內容有問題時不留下任何檔案"""
+    import shutil
+    import tempfile
+    import zipfile
+    tmp = None
+    try:
+        if os.path.isfile(src) and src.lower().endswith('.zip'):
+            tmp = tempfile.mkdtemp(prefix='pet_import_')
+            with zipfile.ZipFile(src) as z:
+                total = 0
+                for info in z.infolist():
+                    total += info.file_size
+                    if total > MAX_IMPORT_BYTES:
+                        raise ValueError('角色包太大（超過 80 MB）')
+                    target = os.path.normpath(os.path.join(tmp, info.filename))
+                    if not target.startswith(os.path.normpath(tmp) + os.sep) and target != os.path.normpath(tmp):
+                        raise ValueError('角色包內有不安全的路徑')
+                z.extractall(tmp)
+            root = _pack_root(tmp)
+        elif os.path.isdir(src):
+            root = _pack_root(src)
+        else:
+            raise ValueError('請選擇 zip 檔或資料夾')
+        load_pack(root)
+        name = os.path.splitext(os.path.basename(src.rstrip('\\/')))[0]
+        try:
+            with open(os.path.join(root, MANIFEST), encoding='utf-8') as f:
+                name = json.load(f).get('name') or name
+        except (OSError, ValueError):
+            pass
+        os.makedirs(pets_dir, exist_ok=True)
+        dest = _unique_dir(pets_dir, name)
+        shutil.copytree(root, dest, ignore=shutil.ignore_patterns('__MACOSX', '.*'))
+        try:
+            load_pack(dest)
+        except ValueError:
+            shutil.rmtree(dest, ignore_errors=True)
+            raise
+        return os.path.basename(dest)
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def delete_pack(pets_dir: str, pack_id: str):
+    import shutil
+    if not pack_id:
+        raise ValueError('內建角色不能刪除')
+    folder = os.path.normpath(os.path.join(pets_dir, pack_id))
+    if os.path.dirname(folder) != os.path.normpath(pets_dir) or not os.path.isdir(folder):
+        raise ValueError('找不到這個角色')
+    shutil.rmtree(folder)

@@ -72,18 +72,18 @@ def _mouth_smile(pen, dx, dy):
     pen.arc(60 + dx, 76 + dy, 5, 20, 160, INK, 3)
 
 
-def frame(state: str, i: int, size: int) -> Image.Image:
+def frame(state: str, i: int, size: int, body=BODY) -> Image.Image:
     n = COUNTS[state]
     t = i / n
     pen = _Pen(size)
     if state == 'idle':
         dy = 2 * math.sin(t * 2 * math.pi)
-        _body(pen, 0, dy, BODY)
+        _body(pen, 0, dy, body)
         (_eyes_closed if i in (18, 19) else _eyes_open)(pen, 0, dy)
         _mouth_smile(pen, 0, dy)
     elif state == 'drawing':
         dy = math.sin(t * 4 * math.pi)
-        _body(pen, 0, dy, BODY)
+        _body(pen, 0, dy, body)
         for x, s in ((48, 1), (72, -1)):
             pen.line([(x - 5 * s, 63 + dy), (x + 4 * s, 66 + dy), (x - 5 * s, 69 + dy)], INK, 3)
         pen.line([(56, 80 + dy), (64, 80 + dy)], INK, 3)
@@ -94,8 +94,8 @@ def frame(state: str, i: int, size: int) -> Image.Image:
         dy = -12 * abs(math.sin(t * 2 * math.pi))
         squash = 3 if i in (0, n // 2) else 0
         for s in (-1, 1):
-            pen.line([(60 + 32 * s, 70 + dy), (60 + 46 * s, 48 + dy)], BODY, 7)
-        _body(pen, 0, dy, BODY, squash)
+            pen.line([(60 + 32 * s, 70 + dy), (60 + 46 * s, 48 + dy)], body, 7)
+        _body(pen, 0, dy, body, squash)
         for x in (48, 72):
             pen.arc(x, 70 + dy, 6, 200, 340, INK, 3)
         pen.polygon([(53, 78 + dy), (67, 78 + dy), (60, 88 + dy)], INK)
@@ -106,7 +106,7 @@ def frame(state: str, i: int, size: int) -> Image.Image:
                             (255, 210, 122, 255))
     elif state == 'rest':
         dy = 1.5 * math.sin(t * 2 * math.pi)
-        _body(pen, 0, dy, BODY)
+        _body(pen, 0, dy, body)
         _eyes_closed(pen, 0, dy)
         _mouth_smile(pen, 0, dy)
         pen.polygon([(90, 86), (108, 86), (106, 100), (92, 100)], (242, 239, 232, 255))
@@ -116,14 +116,14 @@ def frame(state: str, i: int, size: int) -> Image.Image:
             pen.line([(x, 80 - rise), (x - 2, 74 - rise)], (201, 199, 214, int(200 * (1 - rise / 10))), 2)
     elif state == 'remind':
         dx = 3 * math.sin(t * 6 * math.pi) * (1 - t)
-        _body(pen, dx, 0, BODY)
+        _body(pen, dx, 0, body)
         _eyes_open(pen, dx, 0)
         pen.line([(56 + dx, 80), (64 + dx, 80)], INK, 3)
         pen.ellipse(96, 24, 12, 12, (255, 176, 32, 255))
         pen.line([(96, 18), (96, 25)], INK, 3.4)
         pen.ellipse(96, 30, 1.8, 1.8, INK)
     else:   # sleep / offline
-        color = BODY_OFFLINE if state == 'offline' else BODY
+        color = BODY_OFFLINE if state == 'offline' else body
         breathe = 1.5 * math.sin(t * 2 * math.pi)
         _body(pen, 0, 2, color, squash=breathe)
         _eyes_closed(pen, 0, 4)
@@ -137,11 +137,22 @@ def frame(state: str, i: int, size: int) -> Image.Image:
     return pen.done(size)
 
 
-@lru_cache(maxsize=32)
-def _cached(state: str, size: int) -> tuple:
-    return tuple((frame(state, i, size), FRAME_MS) for i in range(COUNTS[state]))
+def parse_color(value) -> tuple:
+    """'#7a52d5' 或 (r, g, b[, a]) → RGBA tuple；None 用預設紫"""
+    if not value:
+        return BODY
+    if isinstance(value, str):
+        v = value.lstrip('#')
+        return (int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16), 255)
+    return tuple(value) + ((255,) if len(value) == 3 else ())
 
 
-def frames(state: str, size: int) -> list[tuple[Image.Image, int]]:
+@lru_cache(maxsize=64)
+def _cached(state: str, size: int, body: tuple = BODY) -> tuple:
+    return tuple((frame(state, i, size, body), FRAME_MS) for i in range(COUNTS[state]))
+
+
+def frames(state: str, size: int, body=None) -> list[tuple[Image.Image, int]]:
+    """body：身體顏色（跟隨主題色時傳入），None = 預設紫"""
     state = state if state in COUNTS else 'idle'
-    return list(_cached(state, int(size)))
+    return list(_cached(state, int(size), parse_color(body)))
