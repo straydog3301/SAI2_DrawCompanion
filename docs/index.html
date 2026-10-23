@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DrawCompanion 2.0</title>
+<meta name="description" content="陪你畫畫的 PaintTool SAI2 桌面小夥伴：自動記錄畫圖時間、每日練習任務、不占畫面的速寫與臨摹小窗。2.0 測試版招募中。">
+<meta property="og:title" content="DrawCompanion 2.0 測試版">
+<meta property="og:description" content="陪你畫畫的 SAI2 桌面小夥伴：自動記錄、每日練習、不占畫面的參考小窗。">
+<meta property="og:image" content="https://straydog3301.github.io/SAI2_DrawCompanion/img/hero.webp">
+<link rel="icon" href="img/icon.png" type="image/png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e0e12; --bg2: #15141b; --card: #1a1922; --line: #2a2933;
+    --text: #f2f1f6; --muted: #a8a6b8; --accent: #8b5cf6; --accent-btn: #7c3aed; --accent-soft: #2a2140;
+    --accent-text: #c4b5fd; --ok: #86efac; --warn: #fbbf6a;
+    --shadow: 0 20px 60px rgba(0, 0, 0, .45);
+    --radius: 18px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f6f5fa; --bg2: #eeecf5; --card: #ffffff; --line: #e3e0ec;
+      --text: #1b1a22; --muted: #5c5a6b; --accent-soft: #ede7fd; --accent-text: #6d28d9;
+      --ok: #15803d; --warn: #b45309; --shadow: 0 20px 50px rgba(40, 30, 80, .14);
+    }
+  }
+  :root[data-theme="dark"] { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Noto Sans TC", "Microsoft JhengHei UI", "PingFang TC", system-ui, sans-serif;
+    line-height: 1.7; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-text); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  img { max-width: 100%; height: auto; display: block; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  @media (max-width: 600px) { .wrap { padding: 0 16px; } }
+
+  /* 導覽列 */
+  nav { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(14px);
+        background: color-mix(in srgb, var(--bg) 82%, transparent); border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; align-items: center; gap: 20px; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); }
+  .brand img { width: 32px; height: 32px; }
+  .brand:hover { text-decoration: none; }
+  nav .links { margin-left: auto; display: flex; gap: 22px; font-size: 15px; }
+  nav .links a { color: var(--muted); }
+  nav .links a:hover { color: var(--text); text-decoration: none; }
+  @media (max-width: 720px) { nav .links { display: none; } }
+
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 22px; border-radius: 12px;
+         font-weight: 700; font-size: 16px; border: 1px solid transparent; transition: transform .15s, background .15s; }
+  .btn:hover { text-decoration: none; transform: translateY(-1px); }
+  .btn.primary { background: var(--accent-btn); color: #fff; }
+  .btn.primary:hover { background: #6d28d9; }
+  .btn.ghost { border-color: var(--line); color: var(--text); background: var(--card); }
+  .btn.small { padding: 8px 16px; font-size: 14px; }
+  .btn svg { width: 18px; height: 18px; }
+  @media (prefers-reduced-motion: reduce) { .btn { transition: none; } .btn:hover { transform: none; } html { scroll-behavior: auto; } }
+
+  /* 首屏 */
+  header.hero { padding: 72px 0 40px; text-align: center; overflow: hidden; }
+  .badge { display: inline-block; padding: 4px 14px; border-radius: 999px; background: var(--accent-soft);
+           color: var(--accent-text); font-size: 14px; font-weight: 700; margin-bottom: 18px; }
+  h1 { font-size: clamp(34px, 6vw, 60px); line-height: 1.2; margin: 0 0 18px; font-weight: 900; letter-spacing: .02em; }
+  h1 .hl { background: linear-gradient(120deg, #a78bfa, #f0abfc); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { font-size: clamp(16px, 2.2vw, 20px); color: var(--muted); max-width: 680px; margin: 0 auto 30px; }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .note { font-size: 14px; color: var(--muted); margin-top: 14px; }
+  .hero-shot { margin: 48px auto 0; max-width: 1040px; border-radius: 22px; overflow: hidden;
+               box-shadow: var(--shadow); border: 1px solid var(--line); }
+
+  /* 三個重點 */
+  .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin: 64px 0 24px; text-align: left; }
+  @media (max-width: 820px) { .pillars { grid-template-columns: 1fr; } }
+  .pillar { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+  .pillar .ico { width: 42px; height: 42px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-text);
+                 display: grid; place-items: center; margin-bottom: 12px; }
+  .pillar .ico svg { width: 22px; height: 22px; }
+  .pillar h3 { margin: 0 0 6px; font-size: 19px; }
+  .pillar p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  /* 功能介紹 */
+  section { padding: 56px 0; }
+  .sec-title { text-align: center; margin-bottom: 40px; }
+  .sec-title h2 { font-size: clamp(26px, 4vw, 38px); margin: 0 0 8px; }
+  .sec-title p { color: var(--muted); margin: 0; }
+  .feature { display: grid; grid-template-columns: 1fr 1.25fr; gap: 48px; align-items: center; padding: 36px 0; }
+  .feature.flip { grid-template-columns: 1.25fr 1fr; }
+  .feature.flip .text { order: 2; }
+  @media (max-width: 820px) { .feature, .feature.flip { grid-template-columns: 1fr; gap: 20px; } .feature.flip .text { order: 0; } }
+  .feature h3 { font-size: 26px; margin: 0 0 10px; }
+  .feature .kicker { color: var(--accent-text); font-weight: 700; font-size: 14px; letter-spacing: .08em; }
+  .feature ul { padding-left: 1.2em; margin: 14px 0 0; color: var(--muted); }
+  .feature li { margin: 6px 0; }
+  .feature li b { color: var(--text); font-weight: 500; }
+  .shot { border-radius: 16px; overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--card); }
+  .shot.narrow { max-width: 360px; margin: 0 auto; }
+  .themes { margin-top: 28px; border-radius: 16px; overflow: hidden; }
+
+  /* 開始使用 */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; counter-reset: step; }
+  @media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; position: relative; }
+  .step::before { counter-increment: step; content: counter(step); position: absolute; top: 20px; right: 22px;
+                  font-size: 40px; font-weight: 900; color: var(--accent-soft); line-height: 1; }
+  .step h3 { margin: 0 0 8px; font-size: 18px; }
+  .step p { margin: 0; color: var(--muted); font-size: 15px; }
+  .req { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 820px) { .req { grid-template-columns: 1fr; } }
+  .box { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 24px; }
+  .box h3 { margin: 0 0 8px; font-size: 17px; }
+  .box ul { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: 15px; }
+  .box li { margin: 4px 0; }
+  code { background: var(--bg2); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; font-size: .92em; }
+
+  /* 回饋 */
+  .feedback { background: linear-gradient(160deg, var(--accent-soft), var(--card)); border: 1px solid var(--line);
+              border-radius: 24px; padding: 40px; display: grid; grid-template-columns: 1.2fr 1fr; gap: 36px; }
+  @media (max-width: 820px) { .feedback { grid-template-columns: 1fr; padding: 28px 22px; } }
+  .feedback h2 { margin: 0 0 10px; font-size: clamp(24px, 3.5vw, 32px); }
+  .feedback p { color: var(--muted); margin: 0 0 18px; }
+  .feedback ol { margin: 0 0 20px; padding-left: 1.3em; }
+  .feedback li { margin: 6px 0; }
+  .wish { display: flex; flex-wrap: wrap; gap: 8px; }
+  .wish span { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 14px; }
+
+  /* 常見問題 */
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; margin: 10px 0; }
+  summary { cursor: pointer; font-weight: 700; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "＋"; color: var(--accent-text); }
+  details[open] summary::after { content: "－"; }
+  details p { color: var(--muted); margin: 10px 0 0; }
+  .faq { max-width: 820px; margin: 0 auto; }
+
+  footer { border-top: 1px solid var(--line); padding: 32px 0 48px; color: var(--muted); font-size: 14px; text-align: center; }
+  footer img { width: 40px; height: 40px; margin: 0 auto 10px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="img/icon.png" alt="" width="32" height="32">DrawCompanion</a>
+    <div class="links">
+      <a href="#features">功能</a>
+      <a href="#start">開始使用</a>
+      <a href="#feedback">回饋</a>
+      <a href="#faq">常見問題</a>
+    </div>
+    <a class="btn primary small" href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.1">下載測試版</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <span class="badge">2.0 測試版招募中</span>
+    <h1>陪你畫畫的<br><span class="hl">SAI2 桌面小夥伴</span></h1>
+    <p class="lead">DrawCompanion 會在 PaintTool SAI2 旁邊安靜地陪著你：自動記錄每張作品畫了多久、每天排好練習任務，速寫和臨摹的參考圖用小窗開著，不占你的畫布。</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.1">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 21h16"/></svg>
+        下載 DrawCompanion2.exe
+      </a>
+      <a class="btn ghost" href="#feedback">我想幫忙測試</a>
+    </div>
+    <p class="note">Windows 10／11 · 免安裝，下載就能用 · 不需要 Python</p>
+    <div class="hero-shot">
+      <img src="img/hero.webp" width="1800" height="1100" alt="畫布旁邊的桌面寵物「墨墨」、對話泡泡與快捷面板：今日進度、每日任務、最近開啟的作品縮圖與快捷按鈕">
+    </div>
+
+    <div class="pillars">
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></div>
+        <h3>開著就會記錄</h3>
+        <p>偵測 SAI2 正在畫哪個檔案，只計算真正下筆的時間；不用按開始、也不會忘記按停止。</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg></div>
+        <h3>每天知道要練什麼</h3>
+        <p>依你想練的技能排好速寫、臨摹、反覆練習；完成就打卡，連續天數與技能成長一目了然。</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="13" y="12" width="6" height="6" rx="1"/></svg></div>
+        <h3>不占你的畫面</h3>
+        <p>平常只有一隻小寵物；參考圖是可以穿透滑鼠的小窗，單螢幕也能一邊看一邊畫。</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+<section id="features">
+  <div class="wrap">
+    <div class="sec-title">
+      <h2>功能一覽</h2>
+      <p>以下都是 2.0 測試版的實際畫面（範例資料）</p>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">桌面寵物 × 快捷面板</div>
+        <h3>點一下墨墨，常用的都在這</h3>
+        <p>啟動後桌面只會出現墨墨，可以拖到任何地方。點一下打開快捷面板：</p>
+        <ul>
+          <li><b>今日進度</b>：今天畫了幾分鐘、連續幾天</li>
+          <li><b>每日任務</b>：開始、繼續、打卡</li>
+          <li><b>最近開啟</b>：作品縮圖，點了直接在 SAI2 開啟</li>
+          <li><b>快捷按鈕</b>：速寫、臨摹、快照、縮時錄影…可以自己換</li>
+        </ul>
+        <p>墨墨會依 SAI2 的狀態切換動作，畫太久會提醒你休息；寵物下方顯示本次動筆時間與錄影開關。</p>
+      </div>
+      <div class="shot narrow"><img src="img/panel.webp" width="570" height="854" loading="lazy" alt="快捷面板：今日進度環、三項每日任務、最近開啟的作品縮圖、快捷按鈕"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="text">
+        <div class="kicker">參考小窗</div>
+        <h3>速寫、臨摹都在小窗裡</h3>
+        <ul>
+          <li><b>速寫</b>：本機圖庫或線上圖庫自動換圖，<b>下筆時才倒數</b>，停筆看參考圖時暫停</li>
+          <li><b>自動建立畫布</b>：一輪速寫一張 A4 畫布，直接在 SAI2 開好</li>
+          <li><b>臨摹研究</b>：7 條學習路徑，每堂課有分段步驟、重點與完成檢查</li>
+          <li><b>穿透模式</b>：小窗半透明、滑鼠點得穿，疊在畫布上照著畫</li>
+          <li><b>按住比對</b>：按住快捷鍵，把你的畫布疊上參考圖比較</li>
+          <li><b>灰階、明度分階、構圖線</b>等檢查工具</li>
+        </ul>
+      </div>
+      <div class="shot narrow"><img src="img/sketch.webp" width="540" height="656" loading="lazy" alt="速寫參考小窗：參考圖、上方的檢查工具列、下方的上一張／暫停／下一張／畫布按鈕與倒數"></div>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">今日</div>
+        <h3>今天要練什麼，一眼就知道</h3>
+        <p>主視窗的「今日」頁整理今天的動筆時間、每日任務、本週動筆長條圖與技能動態，也會提醒你哪些技能太久沒練。</p>
+        <ul>
+          <li>任務依每日練習時間與想加強的技能排出，可以換一個或手動加入</li>
+          <li>每週可以請假，連續天數不中斷</li>
+          <li>第一次使用時用 30 秒調整練習份量，3 天後依你實際畫的時間再建議一次</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="img/today.webp" width="1920" height="1200" loading="lazy" alt="今日頁：今天動筆、連續天數、今日任務、本週動筆、SAI2 連線狀態與技能動態"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="text">
+        <div class="kicker">成長</div>
+        <h3>每天的投入都看得到</h3>
+        <ul>
+          <li><b>練習月曆</b>：打卡越多顏色越深，點日期看當天做了什麼</li>
+          <li><b>動筆時間統計</b>：週、月、半年、一年</li>
+          <li><b>技能卡</b>：各技能累積時數與等級</li>
+          <li>打卡時自動存一張畫布快照，回頭看自己的進步</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="img/growth.webp" width="1920" height="1200" loading="lazy" alt="成長頁：連續天數、最長紀錄、本月打卡、練習月曆熱度圖與單日明細"></div>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">作品</div>
+        <h3>每張作品畫了多久，還有縮圖</h3>
+        <ul>
+          <li>存檔、停筆時<b>自動擷取作品縮圖</b>，清單直接看得到</li>
+          <li>動筆時間、開著的時間、動筆效率、畫了幾次</li>
+          <li>技能標籤：這張畫的時間算進哪些技能</li>
+          <li>另存新檔後可以把兩個檔案合併成一筆；縮時錄影的影片也在這裡</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="img/works.webp" width="1920" height="1200" loading="lazy" alt="作品頁：帶縮圖的作品清單與右側的大圖預覽、動筆統計"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="text">
+        <div class="kicker">客製化</div>
+        <h3>換成你自己的樣子</h3>
+        <ul>
+          <li><b>自訂角色</b>：放上自己畫的角色，每個狀態可以有不同動畫（PNG／GIF／APNG／WebP）</li>
+          <li><b>對話泡泡外觀</b>：用一張圖當泡泡，圈出文字範圍，四角不變形</li>
+          <li><b>「如果…就…」規則</b>：例如「連續畫 50 分鐘 → 墨墨提醒休息並做動作」</li>
+          <li><b>主題色與深淺色</b>、快捷面板的區塊與按鈕、快捷鍵</li>
+          <li>設定與角色可以<b>匯出分享</b>給朋友</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="img/rules.webp" width="1920" height="1200" loading="lazy" alt="規則頁：連續動筆提醒、開啟練習檔案、深夜提醒等「如果…就…」規則"></div>
+    </div>
+    <img class="themes" src="img/themes.webp" width="2946" height="854" loading="lazy" alt="五種主題色的快捷面板：紫、藍、青綠（淺色）、粉紅、橘（淺色）">
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <div class="sec-title">
+      <h2>開始使用</h2>
+      <p>免安裝，三步就好</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <h3>下載</h3>
+        <p>到 <a href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.1">GitHub 發布頁</a> 下載 <code>DrawCompanion2.exe</code>（約 35 MB）。</p>
+      </div>
+      <div class="step">
+        <h3>放好</h3>
+        <p>放在任何資料夾。用過 1.x 的話，放在 <code>SAI2_DrawCompanion.exe</code> 旁邊，就會沿用原本的紀錄。</p>
+      </div>
+      <div class="step">
+        <h3>雙擊執行</h3>
+        <p>桌面出現墨墨就完成了。打開 SAI2 開始畫，其他設定都有預設值，用到時才會提醒你。</p>
+      </div>
+    </div>
+    <div class="req">
+      <div class="box">
+        <h3>需要</h3>
+        <ul>
+          <li>Windows 10 或 11（64 位元）</li>
+          <li>PaintTool SAI Ver.2</li>
+          <li>縮時錄影要合成影片時才需要 <a href="https://ffmpeg.org/">ffmpeg</a>（加入 PATH）</li>
+          <li>線上圖庫（Unsplash／Pexels）需要免費金鑰；不填也能用本機資料夾的參考圖</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>第一次執行時</h3>
+        <ul>
+          <li>Windows 可能顯示 SmartScreen 警告（程式沒有數位簽章）：按「其他資訊 → 仍要執行」</li>
+          <li>執行中在工作管理員會看到兩個 DrawCompanion2.exe（啟動器＋本體），是正常的</li>
+          <li>同時只會有一份在執行，重複開啟不會多開</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="feedback">
+  <div class="wrap">
+    <div class="feedback">
+      <div>
+        <h2>幫忙測試，讓它更好用</h2>
+        <p>2.0 是全新改寫的版本，正在找實際用 SAI2 畫畫的人一起測試。好用、難用、看不懂、壞掉，都想聽。</p>
+        <ol>
+          <li>照平常的習慣畫幾天圖</li>
+          <li>遇到問題時：<b>設定 → 一般 → 關於與問題回報 → 匯出診斷資訊</b>（不含 API 金鑰、本機路徑與作品檔名）</li>
+          <li>到 GitHub 開一個 Issue，寫下發生什麼事、怎麼重現，附上診斷資訊 zip 或截圖</li>
+        </ol>
+        <div class="cta" style="justify-content:flex-start">
+          <a class="btn primary" href="https://github.com/straydog3301/SAI2_DrawCompanion/issues/new">回報問題或建議</a>
+          <a class="btn ghost" href="https://github.com/straydog3301/SAI2_DrawCompanion/blob/feat/v2-stage3/docs/RELEASE_CHECKLIST.md">完整測試清單</a>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-top:0">特別想知道</h3>
+        <div class="wish">
+          <span>動筆時間記得準嗎</span>
+          <span>速寫的難度與時間</span>
+          <span>每日任務的份量</span>
+          <span>作品縮圖有沒有抓對</span>
+          <span>在 SAI2 開檔順不順</span>
+          <span>寵物會不會擋到畫面</span>
+          <span>高解析度螢幕的顯示</span>
+          <span>哪裡看不懂</span>
+          <span>希望加入的功能</span>
+        </div>
+        <p style="margin-top:18px;font-size:14px">還沒有的：筆刷工坊與液化（將在 2.x 重新開發，需要時請用 <a href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v1.7.0">1.x</a>）；介面目前只有繁體中文。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap faq">
+    <div class="sec-title"><h2>常見問題</h2></div>
+    <details>
+      <summary>需要安裝 Python 或其他程式嗎？</summary>
+      <p>不需要。DrawCompanion2.exe 已經包含執行需要的所有東西，下載後直接執行。只有縮時錄影合成影片時需要另外安裝 ffmpeg。</p>
+    </details>
+    <details>
+      <summary>可以和 1.x 一起用嗎？會不會重複記錄？</summary>
+      <p>可以並存，放在同一個資料夾就共用同一份紀錄。1.x 開著的時候 2.0 會自動暫停記錄，關掉 1.x 後自動繼續，不會重複計時。</p>
+    </details>
+    <details>
+      <summary>我的作品和紀錄會被上傳嗎？</summary>
+      <p>不會。紀錄、作品縮圖、設定都只存在你的電腦（程式所在的資料夾）。程式只有在抓參考圖時才會連線到圖庫（大都會博物館、芝加哥藝術博物館、Unsplash、Pexels），不會收集或傳送你的使用資料。</p>
+    </details>
+    <details>
+      <summary>速寫的倒數為什麼不動？</summary>
+      <p>預設是「下筆時才倒數」：要在 SAI2 已存檔的畫布上下筆才會倒數，停筆看參考圖時會暫停。開始速寫時會自動建立並開啟一張畫布；想改成一直倒數，到小窗的速寫設定或「設定 → 參考圖來源 → 練習畫布」關閉。</p>
+    </details>
+    <details>
+      <summary>寵物擋到我畫畫怎麼辦？</summary>
+      <p>可以把墨墨拖到任何地方；動筆時它會自動變半透明。快捷面板裡的「隱藏 30 分」可以暫時收起來，系統匣圖示隨時叫回來。</p>
+    </details>
+    <details>
+      <summary>可以換成自己畫的角色嗎？</summary>
+      <p>可以。到「設定 → 寵物 → 角色工作室」建立新角色，指定各狀態的圖檔即可；建議 512×512 透明背景的 APNG 或 WebP。做好的角色包可以匯出分享給其他人。</p>
+    </details>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <img src="img/icon.png" alt="" width="40" height="40">
+    <p>DrawCompanion · PaintTool SAI2 的開源輔助工具 · <a href="https://github.com/straydog3301/SAI2_DrawCompanion">GitHub</a></p>
+    <p>PaintTool SAI 是 SYSTEMAX 的產品；本工具為個人開發的非官方輔助程式。</p>
+  </div>
+</footer>
+</body>
+</html>
