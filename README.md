@@ -6,7 +6,7 @@
 
 ## 🆕 DrawCompanion 2.0 測試版（招募測試中）
 
-**介紹網頁：<https://straydog3301.github.io/SAI2_DrawCompanion/>**　·　**下載：[v2.0.0-beta.1](https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.1)**
+**介紹網頁：<https://straydog3301.github.io/SAI2_DrawCompanion/>**　·　**下載：[v2.0.0-beta.2](https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.2)**
 
 2.0 用 PySide6 重新設計介面：啟動後只有一隻可以拖曳的桌面寵物，點一下打開快捷面板；速寫與研究合併成不占畫面的參考小窗；控制中心與設定在同一個主視窗。完整內容見 [CHANGELOG.md](CHANGELOG.md)。
 

@@ -985,6 +985,12 @@ class SketchMode:
         self.loading = False
         self.status = ''
         self._retry = QTimer(win, singleShot=True, timeout=self.load_new)
+        self._token = 0                     # 每次抓圖的編號：逾時或改設定後，舊的結果直接丟掉
+        self._prefetched = None             # 預先抓好的下一張 (圖, 說明)：倒數結束時馬上換，不用等網路
+        self._prefetching = False
+        self._await_prefetch = False        # 預先抓的還沒好就按了下一張：等它好了直接顯示
+        self.load_error = ''                # 上一次抓圖失敗的原因（畫面上已有圖時也要讓使用者看到）
+        self._watchdog = QTimer(win, singleShot=True, timeout=self._load_timeout)
         self.count_mode = self.opts.get('count_mode', 'draw')     # draw：下筆才倒數；clock：一直倒數
         self._counter = None                # 上一次讀到的累計動筆秒數
         self.drawing = False
@@ -1032,32 +1038,95 @@ class SketchMode:
         self.ctl.say(msg, important=False)
         self.ctl.open_path(path)
 
-    def load_new(self):
-        if self.loading:
-            return
-        self.loading = True
+    LOAD_TIMEOUT_MS = 30000
+
+    def _fetch(self, token, on_done):
+        """背景抓一張；結果交回主執行緒（token 不符代表已逾時或改了設定，結果丟掉）"""
         opts = dict(self.opts)
-        if self.win.base is None:
-            self.win.set_image(None, '正在抓圖…')
 
         def run():
             try:
                 img, cap = self.source.next_image(opts)
-                self.ctl.work_done.emit(lambda: self._loaded(img, cap))
+                self.ctl.work_done.emit(lambda: on_done(token, (img, cap), None))
             except SK.SketchError as e:
-                self.ctl.work_done.emit(lambda err=e: self._failed(err))
-            except Exception as e:
-                self.ctl.work_done.emit(lambda err=SK.SketchError(str(e), SK.RETRY_SEC): self._failed(err))
-        threading.Thread(target=run, daemon=True).start()
+                self.ctl.work_done.emit(lambda err=e: on_done(token, None, err))
+            except Exception as e:                  # noqa: BLE001 - 解碼、網路等各種錯誤都要回報，不能卡住
+                from core import diagnostics
+                diagnostics.write(self.ctl.settings.app_dir, f'sketch image failed: {type(e).__name__}', str(e))
+                self.ctl.work_done.emit(lambda err=SK.SketchError(f'{type(e).__name__}：{e}', SK.RETRY_SEC):
+                                        on_done(token, None, err))
+        threading.Thread(target=run, daemon=True, name='sketch-fetch').start()
 
-    def _loaded(self, img, cap):
+    def load_new(self):
+        """換到新的一張：有預先抓好的就馬上用，否則現在抓（期間畫面顯示「載入下一張」）"""
+        if self.loading:
+            return
+        if self._prefetched is not None:
+            img, cap = self._prefetched
+            self._prefetched = None
+            self._show(img, cap)
+            return
+        self.loading = True
+        self._watchdog.start(self.LOAD_TIMEOUT_MS)
+        if self.win.base is None:
+            self.win.set_image(None, '正在抓圖…')
+        self.win._tick()
+        if self._prefetching:                       # 已經在抓下一張了，不要再同時抓一張
+            self._await_prefetch = True
+            return
+        self._token += 1
+        self._fetch(self._token, self._fetched)
+
+    def _fetched(self, token, result, err):
+        if token != self._token or not self.loading:
+            return
+        self._watchdog.stop()
         self.loading = False
+        if err is not None:
+            self._failed(err)
+        else:
+            self._show(*result)
+
+    def _load_timeout(self):
+        if not self.loading:
+            return
+        self._token += 1                            # 之後才回來的結果不用了
+        self.loading = False
+        self._await_prefetch = False
+        self._failed(SK.SketchError('網路太慢，抓圖逾時', SK.RETRY_SEC))
+
+    def _show(self, img, cap):
         shown = self.session.push(img)
         self.status = cap
+        self.load_error = ''
         self.win.set_image(shown)
+        self.win._tick()
+        self._prefetch()
+
+    def _prefetch(self):
+        """畫這張的同時先抓好下一張"""
+        if self._prefetching or self._prefetched is not None:
+            return
+        self._prefetching = True
+        token = self._token
+
+        def done(tok, result, err):
+            self._prefetching = False
+            if tok != self._token:
+                return
+            if self._await_prefetch:                # 使用者正在等這一張
+                self._await_prefetch = False
+                self._fetched(tok, result, err)
+            elif result is not None:
+                self._prefetched = result
+        self._fetch(token, done)
 
     def _failed(self, err: SK.SketchError):
         self.loading = False
+        self.load_error = str(err)
+        if self.win.base is not None and not err.need_setup:
+            hint = f'{err.retry_after} 秒後自動重試，也可以按「下一張」' if err.retry_after else '按「下一張」再試一次'
+            self.ctl.say(f'下一張參考圖載入失敗：{err}。{hint}。', important=False, seconds=8)
         if err.need_setup:
             msg = {'local_dir': '還沒有設定本機參考圖資料夾。', 'unsplash_key': '還沒有填 Unsplash 金鑰。',
                    'pexels_key': '還沒有填 Pexels 金鑰。'}.get(err.need_setup, str(err))
@@ -1228,6 +1297,12 @@ class SketchMode:
             self.uid = None
             self.ctl.say('已改變題目或間隔，之後的張數不計入原本的任務。', important=False)
         self.topic = SK.topic_key(self.opts)
+        if set(kw) - {'interval'}:                  # 換了題目或圖源：預先抓的那張不能用了
+            self._token += 1
+            self._prefetched = None
+            self._await_prefetch = False
+            self._watchdog.stop()
+            self.loading = False
         if 'interval' in kw:
             self.session.interval = int(kw['interval'])
             self.session.restart()
@@ -1262,6 +1337,10 @@ class SketchMode:
                 and self.ctl.service.draw_counter() is not None:
             st = self.ctl.last_status
             left += '　在已存檔的畫布上下筆才倒數' if st is not None and st.unsaved_file else '　下筆開始倒數'
+        if self.loading and self.win.base is not None:
+            left = '載入下一張…'
+        elif self.load_error and self.win.base is not None:
+            left = f'下一張載入失敗：{self.load_error}'
         if self.status and self.win.base is None:
             left = self.status
         if s.interval <= 0:
@@ -1271,3 +1350,5 @@ class SketchMode:
 
     def on_close(self):
         self._retry.stop()
+        self._watchdog.stop()
+        self._token += 1
