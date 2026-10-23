@@ -55,7 +55,7 @@ DEFAULTS: dict = {
     'study': {'canvas_dir': '', 'canvas_side': 2000},   # canvas_dir 空白 = 文件\SAI2 練習；canvas_side：長邊 px
     'timelapse': {'enabled': False, 'multiplier': 5, 'target': 'canvas', 'quality': 'standard', 'fps': 30,
                   'output_dir': ''},      # output_dir 空白 = APP_DIR/videos
-    'works': {'groups': {}, 'sort': 'recent'},
+    'works': {'groups': {}, 'sort': 'recent', 'thumbnails': True},   # thumbnails：存檔、停筆時自動擷取作品縮圖
     'ref': {                              # 參考小窗：位置與寬度依模式分別記住
         'sketch': {'w': 240, 'x': None, 'y': None},
         'study': {'w': 260, 'x': None, 'y': None},

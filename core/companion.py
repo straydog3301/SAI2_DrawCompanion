@@ -70,12 +70,20 @@ class TickResult:
     ready: list = field(default_factory=list)       # 剛達標的任務
     events: list = field(default_factory=list)      # legacy_paused / legacy_resumed / new_day / exe_found
     export: list = field(default_factory=list)      # 影片合成進度 [(百分比, 訊息)]
+    thumbs: list = field(default_factory=list)      # 剛存好縮圖的作品 key
 
 
 class CompanionService:
     def __init__(self, settings, tracker_factory=DrawTracker, quests_factory=QuestManager,
-                 legacy_check=legacy_running, exe_finder=None, clock=time.monotonic, recorder_factory=None):
+                 legacy_check=legacy_running, exe_finder=None, clock=time.monotonic, recorder_factory=None,
+                 thumb_capture=None):
+        from core.work_thumbs import ThumbPolicy
         self.settings = settings
+        self._thumb_capture = thumb_capture            # () -> PIL.Image | None；None = 擷取 SAI2 畫布
+        self.thumbs = ThumbPolicy()
+        self._thumb_busy = False
+        self._thumb_done: list[str] = []
+        self._last_tick = None
         self._tracker_factory = tracker_factory
         self._quests_factory = quests_factory
         self._legacy_check = legacy_check
@@ -178,6 +186,17 @@ class CompanionService:
         self._sync_recorder(state, st)
         with self._rec_lock:
             res.export, self._rec_export = self._rec_export, []
+            res.thumbs, self._thumb_done = self._thumb_done, []
+        dt = 1.0 if self._last_tick is None else max(0.0, min(5.0, t - self._last_tick))
+        self._last_tick = t
+        if self.settings.get('works.thumbnails', True):
+            from core import work_thumbs
+            cur = st.current_file
+            missing = bool(cur) and not os.path.isfile(work_thumbs.path_for(self.settings.app_dir, cur))
+            key = self.thumbs.update(t, cur, st.drawing, work_thumbs.title_modified(state.get('raw_title')),
+                                     dt, missing)
+            if key:
+                self.capture_thumb(key)
 
         if st.sai2_running and self._exe_finder and t - self._last_exe >= EXE_REMEMBER_SEC:
             self._last_exe = t
@@ -187,6 +206,53 @@ class CompanionService:
                 self.settings.save()
                 res.events.append('exe_found')
         return res
+
+    # ── 作品縮圖 ──
+    def capture_thumb(self, key: str, manual: bool = False) -> bool:
+        """在背景擷取 SAI2 畫布當作品縮圖；擷取前後都確認畫面上還是這個檔案。回傳是否開始擷取"""
+        if self._thumb_busy or self.tracker is None or self.paused:
+            return False
+        if manual:
+            self.thumbs.force(key, self._clock())
+        self._thumb_busy = True
+        capture = self._thumb_capture
+        if capture is None:
+            from core.snapshots import capture_sai2_canvas as capture
+        tracker, app_dir = self.tracker, self.settings.app_dir
+
+        def run():
+            from core import work_thumbs
+            try:
+                if tracker.get_state().get('current_file') != key:
+                    return
+                img = capture()
+                if img is None or work_thumbs.looks_blank(img) or tracker.get_state().get('current_file') != key:
+                    return
+                work_thumbs.save(app_dir, key, img)
+                with self._rec_lock:
+                    self._thumb_done.append(key)
+            except Exception as e:                  # noqa: BLE001 - 擷取失敗不影響記錄
+                print(f'[thumbs] capture failed: {e}')
+            finally:
+                self._thumb_busy = False
+        threading.Thread(target=run, daemon=True, name='work-thumb').start()
+        return True
+
+    def thumb_of(self, key: str) -> str | None:
+        from core import work_thumbs
+        return work_thumbs.find(self.settings.app_dir, key, self.aliases_of(key))
+
+    def delete_work(self, key: str):
+        """刪除作品的計時紀錄與縮圖（不刪畫作檔案）"""
+        from core import work_thumbs
+        self.tracker.delete_file(key)
+        work_thumbs.delete(self.settings.app_dir, key)
+
+    def merge_work(self, key: str, target: str):
+        """把 key 合併到 target（之後 key 的時間算進 target）；target 沒有縮圖時沿用 key 的"""
+        from core import work_thumbs
+        self.tracker.add_alias(key, target)
+        work_thumbs.move(self.settings.app_dir, key, target)
 
     # ── 縮時錄影 ──
     def _start_recorder(self):

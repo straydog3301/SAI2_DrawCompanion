@@ -611,13 +611,13 @@ class DrawTracker:
             self._session_last_mouse     = 0.0
             self._session_draw_flushed   = 0.0
 
-    def _update_state(self, now: float):
+    def _update_state(self, now: float, force: bool = False):
         """更新 UI 快照（在 lock 內呼叫）。
 
         重建整份檔案快照的成本與檔案數成正比，UI 每秒才輪詢一次，
-        因此以 0.25 秒節流，避免 15ms 迴圈中每次都重建。
+        因此以 0.25 秒節流，避免 15ms 迴圈中每次都重建。force：紀錄被修改（刪除、合併）後立刻重建。
         """
-        if now - getattr(self, '_last_state_build', 0.0) < 0.25:
+        if not force and now - getattr(self, '_last_state_build', 0.0) < 0.25:
             return
         self._last_state_build = now
 
@@ -710,6 +710,11 @@ class DrawTracker:
                     rec.get('last_seen', ''),
                 ])
 
+    def _refresh_snapshot(self):
+        """刪除、合併紀錄後馬上更新快照：否則畫面會讀到舊快照，看起來像沒刪掉（要刪兩次）"""
+        with self._lock:
+            self._update_state(time.monotonic(), force=True)
+
     def delete_file(self, filename: str):
         """刪除特定檔案的記錄。"""
         with self._lock:
@@ -731,6 +736,7 @@ class DrawTracker:
                 self._base_draw              = 0.0
             if self.locked_file == filename:
                 self.locked_file = None
+        self._refresh_snapshot()
         self.save()
 
     def reset_all(self):
@@ -746,6 +752,7 @@ class DrawTracker:
             self._base_open              = 0.0
             self._base_draw              = 0.0
             self.locked_file             = None
+        self._refresh_snapshot()
         self.save()
 
     def resolve_alias(self, name: str | None) -> str | None:
@@ -841,6 +848,7 @@ class DrawTracker:
             if self.locked_file == alias_name:
                 self.locked_file = target_name
                 
+        self._refresh_snapshot()
         self.save()
 
     def remove_alias(self, alias_name: str):
@@ -848,4 +856,5 @@ class DrawTracker:
         with self._lock:
             if 'aliases' in self._persist:
                 self._persist['aliases'].pop(alias_name, None)
+        self._refresh_snapshot()
         self.save()

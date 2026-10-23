@@ -247,6 +247,10 @@ class CompanionApp(QObject):
         self._run_rules(st)
         for pct, msg in res.export:
             self._on_export(pct, msg)
+        if res.thumbs and self._main is not None and self._main.current == '作品':
+            page = self._main.page_widget('作品', 'WorksPage')
+            if page is not None:
+                page.thumbs_updated(res.thumbs)
         if 'new_day' in res.events and not self.service.paused:
             self._usage_prompt()
         if res.events and self.panel.isVisible():

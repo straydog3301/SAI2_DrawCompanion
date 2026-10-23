@@ -8,8 +8,8 @@ import subprocess
 import threading
 from datetime import datetime
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QScrollArea, QVBoxLayout, QWidget)
 
@@ -383,6 +383,8 @@ class WorksPage(QWidget):
         self.s = ctl.settings
         self.selected = None
         self.limit = self.PAGE
+        self._tiles: dict[str, QLabel] = {}
+        self._pm_cache: dict = {}
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(20)
@@ -447,8 +449,65 @@ class WorksPage(QWidget):
         self.s.save()
         self._fill()
 
+    # ── 縮圖 ──
+    def _pixmap(self, path: str) -> QPixmap | None:
+        try:
+            key = (path, os.path.getmtime(path))
+        except OSError:
+            return None
+        pm = self._pm_cache.get(key)
+        if pm is None:
+            pm = QPixmap(path)
+            if pm.isNull():
+                return None
+            self._pm_cache = {k: v for k, v in self._pm_cache.items() if k[0] != path}
+            self._pm_cache[key] = pm
+        return pm
+
+    def _set_tile(self, tile: QLabel, key: str):
+        path = self.svc.thumb_of(key)
+        pm = self._pixmap(path) if path else None
+        if pm is None:
+            tile.setPixmap(icon('file', theme.ACCENT_TEXT, 18).pixmap(18, 18))
+            return
+        dpr = tile.devicePixelRatioF() or 1.0
+        size = QSize(int(tile.width() * dpr), int(tile.height() * dpr))
+        scaled = pm.scaled(size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        x, y = (scaled.width() - size.width()) // 2, (scaled.height() - size.height()) // 2
+        crop = scaled.copy(x, y, size.width(), size.height())         # 置中裁成格子大小
+        out = QPixmap(size)
+        out.fill(Qt.transparent)
+        p = QPainter(out)                                             # 圓角，與格子底色一致
+        p.setRenderHint(QPainter.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0, 0, size.width(), size.height()), 8 * dpr, 8 * dpr)
+        p.setClipPath(path)
+        p.drawPixmap(0, 0, crop)
+        p.end()
+        out.setDevicePixelRatio(dpr)
+        tile.setPixmap(out)
+
+    def thumbs_updated(self, keys):
+        """背景剛存好縮圖：更新清單上的小圖與右側預覽"""
+        for k in keys:
+            tile = self._tiles.get(k)
+            if tile is not None:
+                try:
+                    self._set_tile(tile, k)
+                except RuntimeError:                 # 列表已經重建
+                    pass
+        if self.selected in keys:
+            self._show(self.selected)
+
+    def _capture_now(self, key):
+        if self.svc.capture_thumb(key, manual=True):
+            self.ctl.say('正在擷取畫布…', important=False, seconds=3)
+        else:
+            self.ctl.say('現在沒辦法擷取：請確認 SAI2 開著這個檔案（1.x 執行中時也無法擷取）。')
+
     def _fill(self):
         _clear(self.list_box)
+        self._tiles = {}
         items = works.sort_rows(works.filter_rows(self.rows, self.search.text(), self.group.currentData() or ''),
                                 self.sort.value)
         if not items:
@@ -478,7 +537,12 @@ class WorksPage(QWidget):
         row.setContentsMargins(14, 10, 14, 10)
         row.setSpacing(12)
         tile = QLabel()
-        tile.setPixmap(icon('file', theme.ACCENT_TEXT, 18).pixmap(18, 18))
+        tile.setObjectName('wthumb')
+        tile.setFixedSize(64, 48)
+        tile.setAlignment(Qt.AlignCenter)
+        tile.setStyleSheet(f'QLabel#wthumb{{background:{theme.SURFACE2};border-radius:8px;}}')
+        self._set_tile(tile, r['key'])
+        self._tiles[r['key']] = tile
         row.addWidget(tile)
         col = QVBoxLayout()
         col.setSpacing(3)
@@ -494,6 +558,39 @@ class WorksPage(QWidget):
         right.addWidget(pb, 0, Qt.AlignRight)
         row.addLayout(right)
         return w
+
+    def _preview(self, key, editable) -> QWidget:
+        """作品縮圖（存檔、停筆時自動擷取）；SAI2 正開著這個檔案時可以手動更新"""
+        from datetime import datetime
+        box = QWidget()
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(0, 4, 0, 4)
+        bl.setSpacing(6)
+        path = self.svc.thumb_of(key)
+        pm = self._pixmap(path) if path else None
+        if pm is not None:
+            img = QLabel()
+            dpr = img.devicePixelRatioF() or 1.0
+            shown = pm.scaled(QSize(int(320 * dpr), int(220 * dpr)), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            shown.setDevicePixelRatio(dpr)
+            img.setPixmap(shown)
+            img.setCursor(Qt.PointingHandCursor)
+            img.setToolTip('開啟圖片')
+            img.mouseReleaseEvent = lambda _e, p=path: os.startfile(p)
+            bl.addWidget(img, 0, Qt.AlignLeft)
+            when = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%m/%d %H:%M')
+            note = f'縮圖更新於 {when}（存檔、停筆時自動擷取）'
+        else:
+            note = '還沒有縮圖：在 SAI2 開啟這個檔案後會自動擷取。'
+        row = QHBoxLayout()
+        row.addWidget(label(note, 'caption'), 1)
+        st = self.ctl.last_status
+        if editable and st is not None and st.current_file == key:
+            b = button('擷取目前畫布', 'ghost', ic='snapshot')
+            b.clicked.connect(lambda: self._capture_now(key))
+            row.addWidget(b)
+        bl.addLayout(row)
+        return box
 
     def _empty_detail(self):
         _clear(self.detail.lay)
@@ -512,6 +609,7 @@ class WorksPage(QWidget):
         editable = not self.svc.paused and self.svc.tracker is not None
         lay.addWidget(label(r['name'], 'h2'))
         lay.addWidget(label(key, 'caption'))
+        lay.addWidget(self._preview(key, editable))
         tiles = QGridLayout()
         tiles.setSpacing(8)
         for i, (cap, val) in enumerate((('動筆', stats.fmt_duration(r['draw'])), ('開著', stats.fmt_duration(r['open'])),
@@ -642,7 +740,7 @@ class WorksPage(QWidget):
         if not target:
             return
         try:
-            self.svc.tracker.add_alias(key, target)
+            self.svc.merge_work(key, target)
         except Exception as e:
             self.ctl.say(f'無法合併：{e}')
             return
@@ -651,7 +749,7 @@ class WorksPage(QWidget):
         self._load()
 
     def _delete(self, key):
-        self.svc.tracker.delete_file(key)
+        self.svc.delete_work(key)
         self.selected = None
         self.ctl.say(f"已刪除「{key.split(' _ ')[-1]}」的計時紀錄。", important=False)
         self._load()

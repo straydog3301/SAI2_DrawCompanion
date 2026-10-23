@@ -142,11 +142,13 @@ def general_page(ctl) -> QWidget:
     open_btn = button('開啟資料夾', ic='works')
     open_btn.clicked.connect(lambda: os.startfile(ctl.settings.app_dir))
     g.row('資料位置', ctl.settings.app_dir, open_btn)
+    g.row('自動擷取作品縮圖', '存檔、停筆時擷取 SAI2 畫布，作品頁就能看到預覽（只存在這台電腦）',
+          _toggle(ctl, 'works.thumbnails'))
     lang = QComboBox()
     lang.addItem('繁體中文')
     lang.setEnabled(False)
     lang.setFixedWidth(150)
-    g.row('語言', '英文、日文會在 2.0 收尾階段加入', lang)
+    g.row('語言', '目前只有繁體中文；英文、日文預計在 2.1 加入', lang)
     lay.addWidget(g)
 
     g = SettingGroup('備份與分享', '把主題、寵物角色、快捷面板、規則、快捷鍵打包成一個檔案；本機的資料夾路徑不會匯出')
