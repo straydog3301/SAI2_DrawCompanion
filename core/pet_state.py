@@ -14,7 +14,7 @@ from datetime import datetime
 
 BREAK_RESET_SEC = 5 * 60
 REST_SHOW_SEC = 30
-ONE_SHOT_SEC = {'cheer': 2.5, 'remind': 2.0}
+ONE_SHOT_SEC = {'cheer': 2.5, 'remind': 2.0, 'rest': REST_SHOW_SEC, 'sleep': 60.0}
 
 
 @dataclass

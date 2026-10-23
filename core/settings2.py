@@ -17,7 +17,7 @@ from core import hotkeys
 SETTINGS_FILE = 'drawcompanion2_settings.json'
 LEGACY_SETTINGS_FILE = 'sai2_timer_settings.json'
 
-SETTINGS_VERSION = 3
+SETTINGS_VERSION = 4
 
 DEFAULTS: dict = {
     'version': SETTINGS_VERSION,
@@ -34,9 +34,8 @@ DEFAULTS: dict = {
         'snap_edges': False,
         'fade_when_drawing': True,        # 動筆時變半透明
         'drawing_opacity': 0.55,
-        'rest_minutes': 50,               # 連續動筆多久提醒休息（0 = 不提醒）
         'bubbles': 'important',           # all / important / off
-        'night_sleep': False,             # 夜間（23～6 點）顯示睡覺
+        'bubble_skin': {'image': '', 'text': None, 'color': '#1b1a22', 'scale': 1.0},   # core/bubble_skin.py
         'show_timer': True,               # 寵物下方顯示本次動筆時間與錄影開關
         'tint_builtin': True,             # 內建角色「墨墨」跟隨主題色
     },
@@ -62,7 +61,11 @@ DEFAULTS: dict = {
         'study': {'w': 260, 'x': None, 'y': None},
         'through_opacity': 0.5,
     },
-    'rules': [],                          # 「如果…就…」規則（core/rules.py）
+    'rules': [                            # 「如果…就…」規則（core/rules.py）；休息提醒也是一條規則
+        {'id': 'rest', 'enabled': True, 'trigger': {'type': 'draw_minutes', 'value': 50},
+         'actions': [{'type': 'bubble', 'value': '已經連續畫了 50 分鐘，起來喝口水、動一動吧'},
+                     {'type': 'pet', 'value': 'rest'}]},
+    ],
     'theme': {'accent': 'purple', 'mode': 'dark'},
     'prompted': {},                       # 一次性提醒是否已出現過
     'first_run_at': '',
@@ -148,10 +151,37 @@ class Settings2:
         else:
             self.data = _merge(DEFAULTS, raw)
             if int(raw.get('version', 1)) < SETTINGS_VERSION:
+                if int(raw.get('version', 1)) < 4:
+                    self._reminders_to_rules(raw)
                 # 新版本加入的設定（例如參考圖來源）若是空的，從 1.x 補帶入
                 self._import_legacy(only_missing=True, keys=[k for k in _LEGACY_KEYS if '.' in _LEGACY_KEYS[k]])
                 self.data['version'] = SETTINGS_VERSION
                 self.save()
+
+    def _reminders_to_rules(self, raw: dict):
+        """v3 以前寵物設定裡的「連續動筆提醒休息」「夜間顯示睡覺」改成規則"""
+        old = raw.get('pet') if isinstance(raw.get('pet'), dict) else {}
+        pet = self.data.get('pet', {})
+        pet.pop('rest_minutes', None)
+        pet.pop('night_sleep', None)
+        rules = list(raw.get('rules') or [])
+        add = []
+        try:
+            rest = int(old.get('rest_minutes', 50))
+        except (TypeError, ValueError):
+            rest = 50
+        if rest > 0 and not any((r.get('trigger') or {}).get('type') == 'draw_minutes' for r in rules):
+            add.append({'id': 'rest', 'enabled': True, 'trigger': {'type': 'draw_minutes', 'value': rest},
+                        'actions': [{'type': 'bubble', 'value': f'已經連續畫了 {rest} 分鐘，起來喝口水、動一動吧'},
+                                    {'type': 'pet', 'value': 'rest'}]})
+        if old.get('night_sleep') and not any((r.get('trigger') or {}).get('type') == 'after_time' for r in rules):
+            add.append({'id': 'night', 'enabled': True, 'trigger': {'type': 'after_time', 'value': '23:00'},
+                        'actions': [{'type': 'pet', 'value': 'sleep'}]})
+        self.data['rules'] = add + rules
+
+    @property
+    def bubbles_dir(self) -> str:
+        return os.path.join(self.app_dir, 'bubbles')
 
     def _import_legacy(self, only_missing: bool, keys=None):
         try:

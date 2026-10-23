@@ -23,7 +23,7 @@ from PySide6.QtGui import QAction, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QSystemTrayIcon
 
-from core import autostart, hotkeys, pet_pack, study_lessons
+from core import autostart, bubble_skin, hotkeys, pet_pack, study_lessons
 from core.companion import CompanionService
 from core.paths import APP_DIR
 from core.pet_state import PetBrain, PetInputs
@@ -92,7 +92,7 @@ class CompanionApp(QObject):
         theme.apply(settings.get('theme.accent', 'purple'), settings.get('theme.mode', 'dark'))
         qapp.setStyleSheet(theme.QSS)
         self.service = CompanionService(settings, exe_finder=self._find_exe)
-        self.brain = PetBrain(settings.get('pet.rest_minutes', 50), settings.get('pet.night_sleep', False))
+        self.brain = PetBrain(rest_minutes=0)        # 休息提醒、夜間睡覺改用規則（core/rules.py）
         self.backend = Win32Backend()
         self.opener = Sai2Opener(self.backend, exe_path=settings.get('sai2_exe', ''))
         self.last_status = None
@@ -113,6 +113,7 @@ class CompanionApp(QObject):
         self.pet = PetWindow(os.path.join(settings.app_dir, 'drawcompanion2_pet_pos.json'))
         self.bubble = Bubble()
         self.bubble.anchor = self.pet
+        self.apply_bubble_skin()
         self.panel = QuickPanel(self)
         self.pet.clicked.connect(self._pet_clicked)
         from ui2.status_capsule import StatusCapsule
@@ -195,9 +196,9 @@ class CompanionApp(QObject):
             self.say('偵測到 1.x 開啟，2.0 暫停記錄，避免重複計時。')
         if 'legacy_resumed' in res.events:
             self.say('1.x 已關閉，2.0 繼續記錄。', important=False)
-        if 'exe_found' in res.events:
         if self._main is not None and ({'legacy_paused', 'legacy_resumed'} & set(res.events)):
             self._main.on_tracking_changed()
+        if 'exe_found' in res.events:
             self.opener.exe_path = self.settings.get('sai2_exe', '')
         if st.unsaved_file and st.drawing and st.unsaved_file not in self._reminded_unsaved:
             self._reminded_unsaved.add(st.unsaved_file)
@@ -275,8 +276,6 @@ class CompanionApp(QObject):
             self.pet.setWindowOpacity(base)
 
     def apply_pet_settings(self, reload_frames: bool = False):
-        self.brain.rest_minutes = float(self.settings.get('pet.rest_minutes', 50))
-        self.brain.night_sleep = bool(self.settings.get('pet.night_sleep', False))
         self.pet.snap_edges = bool(self.settings.get('pet.snap_edges', False))
         if reload_frames or self._pack is None:
             self._pack = pet_pack.find_pack(self.settings.pets_dir, self.settings.get('pet.pack', ''), self.pet_tint())
@@ -393,7 +392,7 @@ class CompanionApp(QObject):
         if t == 'bubble':
             self.say(str(v))
         elif t == 'pet':
-            self.brain.trigger(v, 8 if v in ('rest', 'sleep') else None)
+            self.brain.trigger(v)
         elif t == 'open_sketch':
             if self.ref_win is None:
                 self.open_ref('sketch', None)
@@ -659,10 +658,15 @@ class CompanionApp(QObject):
     def reload_settings(self):
         """匯入設定後重新套用：主題、寵物、快捷鍵、錄影設定"""
         self.apply_pet_settings(reload_frames=True)
+        self.apply_bubble_skin()
         self.apply_hotkeys()
         self.service.apply_recorder_settings()
         self.opener.exe_path = self.settings.get('sai2_exe', '') or self.opener.exe_path
         self.set_theme()
+
+    def apply_bubble_skin(self):
+        skin = self.settings.get('pet.bubble_skin')
+        self.bubble.set_skin(skin, bubble_skin.image_path(self.settings.app_dir, skin))
 
     def open_control_center(self, page: str = '今日'):
         self.open_main(page)

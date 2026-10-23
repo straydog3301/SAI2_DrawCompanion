@@ -11,8 +11,9 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QMenu,
                                QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget)
 
-from core import hotkeys, pet_pack
+from core import bubble_skin, hotkeys, pet_pack
 from ui2 import theme
+from ui2.bubble import BubbleBody
 from ui2.pet_window import to_pixmap
 from ui2.widgets import Card, PageHeader, Segmented, SettingGroup, Stepper, ToggleSwitch, button, label
 
@@ -241,13 +242,12 @@ class PetPage(QWidget):
               _toggle(ctl, 'pet.show_timer'))
         lay.addWidget(g)
 
-        g = SettingGroup('提醒')
-        g.row('連續動筆提醒休息', '0 = 不提醒', _spin(ctl, 'pet.rest_minutes', 0, 240, ' 分', int, self._apply))
+        g = SettingGroup('對話泡泡', '休息提醒、夜間睡覺改在「規則」頁設定，可以同時讓寵物說話和做動作')
         seg = Segmented([('important', '只有重要的'), ('all', '全部'), ('off', '關閉')], self.s.get('pet.bubbles', 'important'))
         seg.changed.connect(lambda v: (self.s.set('pet.bubbles', v), self.s.save()))
-        g.row('對話泡泡', '', seg)
-        g.row('晚上 11 點到早上 6 點顯示睡覺', '', _toggle(ctl, 'pet.night_sleep', self._apply))
+        g.row('要顯示哪些訊息', '', seg)
         lay.addWidget(g)
+        lay.addWidget(self._bubble_card())
         lay.addStretch(1)
 
         self._frames, self._i = [], 0
@@ -283,6 +283,130 @@ class PetPage(QWidget):
 
     def _apply(self, reload_frames=False):
         self.ctl.apply_pet_settings(reload_frames=reload_frames)
+
+    # ── 對話泡泡外觀 ──
+    def _bubble_card(self) -> Card:
+        card = Card('對話泡泡外觀', '用一張圖當泡泡：圈出放文字的範圍，其他部分以九宮格延伸，四個角不會變形')
+        pick = button('選擇圖片…', ic='canvas')
+        pick.clicked.connect(self._bubble_pick)
+        card.head.addWidget(pick)
+        body = QHBoxLayout()
+        body.setSpacing(24)
+        stage = QFrame()
+        stage.setObjectName('bubbleStage')
+        stage.setStyleSheet(f'#bubbleStage{{background:{theme.BG};border-radius:12px;}}')
+        stage.setMinimumSize(300, 150)
+        sl = QVBoxLayout(stage)
+        sl.setContentsMargins(16, 16, 16, 16)
+        self.bubble_preview = BubbleBody()
+        sl.addWidget(self.bubble_preview, 0, Qt.AlignCenter)
+        body.addWidget(stage, 1)
+        side = QVBoxLayout()
+        side.setSpacing(10)
+        self.bubble_range = button('圈選文字範圍…')
+        self.bubble_range.clicked.connect(self._bubble_edit_range)
+        self.bubble_color = button('文字顏色')
+        self.bubble_color.clicked.connect(self._bubble_pick_color)
+        self.bubble_reset = button('還原內建泡泡', 'ghost')
+        self.bubble_reset.clicked.connect(self._bubble_restore)
+        scale = QWidget()
+        sr = QHBoxLayout(scale)
+        sr.setContentsMargins(0, 0, 0, 0)
+        sr.addWidget(label('大小', 'muted', wrap=False))
+        self.bubble_scale = QSlider(Qt.Horizontal)
+        lo, hi = bubble_skin.SCALES
+        self.bubble_scale.setRange(int(lo * 100), int(hi * 100))
+        self.bubble_scale.setFixedWidth(160)
+        self.bubble_scale_lb = label('', 'muted', wrap=False)
+        self.bubble_scale_lb.setFixedWidth(44)
+        self.bubble_scale.valueChanged.connect(self._bubble_scale_changed)
+        sr.addWidget(self.bubble_scale)
+        sr.addWidget(self.bubble_scale_lb)
+        for w in (self.bubble_range, self.bubble_color, scale, self.bubble_reset):
+            side.addWidget(w, 0, Qt.AlignLeft)
+        side.addStretch(1)
+        body.addLayout(side)
+        card.lay.addLayout(body)
+        card.lay.addWidget(label('建議用透明背景的 PNG；圖案的花紋、尾巴要放在文字範圍外面。'
+                                 '圖片會複製到設定資料夾，原檔可以移動或刪除。', 'caption'))
+        self._bubble_refresh()
+        return card
+
+    def _bubble_skin(self) -> dict:
+        return bubble_skin.normalize(self.s.get('pet.bubble_skin'))
+
+    def _bubble_save(self, skin: dict):
+        self.s.set('pet.bubble_skin', skin)
+        self.s.save()
+        self.ctl.apply_bubble_skin()
+        self._bubble_refresh()
+
+    def _bubble_refresh(self):
+        skin = self._bubble_skin()
+        path = bubble_skin.image_path(self.s.app_dir, skin)
+        self.bubble_preview.set_skin(skin, path)
+        self.bubble_preview.set_message('已經連續畫了 50 分鐘，起來喝口水、動一動吧')
+        self.bubble_preview.fit()
+        for w in (self.bubble_range, self.bubble_color, self.bubble_scale, self.bubble_reset):
+            w.setEnabled(bool(path))
+        self.bubble_scale.blockSignals(True)
+        self.bubble_scale.setValue(int(round(skin['scale'] * 100)))
+        self.bubble_scale.blockSignals(False)
+        self.bubble_scale_lb.setText(f"{int(round(skin['scale'] * 100))}%")
+        from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+        sw = QPixmap(14, 14)
+        sw.fill(Qt.transparent)
+        p = QPainter(sw)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(QColor(255, 255, 255, 120))
+        p.setBrush(QColor(skin['color']))
+        p.drawRoundedRect(1, 1, 12, 12, 3, 3)
+        p.end()
+        self.bubble_color.setIcon(QIcon(sw))
+
+    def _bubble_pick(self):
+        path, _ = QFileDialog.getOpenFileName(self, '選擇泡泡圖片', '', '圖片 (*.png *.webp *.gif *.jpg *.jpeg *.bmp)')
+        if not path:
+            return
+        try:
+            name, w, h = bubble_skin.import_image(self.s.app_dir, path)
+        except ValueError as e:
+            self.ctl.say(str(e))
+            return
+        skin = self._bubble_skin()
+        skin.update(image=name, text=bubble_skin.default_text_rect(w, h))
+        self._bubble_save(skin)
+        bubble_skin.remove_unused(self.s.app_dir, keep=name)
+        self._bubble_edit_range()
+
+    def _bubble_edit_range(self):
+        from ui2.bubble_editor import TextRangeDialog
+        skin = self._bubble_skin()
+        path = bubble_skin.image_path(self.s.app_dir, skin)
+        if not path:
+            return
+        dlg = TextRangeDialog(self, path, skin)
+        if dlg.exec():
+            skin['text'] = dlg.result_rect()
+            self._bubble_save(skin)
+
+    def _bubble_pick_color(self):
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QColorDialog
+        skin = self._bubble_skin()
+        c = QColorDialog.getColor(QColor(skin['color']), self, '文字顏色')
+        if c.isValid():
+            skin['color'] = c.name()
+            self._bubble_save(skin)
+
+    def _bubble_scale_changed(self, v: int):
+        skin = self._bubble_skin()
+        skin['scale'] = v / 100
+        self._bubble_save(skin)
+
+    def _bubble_restore(self):
+        self._bubble_save(bubble_skin.normalize(None))
+        bubble_skin.remove_unused(self.s.app_dir)
 
     def _reload_packs(self):
         self.packs = pet_pack.list_packs(self.s.pets_dir, self.ctl.pet_tint())
@@ -713,7 +837,7 @@ class RulesPage(QWidget):
         head.actions.addWidget(ex)
         head.actions.addWidget(add)
         lay.addWidget(head)
-        self.group = SettingGroup('我的規則', '休息提醒在「寵物」頁設定；這裡的規則會另外執行。1.x 執行中時規則暫停')
+        self.group = SettingGroup('我的規則', '休息提醒、夜間睡覺也在這裡設定。1.x 執行中時規則暫停')
         lay.addWidget(self.group)
         lay.addStretch(1)
         self._build()
@@ -725,7 +849,27 @@ class RulesPage(QWidget):
         self.s.set('rules', rules)
         self.s.save()
 
+    def _scroll_bar(self):
+        from PySide6.QtWidgets import QScrollArea
+        w = self.parentWidget()
+        while w is not None and not isinstance(w, QScrollArea):
+            w = w.parentWidget()
+        return w.verticalScrollBar() if w is not None else None
+
     def _build(self):
+        bar = self._scroll_bar()
+        keep = bar.value() if bar is not None else None
+        self.setUpdatesEnabled(False)
+        try:
+            self._rebuild()
+        finally:
+            if bar is not None:
+                self.layout().activate()          # 先算好新高度，捲軸範圍才不會把位置夾掉
+                bar.setValue(keep)
+                QTimer.singleShot(0, lambda: bar.setValue(keep))   # 焦點移動造成的自動捲動也還原
+            self.setUpdatesEnabled(True)
+
+    def _rebuild(self):
         g = self.group
         while g.inner.count():
             w = g.inner.takeAt(0).widget()

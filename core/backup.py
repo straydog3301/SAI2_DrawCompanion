@@ -2,7 +2,7 @@
 """
 backup.py - 整套設定的匯出 / 匯入（不含 UI；docs/UI_2.0_PLAN.md §9）
 
-匯出成一個 zip：settings.json（主題、寵物、快捷面板、規則、快捷鍵…）＋ pets/ 角色包。
+匯出成一個 zip：settings.json（主題、寵物、快捷面板、規則、快捷鍵…）＋ pets/ 角色包＋ bubbles/ 對話泡泡圖。
 不匯出只屬於這台電腦的設定（SAI2 位置、資料夾路徑、提醒紀錄）；API 金鑰預設不匯出，要分享給別人時比較安全。
 匯入時合併設定、角色包以新名稱加入（不覆蓋現有的），本機專屬的設定維持原樣。
 """
@@ -14,6 +14,8 @@ import json
 import os
 import zipfile
 from datetime import datetime
+
+from core import bubble_skin
 
 FORMAT = 'drawcompanion2-settings'
 LOCAL_ONLY = ('sai2_exe', 'data_path', 'autostart', 'prompted', 'first_run_at', 'version',
@@ -69,6 +71,9 @@ def export_bundle(settings, path: str, include_secrets: bool = False, include_pe
                     for fn in files:
                         full = os.path.join(d, fn)
                         z.write(full, 'pets/' + os.path.relpath(full, root).replace(os.sep, '/'))
+        bubble = bubble_skin.image_path(settings.app_dir, settings.get('pet.bubble_skin'))
+        if bubble:
+            z.write(bubble, 'bubbles/' + os.path.basename(bubble))
     return {'pets': pets}
 
 
@@ -102,7 +107,10 @@ def import_bundle(settings, path: str) -> dict:
         tmp = tempfile.mkdtemp(prefix='dc2_import_')
         try:
             pet_dirs = set()
+            bubbles = {}
             for info in z.infolist():
+                if info.filename.startswith('bubbles/') and not info.is_dir() and info.filename.count('/') == 1:
+                    bubbles[info.filename[8:]] = info
                 if not info.filename.startswith('pets/') or info.is_dir():
                     continue
                 target = os.path.normpath(os.path.join(tmp, info.filename))
@@ -120,6 +128,16 @@ def import_bundle(settings, path: str) -> dict:
                     imported[name] = pet_pack.import_pack(os.path.join(tmp, 'pets', name), settings.pets_dir)
                 except ValueError:
                     pass
+            new_bubble = None
+            want = os.path.basename(str(_get(data, 'pet.bubble_skin.image') or ''))
+            if want in bubbles:
+                target = os.path.join(tmp, 'bubble_src')
+                with z.open(bubbles[want]) as src, open(target, 'wb') as dst:
+                    shutil.copyfileobj(src, dst)
+                try:
+                    new_bubble = bubble_skin.import_image(settings.app_dir, target)[0]
+                except ValueError:
+                    pass
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
     clean = shareable(data, include_secrets=True)
@@ -132,6 +150,8 @@ def import_bundle(settings, path: str) -> dict:
         clean['pet']['pack'] = imported[pack]
     elif pack and not os.path.isdir(os.path.join(settings.pets_dir, pack)):
         clean['pet']['pack'] = ''
+    if isinstance(_get(clean, 'pet.bubble_skin'), dict):
+        clean['pet']['bubble_skin']['image'] = new_bubble or ''
     _merge(settings.data, clean)
     settings.save()
     return {'pets': list(imported.values()), 'keys': has_keys}
