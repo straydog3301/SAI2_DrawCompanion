@@ -8,6 +8,7 @@ brush_assets.py - SAI2 筆刷素材、紋理、紙張材質與自訂工具的讀
 
 from __future__ import annotations
 
+import itertools
 import os
 import glob
 import time
@@ -40,10 +41,15 @@ _BACKUP_SESSION: str | None = None     # 目前作業的備份資料夾名稱（
 _backed_up_files: set[str] = set()
 
 
+_session_seq = itertools.count()
+
+
 def _new_backup_session_name() -> str:
-    # 含毫秒，確保名稱排序 = 時間順序（_prune_backups 依名稱判斷新舊）
+    # 名稱排序 = 時間順序（_prune_backups 依名稱判斷新舊）。同一毫秒內的多次作業靠遞增序號排序，
+    # 不能只靠後面的亂數（否則同毫秒的作業順序是隨機的）
     now = time.time()
-    return f"{time.strftime('%Y%m%d_%H%M%S', time.localtime(now))}_{int(now * 1000) % 1000:03d}_{uuid.uuid4().hex[:4]}"
+    return (f"{time.strftime('%Y%m%d_%H%M%S', time.localtime(now))}_{int(now * 1000) % 1000:03d}"
+            f"_{next(_session_seq) % 10000:04d}_{uuid.uuid4().hex[:4]}")
 
 
 def _prune_backups(keep: int = BACKUP_KEEP):

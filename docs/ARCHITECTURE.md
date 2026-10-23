@@ -39,6 +39,8 @@
 | `backup.py` | 2.0：整套設定、角色包與泡泡圖的匯出／匯入（不匯出本機路徑，金鑰預設不匯出） |
 | `bubble_skin.py` | 2.0：對話泡泡的自訂外觀（單張圖＋文字範圍，九宮格延伸） |
 | `onboarding.py` | 2.0：用到時才提醒（「30 秒調整你的練習」、使用 3 天後建議練習時間與開機啟動、第一部影片位置） |
+| `version.py` | 2.0 的版本號 |
+| `diagnostics.py` | 2.0：錯誤記錄（`drawcompanion2_error.log`）與匯出診斷資訊 |
 | `data_text.py` | 2.0：內建技能／範本／練習方式／課程以 id 對應翻譯表（`locales/data_<語言>.json`；目前只有繁中） |
 | `autostart.py` | 2.0：開機啟動（HKCU Run）、1.x 監視器捷徑偵測與移除 |
 

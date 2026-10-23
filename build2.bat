@@ -6,6 +6,8 @@ if not "%DC2_UTF8%"=="1" (
     cmd /c ""%~f0" %*"
     exit /b
 )
+rem 從別的資料夾執行時，也以本檔所在的專案資料夾為準
+cd /d "%~dp0"
 echo ============================================
 echo  DrawCompanion 2.0 - 編譯 EXE
 echo  （1.x 請用 build.bat；兩個 exe 可以並存，共用同一份紀錄）

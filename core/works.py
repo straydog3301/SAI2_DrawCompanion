@@ -17,12 +17,23 @@ VIDEO_EXTS = ('.mp4', '.gif', '.webm', '.mov')
 SORTS = [('recent', '最近'), ('draw', '動筆時數'), ('name', '名稱')]
 
 
+# 使用者資料夾底下的常用資料夾（SAI2 標題不含磁碟機時，第一段是 Windows 使用者名稱）
+USER_DIRS = {'desktop': '桌面', 'documents': '文件', 'pictures': '圖片', 'downloads': '下載',
+             'onedrive': 'OneDrive', 'videos': '影片', 'appdata': '暫存與程式資料'}
+
+
 def auto_group(key: str) -> str:
-    """依路徑第一層資料夾自動分組（跳過磁碟機標籤）"""
+    """依路徑第一層資料夾自動分組：跳過磁碟機標籤；使用者資料夾跳過使用者名稱與「桌面」「文件」這一層"""
     if ' _ ' in key:
         parts = key.split(' _ ')
         if parts and re.search(r'\([A-Za-z]:\)', parts[0]):
             parts = parts[1:]
+        elif len(parts) > 2 and parts[1].lower() in USER_DIRS:
+            kind = parts[1].lower()
+            rest = parts[2:]
+            if kind == 'appdata' or len(rest) == 1:
+                return USER_DIRS[kind]
+            return rest[0]
         if len(parts) > 1:
             return parts[0]
     return '根目錄'

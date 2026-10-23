@@ -29,6 +29,7 @@ from core.paths import APP_DIR
 from core.pet_state import PetBrain, PetInputs
 from core.sai2_launcher import Sai2Opener, Win32Backend
 from core.settings2 import Settings2
+from core.version import APP_VERSION
 from core.single_instance import SingleInstance, channel_name
 from ui2 import theme, winutil
 from ui2.bubble import Bubble
@@ -142,7 +143,7 @@ class CompanionApp(QObject):
         menu.addAction(QAction('結束', menu, triggered=self.quit))
         self._tray_menu = menu
         self._tray.setContextMenu(menu)
-        self._tray.setToolTip('DrawCompanion 2.0')
+        self._tray.setToolTip(f'DrawCompanion {APP_VERSION}')
         self._tray.activated.connect(lambda r: self.show_pet() if r == QSystemTrayIcon.Trigger else None)
 
         self._tick_timer = QTimer(self, interval=1000, timeout=self._tick)
@@ -859,6 +860,8 @@ def main(argv=None) -> int:
 
     app_dir = os.path.abspath(args.data_dir) if args.data_dir else APP_DIR
     os.makedirs(app_dir, exist_ok=True)
+    from core import diagnostics
+    diagnostics.install(app_dir)                  # 打包後沒有主控台：未處理的錯誤寫進記錄檔
     settings = Settings2(app_dir)
     inbox = Inbox(chan)
     ctl = CompanionApp(qapp, settings, background=args.background)
@@ -869,4 +872,5 @@ def main(argv=None) -> int:
     code = qapp.exec()
     release_widgets(qapp)
     inst.release()
+    diagnostics.uninstall()
     return code

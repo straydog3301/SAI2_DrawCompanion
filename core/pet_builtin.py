@@ -37,31 +37,39 @@ class _Pen:
             return layer, ImageDraw.Draw(layer)
         return None, self.d
 
-    def _merge(self, layer):
-        if layer is not None:
-            self.img.alpha_composite(layer)
+    def _merge(self, layer, x0, y0, x1, y1, pad=0.0):
+        """只合成圖形所在的範圍（整張合成很慢，啟動時要畫幾十格）"""
+        if layer is None:
+            return
+        w, h = self.img.size
+        box = (max(0, int((x0 - pad) * self.k) - 2), max(0, int((y0 - pad) * self.k) - 2),
+               min(w, int((x1 + pad) * self.k) + 3), min(h, int((y1 + pad) * self.k) + 3))
+        if box[2] > box[0] and box[3] > box[1]:
+            self.img.alpha_composite(layer, dest=box[:2], source=box)
 
     def ellipse(self, cx, cy, rx, ry, fill):
         layer, d = self._draw(fill)
         d.ellipse(self.p(cx - rx, cy - ry, cx + rx, cy + ry), fill=fill)
-        self._merge(layer)
+        self._merge(layer, cx - rx, cy - ry, cx + rx, cy + ry)
 
     def line(self, pts, fill, w):
         layer, d = self._draw(fill)
         d.line(self.p(*[v for pt in pts for v in pt]), fill=fill, width=max(1, int(w * self.k)), joint='curve')
         for x, y in (pts[0], pts[-1]):     # 圓頭
             d.ellipse(self.p(x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=fill)
-        self._merge(layer)
+        xs, ys = [x for x, _ in pts], [y for _, y in pts]
+        self._merge(layer, min(xs), min(ys), max(xs), max(ys), w)
 
     def polygon(self, pts, fill):
         layer, d = self._draw(fill)
         d.polygon(self.p(*[v for pt in pts for v in pt]), fill=fill)
-        self._merge(layer)
+        xs, ys = [x for x, _ in pts], [y for _, y in pts]
+        self._merge(layer, min(xs), min(ys), max(xs), max(ys))
 
     def arc(self, cx, cy, r, start, end, fill, w):
         layer, d = self._draw(fill)
         d.arc(self.p(cx - r, cy - r, cx + r, cy + r), start, end, fill=fill, width=max(1, int(w * self.k)))
-        self._merge(layer)
+        self._merge(layer, cx - r, cy - r, cx + r, cy + r, w)
 
     def done(self, size: int) -> Image.Image:
         return self.img.resize((size, size), Image.LANCZOS)
@@ -160,20 +168,25 @@ def frame(state: str, i: int, size: int, body=BODY) -> Image.Image:
 ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 
 
-def icon(size: int, body=BODY) -> Image.Image:
-    """程式圖示（exe、視窗、工作列）：待命的墨墨，不含影子，裁掉留白後置中成正方形"""
-    big = max(256, size * 2)
-    pen = _Pen(big)
+@lru_cache(maxsize=8)
+def _icon_master(body: tuple) -> Image.Image:
+    """圖示原圖（512px，畫一次後快取）：待命的墨墨，不含影子，裁掉留白後置中成正方形"""
+    pen = _Pen(512)
     _body(pen, 0, 0, body, shadow=False)
     _eyes_open(pen, 0, 0)
     _mouth_smile(pen, 0, 0)
-    img = pen.done(big)
+    img = pen.img
     box = img.getchannel('A').point(lambda a: 255 if a > 8 else 0).getbbox()
     img = img.crop(box)
     side = int(max(img.size) * 1.04)                 # 四周留一點空間
     sq = Image.new('RGBA', (side, side), (0, 0, 0, 0))
     sq.paste(img, ((side - img.width) // 2, (side - img.height) // 2), img)
-    return sq.resize((size, size), Image.LANCZOS)
+    return sq.resize((512, 512), Image.LANCZOS)
+
+
+def icon(size: int, body=BODY) -> Image.Image:
+    """程式圖示（exe、視窗、工作列、系統匣）"""
+    return _icon_master(tuple(body)).resize((size, size), Image.LANCZOS)
 
 
 def save_ico(path: str, body=BODY):

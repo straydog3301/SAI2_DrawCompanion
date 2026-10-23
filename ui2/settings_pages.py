@@ -78,6 +78,48 @@ def _spin(ctl, key: str, lo: int, hi: int, suffix: str, cast=int, after=None) ->
     return Stepper(sp, 170)
 
 
+def _about_group(ctl, parent) -> SettingGroup:
+    """版本、錯誤記錄、匯出診斷資訊（回報問題用）"""
+    from core import diagnostics
+    from core.version import APP_VERSION
+    g = SettingGroup('關於與問題回報', '遇到問題時，把診斷資訊寄給開發者；不含圖庫金鑰、本機路徑與作品檔名')
+    g.row('版本', '', label(APP_VERSION, 'muted', wrap=False))
+    log = diagnostics.log_path(ctl.settings.app_dir)
+    box = QWidget()
+    row = QHBoxLayout(box)
+    row.setContentsMargins(0, 0, 0, 0)
+    open_log = button('開啟錯誤記錄')
+    export = button('匯出診斷資訊…', ic='file')
+    row.addWidget(open_log)
+    row.addWidget(export)
+    g.row('錯誤記錄', '程式發生未預期的錯誤時會記在這裡', box)
+
+    def show_log():
+        if diagnostics.has_log(ctl.settings.app_dir):
+            os.startfile(log)
+        else:
+            ctl.say('目前沒有錯誤記錄。', important=False)
+
+    def do_export():
+        from datetime import datetime
+        path, _ = QFileDialog.getSaveFileName(parent, '匯出診斷資訊', os.path.join(
+            os.path.expanduser('~'), 'Desktop', f'DrawCompanion診斷_{datetime.now():%Y%m%d_%H%M}.zip'), '壓縮檔 (*.zip)')
+        if not path:
+            return
+        st = ctl.last_status
+        extra = {'paused_for_1x': bool(ctl.service.paused),
+                 'sai2_running': bool(st and st.sai2_running), 'pet_pack': ctl.settings.get('pet.pack', '') or 'builtin'}
+        try:
+            diagnostics.export_bundle(ctl.settings, path, extra)
+        except OSError as e:
+            ctl.say(f'匯出失敗：{e}')
+            return
+        ctl.say('已匯出診斷資訊。', actions=[('開啟資料夾', lambda: os.startfile(os.path.dirname(path)))])
+    open_log.clicked.connect(show_log)
+    export.clicked.connect(do_export)
+    return g
+
+
 # ── 一般 ──
 def general_page(ctl) -> QWidget:
     w, lay = _page('一般', '這些設定都有預設值，不改也能使用。')
@@ -148,6 +190,7 @@ def general_page(ctl) -> QWidget:
     exp.clicked.connect(do_export)
     imp.clicked.connect(do_import)
     lay.addWidget(g)
+    lay.addWidget(_about_group(ctl, w))
     lay.addStretch(1)
     return w
 

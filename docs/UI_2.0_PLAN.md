@@ -1,6 +1,6 @@
 # 2.0 介面規劃（草案 v2：寵物＋參考小窗）
 
-> 狀態：規劃中，尚未開發。核心邏輯沿用 `core/`（見 [ARCHITECTURE.md](ARCHITECTURE.md)），2.0 只重寫介面層。
+> 狀態：階段 0～5 已完成（版本 2.0.0，發布前實機測試中，見 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)）。核心邏輯沿用 `core/`（見 [ARCHITECTURE.md](ARCHITECTURE.md)），2.0 只重寫介面層。
 > 視覺示意圖：Design 畫布「DrawCompanion 2.0 介面示意」（「2.0 改版：寵物＋小窗」頁；「初版」頁的今日頁 A 為控制中心的版面）。
 
 ## 1. 為什麼要重做介面

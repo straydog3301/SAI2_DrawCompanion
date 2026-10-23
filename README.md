@@ -4,6 +4,20 @@
 
 ---
 
+## 🆕 DrawCompanion 2.0（新版介面）
+
+2.0 用 PySide6 重新設計介面：啟動後只有一隻可以拖曳的桌面寵物，點一下打開快捷面板；速寫與研究合併成不占畫面的參考小窗；控制中心與設定在同一個主視窗。完整內容見 [CHANGELOG.md](CHANGELOG.md)。
+
+- **與 1.x 並存**：2.0 是另一個執行檔 `DrawCompanion2.exe`。放在 `SAI2_DrawCompanion.exe` 同一個資料夾就共用同一份紀錄；1.x 執行中時 2.0 會暫停記錄，避免重複計時
+- **筆刷工坊、液化**：2.0 尚未包含（將在 2.x 重新開發），需要時請使用 1.x
+- **從原始碼執行**：`pip install -r requirements2.txt` 後執行 `python drawcompanion2.py`；加上 `--data-dir <資料夾>` 可以不碰正式紀錄
+- **打包**：執行 `build2.bat`，在專案根目錄與 `dist/` 產生 `DrawCompanion2.exe`
+- **回報問題**：設定 → 一般 → 關於與問題回報 → 匯出診斷資訊；發布前的測試項目見 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
+
+以下為 1.x 的功能說明。
+
+---
+
 ## 🌟 主要功能 (Core Features)
 
 ### 1. 🕒 高精度時間追蹤 (Draw Time Tracker)

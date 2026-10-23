@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QGridLayout, 
                                QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
 from core import data_text as DT
+from core.version import APP_VERSION
 from core import growth, pet_pack, sketch_source as SK
 from core.daily_quests import MODES
 from ui2 import theme, winutil
@@ -143,7 +144,7 @@ class MainWindow(QWidget):
         col = QVBoxLayout()
         col.setSpacing(0)
         col.addWidget(label('DrawCompanion', 'h2', wrap=False))
-        col.addWidget(label('2.0 開發版', 'caption', wrap=False))
+        col.addWidget(label(f'版本 {APP_VERSION}', 'caption', wrap=False))
         brand.addLayout(col, 1)
         lay.addLayout(brand)
         self.nav_group = QButtonGroup(self)

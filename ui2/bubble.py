@@ -50,7 +50,8 @@ class BubbleBody(QWidget):
             l, t, r, b = self.margins()
             self.lay.setContentsMargins(*(int(round(v * k)) + PAD for v in (l, t, r, b)))
         self.label.setStyleSheet(f'color:{self.ink};font-size:13px;background:transparent;')
-        self.adjustSize()
+        if self.isVisible():                       # 看不見時不先量大小：第一次量文字會載入字型，別拖慢啟動
+            self.adjustSize()
         self.update()
 
     def margins(self) -> tuple[int, int, int, int]:

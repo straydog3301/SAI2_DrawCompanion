@@ -16,6 +16,7 @@ import zipfile
 from datetime import datetime
 
 from core import bubble_skin
+from core.version import APP_VERSION
 
 FORMAT = 'drawcompanion2-settings'
 LOCAL_ONLY = ('sai2_exe', 'data_path', 'autostart', 'prompted', 'first_run_at', 'version',
@@ -56,7 +57,7 @@ def export_bundle(settings, path: str, include_secrets: bool = False, include_pe
     data = shareable(settings.data, include_secrets)
     pets = 0
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
-        z.writestr('manifest.json', json.dumps({'format': FORMAT, 'version': 1,
+        z.writestr('manifest.json', json.dumps({'format': FORMAT, 'version': 1, 'app_version': APP_VERSION,
                                                 'exported_at': datetime.now().isoformat(timespec='seconds')},
                                                ensure_ascii=False))
         z.writestr('settings.json', json.dumps(data, ensure_ascii=False, indent=2))

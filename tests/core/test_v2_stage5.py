@@ -8,7 +8,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from _helpers import check, done, block_tk, tmpdir  # noqa: E402
 
 block_tk()
-from core import data_text as DT, daily_quests as DQ, growth, onboarding as OB, pet_builtin, settings2, study_lessons  # noqa: E402
+from core import (data_text as DT, daily_quests as DQ, diagnostics, growth, onboarding as OB, pet_builtin,  # noqa: E402
+                  settings2, study_lessons, works)
+from core.version import APP_VERSION  # noqa: E402
 
 now = datetime(2026, 10, 23, 14, 0)
 
@@ -98,4 +100,52 @@ from PIL import Image  # noqa: E402
 check(sorted(Image.open(ico).ico.sizes()) == [(s_, s_) for s_ in pet_builtin.ICON_SIZES], 'multi-size ico')
 f = pet_builtin.frame('idle', 0, 120)
 check(f.getpixel((39, 46))[3] == 255 and f.getpixel((40, 78))[3] == 255, 'highlight and cheeks blend instead of punching holes')
+# ─── 作品自動分組：使用者資料夾不以使用者名稱分組 ──
+check(works.auto_group('本機磁碟 (D:) _ art _ x.psd') == 'art', 'drive: first folder')
+check(works.auto_group('Artist _ Desktop _ 委託 _ x.psd') == '委託', 'user folder: skip name and Desktop')
+check(works.auto_group('Artist _ Desktop _ x.psd') == '桌面', 'file right on desktop')
+check(works.auto_group('Artist _ AppData _ Local _ Temp _ x.psd') == '暫存與程式資料', 'temp files')
+check(works.auto_group('x.psd') == '根目錄', 'no folder')
+
+# ─── 錯誤記錄與診斷資訊 ──
+clean = tmpdir()
+diagnostics.install(clean)
+check(not diagnostics.has_log(clean), 'empty log file is not a log')
+diagnostics.uninstall()
+check(not os.path.exists(diagnostics.log_path(clean)), 'no empty log left after a clean exit')
+import json  # noqa: E402
+import threading  # noqa: E402
+import zipfile  # noqa: E402
+app = tmpdir()
+old_stderr = sys.stderr
+hooks_before = (sys.excepthook, threading.excepthook)
+diagnostics.install(app)
+sys.stderr = None                                  # 模擬打包後沒有主控台
+try:
+    raise ValueError('boom')
+except ValueError:
+    sys.excepthook(*sys.exc_info())
+t = threading.Thread(target=lambda: 1 / 0, name='worker')
+t.start()
+t.join()
+sys.stderr = old_stderr
+diagnostics.uninstall()
+log = open(diagnostics.log_path(app), encoding='utf-8').read()
+check('Unhandled ValueError' in log and 'boom' in log and APP_VERSION in log, 'main-thread error logged')
+check('ZeroDivisionError in thread worker' in log, 'thread error logged')
+check((sys.excepthook, threading.excepthook) == hooks_before, 'hooks restored')
+big = diagnostics.log_path(app)
+open(big, 'a', encoding='utf-8').write('x' * (diagnostics.MAX_BYTES + 10))
+diagnostics.write(app, 'after trim')
+check(os.path.getsize(big) < diagnostics.MAX_BYTES and 'after trim' in open(big, encoding='utf-8').read(), 'log trimmed')
+s2 = settings2.Settings2(app)
+s2.set('sources.unsplash_key', 'SECRET123')
+s2.set('sai2_exe', r'D:\Tools\sai2.exe')
+z = diagnostics.export_bundle(s2, os.path.join(tmpdir(), 'diag.zip'), {'paused_for_1x': False})
+with zipfile.ZipFile(z) as zf:
+    names = set(zf.namelist())
+    info = json.loads(zf.read('info.json'))
+    body = zf.read('settings.json').decode('utf-8')
+check(names == {'info.json', 'settings.json', diagnostics.LOG_NAME} and info['app_version'] == APP_VERSION, 'bundle contents')
+check('SECRET123' not in body and 'sai2.exe' not in body, 'no keys or local paths in diagnostics')
 done()
