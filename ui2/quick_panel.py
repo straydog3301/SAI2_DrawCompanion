@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
+import os
 import time
 from datetime import datetime
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPen
 from PySide6.QtWidgets import (QComboBox, QFrame, QGraphicsDropShadowEffect, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QMenu, QPushButton, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
@@ -19,9 +20,13 @@ from core import onboarding, slots
 from core.daily_quests import QuestManager
 from ui2 import theme
 from ui2.icons import icon
-from ui2.widgets import ProgressBar, Stepper
+from ui2.widgets import ProgressBar, Stepper, load_pixmap, rounded_thumb
 
 PANEL_W = 380
+RECENT_COLS = 4               # 最近開啟：每列幾格縮圖
+RECENT_GAP = 6
+RECENT_W = (PANEL_W - 36 - RECENT_GAP * (RECENT_COLS - 1)) // RECENT_COLS
+RECENT_H = RECENT_W * 3 // 4
 SHADOW = 18
 
 
@@ -246,19 +251,34 @@ class QuickPanel(QWidget):
             lay.addWidget(_label('還沒有紀錄。在 SAI2 開檔畫圖後會出現在這裡。', muted=True))
             return lay
         grid = QGridLayout()
-        grid.setSpacing(6)
+        grid.setSpacing(RECENT_GAP)
         for i, r in enumerate(rows):
-            b = QPushButton(f'  {r["name"]}\n  {_rel_time(r["last_seen"])}')
-            b.setIcon(icon('file', theme.ACCENT_TEXT))
-            b.setIconSize(QSize(18, 18))
-            b.setStyleSheet(f'QPushButton{{text-align:left;background:{theme.SURFACE2};border:none;border-radius:10px;'
-                            f'padding:8px;font-size:12px;}}QPushButton:hover{{background:{theme.HOVER};}}')
-            b.setToolTip(f'在 SAI2 開啟 {r["name"]}')
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _=False, k=r['key']: (self.hide(), self.ctl.open_recent(k)))
-            grid.addWidget(b, i // 2, i % 2)
+            grid.addWidget(self._recent_tile(r), i // RECENT_COLS, i % RECENT_COLS)
         lay.addLayout(grid)
         return lay
+
+    def _recent_tile(self, r) -> QPushButton:
+        """作品縮圖格（名稱與時間放在提示文字）；還沒有縮圖的作品顯示圖示與簡短檔名"""
+        b = QPushButton()
+        b.setObjectName('recentTile')
+        b.setFixedSize(RECENT_W, RECENT_H)
+        b.setCursor(Qt.PointingHandCursor)
+        b.setToolTip(f'{r["name"]}　{_rel_time(r["last_seen"])}\n點一下在 SAI2 開啟')
+        b.setAccessibleName(f'在 SAI2 開啟 {r["name"]}')
+        b.setStyleSheet(f'QPushButton#recentTile{{background:{theme.SURFACE2};border:none;border-radius:10px;padding:0;'
+                        f'font-size:11px;color:{theme.MUTED};}}'
+                        f'QPushButton#recentTile:hover{{border:2px solid {theme.ACCENT_BORDER};}}')
+        pm = load_pixmap(self.ctl.service.thumb_of(r['key']))
+        if pm is not None:
+            b.setIcon(QIcon(rounded_thumb(pm, RECENT_W, RECENT_H, 10, b.devicePixelRatioF() or 1.0)))
+            b.setIconSize(QSize(RECENT_W, RECENT_H))
+        else:
+            stem = os.path.splitext(r['name'])[0]
+            b.setText(stem if len(stem) <= 6 else stem[:5] + '…')
+            b.setIcon(icon('file', theme.ACCENT_TEXT))
+            b.setIconSize(QSize(18, 18))
+        b.clicked.connect(lambda _=False, k=r['key']: (self.hide(), self.ctl.open_recent(k)))
+        return b
 
     def _slots(self):
         lay = QVBoxLayout()

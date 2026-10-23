@@ -207,6 +207,12 @@ class CompanionService:
                 res.events.append('exe_found')
         return res
 
+    def draw_counter(self) -> float | None:
+        """累計動筆秒數（速寫「下筆才倒數」用，取兩次的差）；1.x 執行中或沒有追蹤器時 None"""
+        if self.paused or self.tracker is None:
+            return None
+        return float(self.tracker.get_draw_counter())
+
     # ── 作品縮圖 ──
     def capture_thumb(self, key: str, manual: bool = False) -> bool:
         """在背景擷取 SAI2 畫布當作品縮圖；擷取前後都確認畫面上還是這個檔案。回傳是否開始擷取"""
@@ -372,7 +378,8 @@ class CompanionService:
     def aliases_of(self, key: str) -> list[str]:
         if self.tracker is None:
             return []
-        return sorted(a for a, v in self.tracker._persist.get('aliases', {}).items() if v == key)
+        persist = getattr(self.tracker, '_persist', None) or {}
+        return sorted(a for a, v in persist.get('aliases', {}).items() if v == key)
 
     # ── 最近開啟 ──
     def recent_files(self, n: int = 4) -> list[dict]:

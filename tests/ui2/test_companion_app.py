@@ -89,7 +89,8 @@ pump(qapp, 200)
 p = ctl.panel
 check(p.isVisible(), 'panel opens')
 texts = [b.text() for b in p.findChildren(QPushButton)]
-check(any('立繪.psd' in t for t in texts), f'recent file listed {texts}')
+tips = [b.toolTip() for b in p.findChildren(QPushButton)]
+check(any('立繪.psd' in t for t in tips), f'recent file listed (name in tooltip) {tips}')
 check(any(t in ('開始', '繼續', '打卡') for t in texts), 'quest buttons')
 slots = {b.text(): b.isEnabled() for b in p.findChildren(QToolButton) if b.property('slot')}
 check(slots.get('快照') and slots.get('SAI2') and slots.get('速寫') and slots.get('錄影'), f'slot availability {slots}')

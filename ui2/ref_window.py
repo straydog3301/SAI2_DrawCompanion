@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import random
 import threading
+import time
 import webbrowser
 
 from PIL import Image
@@ -695,6 +696,11 @@ class RefWindow(QWidget):
     def _tick(self):
         if self.mode is None:
             return
+        tick = getattr(self.mode, 'tick', None)       # 速寫的倒數由這裡每秒推進（研究的進度看實際動筆，由服務計算）
+        if tick is not None:
+            tick()
+            if self.mode is None:                     # 倒數結束後可能已關閉
+                return
         left, right, ratio, warn = self.mode.info()
         if self.view.compare is None:
             self.info.left, self.info.right, self.info.ratio, self.info.warn = left, right, ratio, warn
@@ -979,11 +985,16 @@ class SketchMode:
         self.loading = False
         self.status = ''
         self._retry = QTimer(win, singleShot=True, timeout=self.load_new)
+        self.count_mode = self.opts.get('count_mode', 'draw')     # draw：下筆才倒數；clock：一直倒數
+        self._counter = None                # 上一次讀到的累計動筆秒數
+        self.drawing = False
+        self.canvas_path = None             # 這一輪的速寫畫布（一輪一張）
 
     def actions(self):
         return [('prev', '', '上一張', self.back, False),
                 ('pause', '', '暫停／繼續倒數', self.toggle_pause, False),
                 ('next', '', '換下一張（提早換不計入張數）', self.next, False),
+                ('canvas', '', '速寫畫布：在 SAI2 開啟這一輪的畫布（沒有就建立；尺寸在設定）', self.open_canvas, False),
                 ('settings', '', '設定：題目、間隔、圖源', self.settings_menu, False),
                 ('', '結束', '結束這輪速寫', self.finish, True)]
 
@@ -991,6 +1002,35 @@ class SketchMode:
         if self.note:
             self.ctl.say(self.note, important=False)
         self.load_new()
+        if self.opts.get('auto_canvas', True):
+            self.open_canvas()
+
+    # ── 速寫畫布：一輪一張 ──
+    def _topic_label(self) -> str:
+        if self.opts.get('source') == 'local':
+            return self.opts.get('local_category') or '本機圖庫'
+        return next((label for k, label, _q in SK.CATEGORIES if k == self.opts.get('category')), '速寫')
+
+    def open_canvas(self):
+        if self.canvas_path and os.path.isfile(self.canvas_path):
+            self.ctl.open_path(self.canvas_path)
+            return
+        t = self.q.task(self.uid) if self.uid else None
+        name = DT.task_name(t) if t else self._topic_label()
+        folder = ST.canvas_dir(self.ctl.settings.get('study.canvas_dir', ''), '速寫')
+        stem = ST.safe_filename(f"速寫_{name or '練習'}_{time.strftime('%Y%m%d_%H%M')}")
+        size = ST.sketch_canvas_size(self.opts)
+        try:
+            path, w, h = ST.create_canvas(folder, stem, None, max(size), size=size)
+        except OSError as e:
+            self.ctl.say(f'無法建立速寫畫布：{e}')
+            return
+        self.canvas_path = path
+        msg = f'已建立 {w}×{h} 速寫畫布，這一輪都畫在這張上。'
+        if self.count_mode == 'draw':
+            msg += '在畫布上下筆時才會倒數。'
+        self.ctl.say(msg, important=False)
+        self.ctl.open_path(path)
 
     def load_new(self):
         if self.loading:
@@ -1037,8 +1077,20 @@ class SketchMode:
         ready = self.ctl.service.record_sketch(self.topic, seconds, self.uid, self.session.interval or None)
         self.ctl.on_ready(ready)
 
+    def _elapsed(self) -> float:
+        """這一秒要推進幾秒：一直倒數 = 1；下筆才倒數 = 這段期間 SAI2 的動筆秒數（1.x 執行中時退回一直倒數）"""
+        if self.count_mode != 'draw':
+            return 1.0
+        c = self.ctl.service.draw_counter()
+        if c is None:
+            return 1.0
+        last, self._counter = self._counter, c
+        return 0.0 if last is None or c < last else min(c - last, 3.0)
+
     def tick(self):
-        if self.session.tick(1.0):
+        dt = self._elapsed()
+        self.drawing = dt > 0
+        if self.session.tick(dt):
             self._record(self.session.interval)
             self.next(auto=True)
 
@@ -1081,6 +1133,8 @@ class SketchMode:
         interval.setCurrentIndex(max(0, interval.findData(self.session.interval)))
         gray = QCheckBox('灰階顯示')
         gray.setChecked(bool(self.win.tools['gray']))
+        by_draw = QCheckBox('下筆時才倒數（停筆、看參考圖時暫停）')
+        by_draw.setChecked(self.count_mode == 'draw')
         warn = QLabel()
         warn.setWordWrap(True)
         warn.setProperty('warn', True)
@@ -1114,6 +1168,7 @@ class SketchMode:
             form.addWidget(w, r, 1)
         lay.addLayout(form)
         lay.addWidget(gray)
+        lay.addWidget(by_draw)
         lay.addWidget(warn)
         if self.uid:
             note = QLabel('改了題目或間隔，之後的張數就不算進目前的任務。')
@@ -1147,6 +1202,13 @@ class SketchMode:
                 self.ctl.settings.save()
                 self.win._sync_tool_buttons()
                 self.win._render()
+            mode = 'draw' if by_draw.isChecked() else 'clock'
+            if mode != self.count_mode:
+                self.count_mode = mode
+                self._counter = None
+                self.opts['count_mode'] = mode
+                self.ctl.settings.set('sketch.count_mode', mode)
+                self.ctl.settings.save()
             self.win._close_sheet()
             if changes:
                 self._change(**changes)
@@ -1196,6 +1258,10 @@ class SketchMode:
             left += '　已達標'
         if s.paused:
             left += '（暫停）'
+        elif self.count_mode == 'draw' and not self.drawing and s.current is not None \
+                and self.ctl.service.draw_counter() is not None:
+            st = self.ctl.last_status
+            left += '　在已存檔的畫布上下筆才倒數' if st is not None and st.unsaved_file else '　下筆開始倒數'
         if self.status and self.win.base is None:
             left = self.status
         if s.interval <= 0:

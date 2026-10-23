@@ -114,6 +114,18 @@ wp = mw.page_widget('作品', 'WorksPage')
 check(wp._tiles['本機磁碟 (D:) _ art _ 立繪.psd'].pixmap().width() >= 64, 'tile updated after capture')
 check('縮圖更新於' in ' '.join(lb.text() for lb in wp.detail.findChildren(QLabel)), 'preview updated after capture')
 
+# ─── 快捷面板的最近開啟：縮圖格，名稱放在提示 ──
+mw.hide()
+ctl.toggle_panel()
+pump(200)
+tiles_p = [b for b in ctl.panel.findChildren(QPushButton) if b.objectName() == 'recentTile']
+check(len(tiles_p) == 3, f'panel shows recent tiles ({len(tiles_p)})')
+with_thumb = [b for b in tiles_p if '草稿' in b.toolTip()][0]
+check(with_thumb.text() == '' and with_thumb.iconSize().width() > 40, 'tile with thumbnail: picture only, no name')
+check(all('在 SAI2 開啟' in b.toolTip() or '點一下' in b.toolTip() for b in tiles_p), 'name and hint in tooltip')
+ctl.panel.hide()
+mw.show()
+
 # ─── 刪除：刪除 → 確定刪除，一次就消失 ──
 key = '本機磁碟 (D:) _ art _ 草稿.psd'
 wp._show(key)

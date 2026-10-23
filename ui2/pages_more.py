@@ -8,8 +8,8 @@ import subprocess
 import threading
 from datetime import datetime
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QPainter, QPainterPath, QPixmap
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QScrollArea, QVBoxLayout, QWidget)
 
@@ -20,7 +20,7 @@ from ui2 import theme
 from ui2.charts import BarChart, MonthGrid, Sparkline
 from ui2.icons import icon
 from ui2.widgets import (Card, Chip, PageHeader, ProgressBar, Segmented, SettingGroup, StatTile, ToggleSwitch, button,
-                         label)
+                         label, load_pixmap, rounded_thumb)
 
 STATUS_CHIP = {'done': ('已打卡', 'ok'), 'ready': ('已達標', 'accent'), 'active': ('進行中', 'neutral'),
                'expired': ('未完成', 'warn')}
@@ -384,7 +384,6 @@ class WorksPage(QWidget):
         self.selected = None
         self.limit = self.PAGE
         self._tiles: dict[str, QLabel] = {}
-        self._pm_cache: dict = {}
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(20)
@@ -451,41 +450,14 @@ class WorksPage(QWidget):
 
     # ── 縮圖 ──
     def _pixmap(self, path: str) -> QPixmap | None:
-        try:
-            key = (path, os.path.getmtime(path))
-        except OSError:
-            return None
-        pm = self._pm_cache.get(key)
-        if pm is None:
-            pm = QPixmap(path)
-            if pm.isNull():
-                return None
-            self._pm_cache = {k: v for k, v in self._pm_cache.items() if k[0] != path}
-            self._pm_cache[key] = pm
-        return pm
+        return load_pixmap(path)
 
     def _set_tile(self, tile: QLabel, key: str):
-        path = self.svc.thumb_of(key)
-        pm = self._pixmap(path) if path else None
+        pm = load_pixmap(self.svc.thumb_of(key))
         if pm is None:
             tile.setPixmap(icon('file', theme.ACCENT_TEXT, 18).pixmap(18, 18))
             return
-        dpr = tile.devicePixelRatioF() or 1.0
-        size = QSize(int(tile.width() * dpr), int(tile.height() * dpr))
-        scaled = pm.scaled(size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-        x, y = (scaled.width() - size.width()) // 2, (scaled.height() - size.height()) // 2
-        crop = scaled.copy(x, y, size.width(), size.height())         # 置中裁成格子大小
-        out = QPixmap(size)
-        out.fill(Qt.transparent)
-        p = QPainter(out)                                             # 圓角，與格子底色一致
-        p.setRenderHint(QPainter.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, size.width(), size.height()), 8 * dpr, 8 * dpr)
-        p.setClipPath(path)
-        p.drawPixmap(0, 0, crop)
-        p.end()
-        out.setDevicePixelRatio(dpr)
-        tile.setPixmap(out)
+        tile.setPixmap(rounded_thumb(pm, tile.width(), tile.height(), 8, tile.devicePixelRatioF() or 1.0))
 
     def thumbs_updated(self, keys):
         """背景剛存好縮圖：更新清單上的小圖與右側預覽"""

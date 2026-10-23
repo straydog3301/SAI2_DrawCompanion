@@ -120,11 +120,34 @@ def canvas_stem(lesson: dict | None, skill_name: str | None, task_name: str, day
     return safe_filename(f'{stem}_{day}')
 
 
-def create_canvas(folder: str, stem: str, ref_size: tuple[int, int] | None, long_side: int) -> tuple[str, int, int]:
-    """與參考圖同比例的空白 PSD（同名時加 _2、_3），回傳 (路徑, 寬, 高)"""
-    rw, rh = ref_size or (3, 4)
-    scale = long_side / max(rw, rh)
-    w, h = max(1, round(rw * scale)), max(1, round(rh * scale))
+# 速寫畫布尺寸（300 dpi）：key → (名稱, 寬, 高)；'custom' 用設定裡的 canvas_w / canvas_h
+SKETCH_CANVAS = {
+    'a4_land': ('A4 橫向', 3508, 2480), 'a4_port': ('A4 直向', 2480, 3508),
+    'a3_land': ('A3 橫向', 4961, 3508), 'b5_land': ('B5 橫向', 3035, 2150),
+    'square': ('正方形', 2480, 2480), 'wide': ('16:9 橫向', 3840, 2160), 'custom': ('自訂', 0, 0),
+}
+CANVAS_MIN, CANVAS_MAX = 256, 10000
+
+
+def sketch_canvas_size(opts: dict) -> tuple[int, int]:
+    """速寫設定 → 畫布寬高（px）"""
+    key = opts.get('canvas', 'a4_land')
+    if key == 'custom':
+        w, h = int(opts.get('canvas_w') or 3508), int(opts.get('canvas_h') or 2480)
+        return (max(CANVAS_MIN, min(CANVAS_MAX, w)), max(CANVAS_MIN, min(CANVAS_MAX, h)))
+    _name, w, h = SKETCH_CANVAS.get(key, SKETCH_CANVAS['a4_land'])
+    return w, h
+
+
+def create_canvas(folder: str, stem: str, ref_size: tuple[int, int] | None, long_side: int,
+                  size: tuple[int, int] | None = None) -> tuple[str, int, int]:
+    """空白 PSD（同名時加 _2、_3），回傳 (路徑, 寬, 高)。size 指定寬高；否則與參考圖同比例、長邊 long_side"""
+    if size:
+        w, h = int(size[0]), int(size[1])
+    else:
+        rw, rh = ref_size or (3, 4)
+        scale = long_side / max(rw, rh)
+        w, h = max(1, round(rw * scale)), max(1, round(rh * scale))
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, f'{stem}.psd')
     n = 2

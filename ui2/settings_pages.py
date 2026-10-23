@@ -1143,18 +1143,66 @@ def sources_page(ctl) -> QWidget:
         g.row(title, '', box)
     lay.addWidget(g)
 
-    g = SettingGroup('練習畫布', '研究時按「畫布」會建立與參考圖同比例、依課程命名的 PSD')
-    g.row('存放位置', '預設在「文件 › SAI2 練習 › 技能名稱」', _path_field(ctl, 'study.canvas_dir', '選擇練習畫布資料夾'), stack=True)
+    g = SettingGroup('練習畫布', '研究時按「畫布」會建立與參考圖同比例、依課程命名的 PSD；速寫一輪共用一張畫布')
+    g.row('存放位置', '預設在「文件 › SAI2 練習 › 技能名稱」；速寫畫布放在「速寫」資料夾',
+          _path_field(ctl, 'study.canvas_dir', '選擇練習畫布資料夾'), stack=True)
     side = QComboBox()
     for v in (1500, 2000, 3000, 4000):
         side.addItem(f'長邊 {v} px', v)
     side.setCurrentIndex(max(0, side.findData(int(ctl.settings.get('study.canvas_side', 2000)))))
     side.setFixedWidth(150)
     side.currentIndexChanged.connect(lambda _i: (ctl.settings.set('study.canvas_side', side.currentData()), ctl.settings.save()))
-    g.row('畫布尺寸', '依參考圖的比例決定寬高', side)
+    g.row('研究畫布尺寸', '依參考圖的比例決定寬高', side)
+    g.row('開始速寫時自動建立畫布', '一輪速寫用同一張畫布，並在 SAI2 開啟；也可以按小窗上的「畫布」按鈕', _toggle(ctl, 'sketch.auto_canvas'))
+    g.row('速寫畫布尺寸', '300 dpi', _sketch_size(ctl))
+    g.row('速寫下筆時才倒數', '停筆看參考圖、調整工具時不倒數，計時更接近實際作畫；關閉則一直倒數',
+          _mode_toggle(ctl, 'sketch.count_mode', 'draw', 'clock'))
     lay.addWidget(g)
     lay.addStretch(1)
     return w
+
+
+def _mode_toggle(ctl, key: str, on_value, off_value) -> ToggleSwitch:
+    t = ToggleSwitch(ctl.settings.get(key) == on_value)
+    t.toggled.connect(lambda v: (ctl.settings.set(key, on_value if v else off_value), ctl.settings.save()))
+    return t
+
+
+def _sketch_size(ctl) -> QWidget:
+    """速寫畫布尺寸：常用紙張，或自訂寬高"""
+    from core.study_tools import CANVAS_MAX, CANVAS_MIN, SKETCH_CANVAS
+    s = ctl.settings
+    box = QWidget()
+    row = QHBoxLayout(box)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(8)
+    combo = QComboBox()
+    for k, (name, cw, ch) in SKETCH_CANVAS.items():
+        combo.addItem(f'{name}（{cw}×{ch}）' if cw else name, k)
+    combo.setCurrentIndex(max(0, combo.findData(s.get('sketch.canvas', 'a4_land'))))
+    row.addWidget(combo)
+    spins = []
+    for key in ('sketch.canvas_w', 'sketch.canvas_h'):
+        sp = QSpinBox()
+        sp.setRange(CANVAS_MIN, CANVAS_MAX)
+        sp.setSuffix(' px')
+        sp.setValue(int(s.get(key, 3508 if key.endswith('w') else 2480)))
+        sp.setFixedWidth(110)
+        sp.valueChanged.connect(lambda v, k=key: (s.set(k, int(v)), s.save()))
+        spins.append(sp)
+    times = QLabel('×')
+    for wdg in (spins[0], times, spins[1]):
+        row.addWidget(wdg)
+
+    def changed(_i=None):
+        s.set('sketch.canvas', combo.currentData())
+        s.save()
+        for wdg in (spins[0], times, spins[1]):
+            wdg.setVisible(combo.currentData() == 'custom')
+    combo.currentIndexChanged.connect(changed)
+    for wdg in (spins[0], times, spins[1]):
+        wdg.setVisible(combo.currentData() == 'custom')
+    return box
 
 
 # ── 快捷鍵 ──

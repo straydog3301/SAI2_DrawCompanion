@@ -51,7 +51,10 @@ DEFAULTS: dict = {
         'local_dir': '',
     },
     'sketch': {'source': 'local', 'category': 'pose', 'custom_query': '', 'local_category': '',
-               'interval': 60, 'grayscale': False},
+               'interval': 60, 'grayscale': False,
+               'count_mode': 'draw',          # draw：在 SAI2 下筆時才倒數；clock：一直倒數
+               'auto_canvas': True,           # 開始一輪速寫時建立畫布並在 SAI2 開啟（一輪一張）
+               'canvas': 'a4_land', 'canvas_w': 3508, 'canvas_h': 2480},   # 畫布尺寸（core/study_tools.SKETCH_CANVAS）
     'study': {'canvas_dir': '', 'canvas_side': 2000},   # canvas_dir 空白 = 文件\SAI2 練習；canvas_side：長邊 px
     'timelapse': {'enabled': False, 'multiplier': 5, 'target': 'canvas', 'quality': 'standard', 'fps': 30,
                   'output_dir': ''},      # output_dir 空白 = APP_DIR/videos

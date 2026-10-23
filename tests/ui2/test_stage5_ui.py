@@ -189,6 +189,19 @@ check(t2._anim.duration() == 0, 'switch animation off')
 tg.setChecked(False)
 check(theme.MOTION is True, 'reduce motion off')
 
+# 速寫畫布設定：選「自訂」才出現寬高
+mw.show_page('參考圖來源')
+pump(200)
+from PySide6.QtWidgets import QComboBox, QSpinBox  # noqa: E402
+page = mw.pages['參考圖來源']
+combo = next(c for c in page.findChildren(QComboBox) if c.findData('a4_land') >= 0)
+spins = [x for x in page.findChildren(QSpinBox) if x.suffix() == ' px']
+check(combo.currentData() == 'a4_land' and not any(x.isVisible() for x in spins), 'A4 landscape by default, no size fields')
+combo.setCurrentIndex(combo.findData('custom'))
+check(s.get('sketch.canvas') == 'custom' and all(x.isVisible() for x in spins), 'custom shows width/height')
+spins[0].setValue(2000)
+check(s.get('sketch.canvas_w') == 2000, 'custom width saved')
+
 mw.close()
 ctl.quit()
 A.release_widgets(qapp)

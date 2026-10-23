@@ -168,12 +168,42 @@ check(w.width() >= max(w.top.sizeHint().width(), w.bottom.sizeHint().width()), '
 w.mode.toggle_pause()
 check(w.mode.session.paused, 'pause')
 w.mode.toggle_pause()
+check(w._timer.isActive(), 'window timer running')
+# 速寫畫布：一輪一張，預設 A4 橫向，並在 SAI2 開啟
+cv = w.mode.canvas_path
+check(cv and opened and opened[-1] == cv and Image.open(cv).size == (3508, 2480) and os.sep + '速寫' + os.sep in cv,
+      f'round canvas created (A4 landscape) and opened {cv}')
+n_files = len(os.listdir(os.path.dirname(cv)))
+w.mode.open_canvas()
+check(opened[-1] == cv and len(os.listdir(os.path.dirname(cv))) == n_files, 'canvas button reopens the same canvas')
+# 預設「下筆才倒數」：沒動筆就不倒數，動筆幾秒就倒數幾秒（用視窗自己的計時器推進）
+tr = ctl.service.tracker
+start = w.mode.session.remaining
+pump(2300)
+check(w.mode.session.remaining == start and '下筆開始倒數' in w.mode.info()[0], 'not drawing → countdown waits')
+for _ in range(3):
+    tr.counter += 1.0
+    pump(1050)
+check(start - 4 <= w.mode.session.remaining <= start - 2, f'drawing → countdown runs ({start} → {w.mode.session.remaining})')
+w.mode.count_mode = 'clock'                        # 一直倒數模式
+start = w.mode.session.remaining
+pump(2300)
+check(w.mode.session.remaining <= start - 2, 'clock mode counts down without drawing')
 w.mode.session.remaining = 1
-w.mode.tick()
+pump(1300)
 check(q.task(sk['uid'])['progress'] == 1, 'countdown reaching zero counts one')
 check(wait(lambda: len(w.mode.session.history) == 2), 'next image loaded automatically')
 w.mode.next()
 check(q.task(sk['uid'])['progress'] == 1, 'skipping early does not count')
+target = q.task(sk['uid'])['target']
+for _ in range(int(target) - 1):                   # 畫完整個任務：每張倒數歸零都計入，最後達標
+    check(wait(lambda: w.mode.session.current is not None and not w.mode.session.waiting and not w.mode.loading),
+          'next sketch ready')
+    w.mode.session.remaining = 1
+    w._tick()
+check(q.task(sk['uid'])['status'] == 'ready' and q.task(sk['uid'])['progress'] >= target,
+      f"whole sketch task completes ({q.task(sk['uid'])['progress']}/{target})")
+q.task(sk['uid'])['status'], q.task(sk['uid'])['progress'] = 'active', 1     # 還原，後面的測試沿用這個任務
 w.mode.settings_menu()
 pump(50)
 opt = w.options

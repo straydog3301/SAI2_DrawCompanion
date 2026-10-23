@@ -9,12 +9,53 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Property, QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractButton, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
                                QWidget)
 
 from ui2 import theme
 from ui2.icons import icon
+
+_pixmaps: dict = {}           # 圖檔路徑 → (修改時間, QPixmap)：縮圖會被覆寫，依修改時間判斷要不要重讀
+
+
+def load_pixmap(path: str | None) -> QPixmap | None:
+    import os
+    if not path:
+        return None
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    hit = _pixmaps.get(path)
+    if hit and hit[0] == mtime:
+        return hit[1]
+    pm = QPixmap(path)
+    if pm.isNull():
+        return None
+    if len(_pixmaps) > 200:
+        _pixmaps.clear()
+    _pixmaps[path] = (mtime, pm)
+    return pm
+
+
+def rounded_thumb(pm: QPixmap, w: int, h: int, radius: float, dpr: float = 1.0) -> QPixmap:
+    """置中裁成 w×h（邏輯 px）的圓角縮圖"""
+    size = QSize(int(w * dpr), int(h * dpr))
+    scaled = pm.scaled(size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+    x, y = (scaled.width() - size.width()) // 2, (scaled.height() - size.height()) // 2
+    crop = scaled.copy(x, y, size.width(), size.height())
+    out = QPixmap(size)
+    out.fill(Qt.transparent)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.Antialiasing)
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(0, 0, size.width(), size.height()), radius * dpr, radius * dpr)
+    p.setClipPath(path)
+    p.drawPixmap(0, 0, crop)
+    p.end()
+    out.setDevicePixelRatio(dpr)
+    return out
 
 
 def label(text: str = '', role: str = '', wrap: bool = True) -> QLabel:

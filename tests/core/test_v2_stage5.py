@@ -148,4 +148,16 @@ with zipfile.ZipFile(z) as zf:
     body = zf.read('settings.json').decode('utf-8')
 check(names == {'info.json', 'settings.json', diagnostics.LOG_NAME} and info['app_version'] == APP_VERSION, 'bundle contents')
 check('SECRET123' not in body and 'sai2.exe' not in body, 'no keys or local paths in diagnostics')
+# ─── 速寫畫布尺寸 ──
+from core import study_tools as ST  # noqa: E402
+check(ST.sketch_canvas_size({}) == (3508, 2480), 'default A4 landscape')
+check(ST.sketch_canvas_size({'canvas': 'a4_port'}) == (2480, 3508), 'A4 portrait')
+check(ST.sketch_canvas_size({'canvas': 'custom', 'canvas_w': 1920, 'canvas_h': 1080}) == (1920, 1080), 'custom')
+check(ST.sketch_canvas_size({'canvas': 'custom', 'canvas_w': 99999, 'canvas_h': 10}) == (ST.CANVAS_MAX, ST.CANVAS_MIN), 'custom clamped')
+check(ST.sketch_canvas_size({'canvas': 'nope'}) == (3508, 2480), 'unknown preset → A4')
+cdir = tmpdir()
+path, cw, ch = ST.create_canvas(cdir, 'x', None, 0, size=(1200, 800))
+from PIL import Image as _I  # noqa: E402
+check((cw, ch) == (1200, 800) and _I.open(path).size == (1200, 800), 'canvas at exact size')
+check(settings2.Settings2(tmpdir()).get('sketch.count_mode') == 'draw', 'sketch counts drawing time by default')
 done()
