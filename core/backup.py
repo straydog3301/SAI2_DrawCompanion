@@ -22,7 +22,7 @@ FORMAT = 'drawcompanion2-settings'
 LOCAL_ONLY = ('sai2_exe', 'data_path', 'autostart', 'prompted', 'first_run_at', 'version',
               'timelapse.output_dir', 'timelapse.enabled', 'study.canvas_dir', 'sources.local_dir',
               'ref', 'works.groups', 'exclude_folders')
-SECRETS = ('sources.unsplash_key', 'sources.pexels_key')
+SECRETS = ('sources.unsplash_key', 'sources.pexels_key', 'ai_review.api_key')
 MAX_BYTES = 120 * 1024 * 1024
 
 

@@ -56,7 +56,9 @@ DEFAULTS: dict = {
                'count_mode': 'draw',          # draw：在 SAI2 下筆時才倒數；clock：一直倒數
                'auto_canvas': True,           # 開始一輪速寫時建立畫布並在 SAI2 開啟（一輪一張）
                'canvas': 'a4_land', 'canvas_w': 3508, 'canvas_h': 2480},   # 畫布尺寸（core/study_tools.SKETCH_CANVAS）
-    'study': {'canvas_dir': '', 'canvas_side': 2000},   # canvas_dir 空白 = 文件\SAI2 練習；canvas_side：長邊 px
+    'study': {'canvas_dir': '', 'canvas_side': 2000},
+    # 課程打卡的 AI 評鑑（core/ai_review.py）：使用者自己的金鑰；provider：gemini / openai（OpenAI 相容）
+    'ai_review': {'enabled': False, 'provider': 'gemini', 'api_key': '', 'model': '', 'base_url': ''},   # canvas_dir 空白 = 文件\SAI2 練習；canvas_side：長邊 px
     'timelapse': {'enabled': False, 'multiplier': 5, 'target': 'canvas', 'quality': 'standard', 'fps': 30,
                   'output_dir': ''},      # output_dir 空白 = APP_DIR/videos
     'works': {'groups': {}, 'sort': 'recent', 'thumbnails': True},   # thumbnails：存檔、停筆時自動擷取作品縮圖

@@ -178,6 +178,7 @@ def day_detail(m: QuestManager, key: str) -> dict:
             'ref_title': ' / '.join(x for x in (ref.get('title'), ref.get('artist')) if x),
             'canvas': t.get('canvas') or '',
             'snapshot': t.get('snapshot') or '',
+            'ai_review': t.get('ai_review') or None,
         })
     summary = day_summary(m, key)
     by_skill: dict[str, float] = {}

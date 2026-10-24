@@ -10,7 +10,7 @@ from datetime import datetime
 from PIL import Image, ImageDraw
 from core import study_lessons as L
 from core.daily_quests import QuestManager, est_minutes
-import study_window as SW
+from core import study_tools as SW
 from core import snapshots as SN
 
 
