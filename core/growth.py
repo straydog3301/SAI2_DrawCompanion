@@ -11,7 +11,7 @@ from __future__ import annotations
 import calendar
 from datetime import datetime, timedelta
 
-from core import study_lessons
+from core import data_text, study_lessons
 from core.i18n import _tr
 from core.daily_quests import QuestManager, MODES
 
@@ -117,7 +117,7 @@ def skill_cards(m: QuestManager, now: datetime | None = None) -> list[dict]:
         last = last_day.get(sid)
         idle = (_d(today) - _d(last)).days if last else None
         cards.append({
-            'id': sid, 'name': s['name'], 'icon': s.get('icon', ''),
+            'id': sid, 'name': data_text.skill_name(s), 'icon': s.get('icon', ''),
             'total_seconds': totals.get(sid, 0.0),
             'recent_seconds': recent.get(sid, 0.0),
             'series': series.get(sid, [0.0] * SERIES_DAYS),
@@ -170,7 +170,7 @@ def day_detail(m: QuestManager, key: str) -> dict:
         mode = MODES.get(t.get('mode'), {})
         ref = t.get('ref') or {}
         items.append({
-            'name': t.get('name', ''), 'icon': mode.get('icon', ''), 'status': t.get('status'),
+            'name': data_text.task_name(t), 'icon': mode.get('icon', ''), 'status': t.get('status'),
             'progress': QuestManager.progress_text(t) if t.get('mode') in MODES else '',
             'skills': m.skill_label(t.get('skills') or {}),
             'rating': t.get('rating'), 'note': t.get('note') or '',

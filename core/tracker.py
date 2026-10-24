@@ -248,6 +248,9 @@ class DrawTracker:
         # 未存檔畫布多為貼參考圖用途，且舊有的「未存檔→已存檔」改名合併邏輯
         # 會在切換到任何已存檔案時誤把參考畫布的時間合併進去。
         self.track_unsaved = track_unsaved
+        # 不記錄的檔案（2.0 的「排除資料夾」）：回傳 True 的檔案當作沒有開檔，不計時。1.x 不設定
+        self.is_excluded = lambda name: False
+        self._excluded_file = None
 
         self._lock    = threading.Lock()
         self._running = False
@@ -424,6 +427,15 @@ class DrawTracker:
                 if filename and not self.track_unsaved and not is_saved_filename(filename):
                     filename = None
 
+                # 0b. 排除的資料夾：當作沒有開檔（不計時、不錄影、不提醒存檔）
+                excluded_file = None
+                if filename:
+                    try:
+                        if self.is_excluded(filename):
+                            excluded_file, filename, raw_detected_file = filename, None, None
+                    except Exception:
+                        pass
+
                 # 1. 優先透過 aliases 將別名解析為對應的主圖檔
                 if filename and 'aliases' in self._persist:
                     if filename in self._persist['aliases']:
@@ -445,6 +457,7 @@ class DrawTracker:
                     self._sai2_active = sai_foreground
                     self._sai2_running = sai_running
                     self._raw_cur_file = raw_detected_file
+                    self._excluded_file = excluded_file
 
                     if not sai_running:
                         # PaintTool SAI 沒開 → 切換為 None（結束當前 session）
@@ -611,13 +624,13 @@ class DrawTracker:
             self._session_last_mouse     = 0.0
             self._session_draw_flushed   = 0.0
 
-    def _update_state(self, now: float):
+    def _update_state(self, now: float, force: bool = False):
         """更新 UI 快照（在 lock 內呼叫）。
 
         重建整份檔案快照的成本與檔案數成正比，UI 每秒才輪詢一次，
-        因此以 0.25 秒節流，避免 15ms 迴圈中每次都重建。
+        因此以 0.25 秒節流，避免 15ms 迴圈中每次都重建。force：紀錄被修改（刪除、合併）後立刻重建。
         """
-        if now - getattr(self, '_last_state_build', 0.0) < 0.25:
+        if not force and now - getattr(self, '_last_state_build', 0.0) < 0.25:
             return
         self._last_state_build = now
 
@@ -650,6 +663,7 @@ class DrawTracker:
             'sai2_running':  self._sai2_running,
             'current_file': f,
             'raw_current_file': getattr(self, '_raw_cur_file', None),
+            'excluded_file': self._excluded_file,
             'session_open': session_open_s,
             'session_draw': session_draw_s,
             'files':        all_files,
@@ -660,6 +674,20 @@ class DrawTracker:
         """取得目前快照（供 UI 輪詢）。"""
         with self._lock:
             return dict(self._state)
+
+    def daily_history(self) -> dict[str, float]:
+        """每日動筆秒數 {YYYY-MM-DD: 秒}（副本）"""
+        with self._lock:
+            return dict(self._persist.get('daily_history', {}))
+
+    def today_draw_seconds(self) -> float:
+        """今天的動筆秒數（已寫入每日統計＋目前工作階段尚未寫入的部分）"""
+        with self._lock:
+            today = datetime.now().strftime('%Y-%m-%d')
+            done = self._persist.get('daily_history', {}).get(today, 0.0)
+            if self._cur_file:
+                done += max(0.0, self._current_session_draw(time.monotonic()) - self._session_draw_flushed)
+            return done
 
     def get_draw_counter(self) -> float:
         """程式啟動以來累計的動筆秒數（單調遞增）。呼叫端以兩次讀值的差計算期間動筆時間。"""
@@ -696,6 +724,34 @@ class DrawTracker:
                     rec.get('last_seen', ''),
                 ])
 
+    def delete_files(self, filenames):
+        """一次刪除多筆紀錄（只存檔一次）"""
+        names = set(filenames)
+        with self._lock:
+            for name in names:
+                self._persist['files'].pop(name, None)
+            aliases = self._persist.get('aliases', {})
+            for k in [k for k, v in aliases.items() if v in names]:
+                aliases.pop(k, None)
+            if self._cur_file in names:
+                self._cur_file               = None
+                self._session_open_accum     = 0.0
+                self._session_open_seg_start = 0.0
+                self._session_draw_accum     = 0.0
+                self._session_draw_seg_start = 0.0
+                self._session_last_mouse     = 0.0
+                self._base_open              = 0.0
+                self._base_draw              = 0.0
+            if self.locked_file in names:
+                self.locked_file = None
+        self._refresh_snapshot()
+        self.save()
+
+    def _refresh_snapshot(self):
+        """刪除、合併紀錄後馬上更新快照：否則畫面會讀到舊快照，看起來像沒刪掉（要刪兩次）"""
+        with self._lock:
+            self._update_state(time.monotonic(), force=True)
+
     def delete_file(self, filename: str):
         """刪除特定檔案的記錄。"""
         with self._lock:
@@ -717,6 +773,7 @@ class DrawTracker:
                 self._base_draw              = 0.0
             if self.locked_file == filename:
                 self.locked_file = None
+        self._refresh_snapshot()
         self.save()
 
     def reset_all(self):
@@ -732,6 +789,7 @@ class DrawTracker:
             self._base_open              = 0.0
             self._base_draw              = 0.0
             self.locked_file             = None
+        self._refresh_snapshot()
         self.save()
 
     def resolve_alias(self, name: str | None) -> str | None:
@@ -827,6 +885,7 @@ class DrawTracker:
             if self.locked_file == alias_name:
                 self.locked_file = target_name
                 
+        self._refresh_snapshot()
         self.save()
 
     def remove_alias(self, alias_name: str):
@@ -834,4 +893,5 @@ class DrawTracker:
         with self._lock:
             if 'aliases' in self._persist:
                 self._persist['aliases'].pop(alias_name, None)
+        self._refresh_snapshot()
         self.save()

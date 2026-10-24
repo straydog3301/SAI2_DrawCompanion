@@ -16,6 +16,7 @@ build/
 dist/
 videos/
 *.spec
+!DrawCompanion2.spec
 *.log
 *.exe
 
@@ -33,8 +34,19 @@ study_refs_cache/
 checkin_snapshots/
 sai2_pending_assets/
 sai2_settings_backup/
+sai2_full_backups/
+work_thumbs/
+sai2_snapshots/
+spikes/v2_brush_probe/out/
 watcher_out.log
 pythonw_error.log
+
+# 2.0 (drawcompanion2.py)
+drawcompanion2_settings.json
+drawcompanion2_settings.json.tmp
+drawcompanion2_pet_pos.json
+pets/
+snapshots/
 
 # Operating System
 Thumbs.db

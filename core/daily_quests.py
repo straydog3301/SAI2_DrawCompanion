@@ -186,6 +186,11 @@ class QuestManager:
         if self._upgrade_study_tasks():
             self._dirty = True
 
+    def reload(self):
+        """重新讀取檔案（例如 1.x 剛改過），沿用同一個物件，持有這個物件的畫面不會變成改到舊資料"""
+        self._dirty = False
+        self.load()
+
     # 舊版內建範本名稱 → 新名稱（使用者沒改過名稱時才更新）
     _RENAMED_BUILTINS = {'t_st_color': ('色彩臨摹', '色彩研究'), 't_st_value': ('明度研究', '明暗研究')}
 
@@ -308,11 +313,12 @@ class QuestManager:
 
     def skill_label(self, skills: dict) -> str:
         """技能權重 → 顯示用文字（依權重由大到小，例：「色彩·明暗光影」）"""
+        from core.data_text import skill_name
         names = []
         for sid, _w in sorted(skills.items(), key=lambda kv: -kv[1]):
             s = self.skill(sid)
             if s:
-                names.append(s['name'])
+                names.append(skill_name(s))
         return '·'.join(names)
 
     # ── 換日與課表產生 ────────────────────────────────────────────────────
@@ -329,6 +335,21 @@ class QuestManager:
         self.data['current_day'] = key
         if key not in self.data['days']:
             self.data['days'][key] = {'rerolls_used': 0, 'tasks': self._generate(key)}
+        self.mark_dirty()
+        return True
+
+    def regenerate_today(self, now: datetime | None = None) -> bool:
+        """依目前設定重排今天的課表（例如剛調整每日練習時間）。今天已經開始練習時不動，回傳是否重排"""
+        if not self.settings.get('enabled', True):
+            return False
+        self.ensure_today(now)
+        key = self.day_key(now)
+        day = self.data['days'].get(key)
+        if day is None or any(t.get('progress') or t['status'] != 'active' for t in day['tasks']):
+            return False
+        if self.data.get('active_study') in {t['uid'] for t in day['tasks']}:
+            return False
+        day['tasks'] = self._generate(key)
         self.mark_dirty()
         return True
 

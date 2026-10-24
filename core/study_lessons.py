@@ -388,8 +388,11 @@ for _path in PATHS.values():
 
 
 def lesson(lesson_id: str) -> dict | None:
-    return LESSON_BY_ID.get(lesson_id)
+    """依目前語言回傳課程內容（core/data_text.py；繁中原樣回傳）"""
+    from core import data_text
+    return data_text.lesson(LESSON_BY_ID.get(lesson_id))
 
 
 def path(skill: str) -> list[dict]:
-    return PATHS.get(skill, [])
+    from core import data_text
+    return [data_text.lesson(l) for l in PATHS.get(skill, [])]

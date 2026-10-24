@@ -4,6 +4,23 @@
 
 ---
 
+## 🆕 DrawCompanion 2.0 測試版（招募測試中）
+
+**介紹網頁：<https://straydog3301.github.io/SAI2_DrawCompanion/>**　·　**下載：[v2.0.0-beta.2](https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.2)**
+
+2.0 用 PySide6 重新設計介面：啟動後只有一隻可以拖曳的桌面寵物，點一下打開快捷面板；速寫與研究合併成不占畫面的參考小窗；控制中心與設定在同一個主視窗。完整內容見 [CHANGELOG.md](CHANGELOG.md)。
+
+- **免安裝**：下載 `DrawCompanion2.exe` 直接執行，不需要安裝 Python 或其他套件。需要 Windows 10／11（64 位元）；只有縮時錄影合成影片時需要另外安裝 ffmpeg
+- **與 1.x 並存**：2.0 是另一個執行檔 `DrawCompanion2.exe`。放在 `SAI2_DrawCompanion.exe` 同一個資料夾就共用同一份紀錄；1.x 執行中時 2.0 會暫停記錄，避免重複計時
+- **筆刷工坊、液化**：2.0 不提供。SAI2 2026-07-02 版起內建素材登錄（筆刷形狀、散布、筆刷紋理、紙張材質）與格子／網格變形，請直接使用 SAI2 的功能（舊版 SAI2 需要時可用 1.x）
+- **從原始碼執行**：`pip install -r requirements2.txt` 後執行 `python drawcompanion2.py`；加上 `--data-dir <資料夾>` 可以不碰正式紀錄
+- **打包**：執行 `build2.bat`，在專案根目錄與 `dist/` 產生 `DrawCompanion2.exe`
+- **回報問題**：設定 → 一般 → 關於與問題回報 → 匯出診斷資訊，附在 [Issue](https://github.com/straydog3301/SAI2_DrawCompanion/issues/new) 裡；測試項目見 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
+
+以下為 1.x 的功能說明。
+
+---
+
 ## 🌟 主要功能 (Core Features)
 
 ### 1. 🕒 高精度時間追蹤 (Draw Time Tracker)
@@ -196,4 +213,4 @@ build.bat
 ---
 
 ## 📝 授權條款 (License)
-本專案基於 **MIT License** 授權條款開源，歡迎自由使用、修改及分享。
+目前儲存庫尚未附上授權檔（`LICENSE`），因此在加入之前，原始碼依著作權法預設保留所有權利。歡迎下載使用與回報問題；若想修改或再發布原始碼，請先開 [Issue](https://github.com/straydog3301/SAI2_DrawCompanion/issues) 與作者聯繫。
