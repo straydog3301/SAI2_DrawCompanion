@@ -219,6 +219,8 @@ class QuickPanel(QWidget):
         sub = f'連續 {st.streak} 天' + ('　今天請假' if st.rest_day else '')
         if st.sai2_running and st.current_file:
             sub += f'　正在畫：{st.current_file.split(" _ ")[-1]}'
+        elif st.sai2_running and getattr(st, 'excluded_file', None):
+            sub += f'　{st.excluded_file.split(" _ ")[-1]}（不記錄的資料夾）'
         elif not st.sai2_running and st.tracking:
             sub += '　SAI2 未開啟'
         if st.recording:

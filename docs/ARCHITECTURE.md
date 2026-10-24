@@ -40,6 +40,7 @@
 | `bubble_skin.py` | 2.0：對話泡泡的自訂外觀（單張圖＋文字範圍，九宮格延伸） |
 | `onboarding.py` | 2.0：用到時才提醒（「30 秒調整你的練習」、使用 3 天後建議練習時間與開機啟動、第一部影片位置） |
 | `version.py` | 2.0 的版本號 |
+| `exclusions.py` | 2.0：不記錄的資料夾（依紀錄 key 的路徑分段比對） |
 | `work_thumbs.py` | 2.0：作品縮圖（存檔、停筆時擷取畫布；`APP_DIR/work_thumbs`） |
 | `diagnostics.py` | 2.0：錯誤記錄（`drawcompanion2_error.log`）與匯出診斷資訊 |
 | `data_text.py` | 2.0：內建技能／範本／練習方式／課程以 id 對應翻譯表（`locales/data_<語言>.json`；目前只有繁中） |
@@ -82,6 +83,6 @@ for m in ('core.paths', 'core.sai2_win', 'core.i18n', 'core.tracker', 'core.time
 ## 2.0 前的待辦
 - 介面規劃見 [UI_2.0_PLAN.md](UI_2.0_PLAN.md)（桌面寵物＋參考小窗、單一實例、開檔流程、分階段交付）。
 - 2.0 開工前先以新框架做技術驗證：寵物透明視窗與拖曳、參考小窗穿透、單一實例、SAI2 開檔流程、全域快捷鍵與前景視窗監聽、畫布比對。
-- 筆刷工坊（`brush_studio.py`、`core/brush_assets.py`）與液化（`liquify_helper.py`）仍有缺陷，2.0 不移植，程式碼只供 2.x 重新開發時參考。
+- 筆刷工坊（`brush_studio.py`、`core/brush_assets.py`）與液化（`liquify_helper.py`）只屬於 1.x，**2.x 不再開發**：SAI2 2026-07-02 版起內建素材登錄（筆刷形狀、散布、筆刷紋理、紙張材質）與格子／網格變形
 - 1.x 的新功能（第 3、4 階段）以「核心邏輯放 `core/` 並附測試、介面只做簡單版本」的方式開發。
 - `main.py` 內的設定讀寫（`_load_settings` / `_save_settings`）與速寫網址池邏輯，之後移入 `core/`。

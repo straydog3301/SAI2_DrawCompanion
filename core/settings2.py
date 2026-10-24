@@ -27,6 +27,7 @@ DEFAULTS: dict = {
     'data_path': '',                      # 空白 = APP_DIR/sai2_draw_time.json
     'idle_timeout': 10.0,
     'track_unsaved': False,
+    'exclude_folders': [],                # 不記錄的資料夾（core/exclusions.py）
     'pet': {
         'pack': '',                       # 空白 = 內建角色
         'size': 128,                      # 顯示大小（邏輯 px）

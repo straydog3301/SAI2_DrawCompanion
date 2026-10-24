@@ -53,6 +53,7 @@ class Status:
     drawing: bool = False
     current_file: str | None = None
     unsaved_file: str | None = None   # SAI2 開著未存檔的新畫布（不會被記錄）
+    excluded_file: str | None = None  # 開著的檔案在「不記錄的資料夾」裡
     session_draw: float = 0.0
     today_draw: float = 0.0
     budget_minutes: float = 60.0
@@ -127,6 +128,7 @@ class CompanionService:
             data_path=self.settings.data_path,
             idle_timeout=float(self.settings.get('idle_timeout', 10.0)),
             track_unsaved=bool(self.settings.get('track_unsaved', False)))
+        self.tracker.is_excluded = self.is_excluded       # 每次都讀設定：改了排除清單馬上生效
         self.tracker.start()
         self._counter = None
         self._start_recorder()
@@ -172,6 +174,7 @@ class CompanionService:
         st.current_file = state.get('current_file')
         raw = state.get('raw_current_file')
         st.unsaved_file = raw if raw and not st.current_file and st.sai2_running else None
+        st.excluded_file = state.get('excluded_file')
         st.session_draw = float(state.get('session_draw') or 0.0)
         st.drawing = delta > 0
         st.today_draw = self.tracker.today_draw_seconds()
@@ -247,6 +250,22 @@ class CompanionService:
     def thumb_of(self, key: str) -> str | None:
         from core import work_thumbs
         return work_thumbs.find(self.settings.app_dir, key, self.aliases_of(key))
+
+    def is_excluded(self, key: str | None) -> bool:
+        from core import exclusions
+        return exclusions.match(key, self.settings.get('exclude_folders', []))
+
+    def delete_works(self, keys):
+        """一次刪除多筆作品紀錄與縮圖（不刪畫作檔案）"""
+        from core import work_thumbs
+        keys = list(keys)
+        if hasattr(self.tracker, 'delete_files'):
+            self.tracker.delete_files(keys)
+        else:
+            for k in keys:
+                self.tracker.delete_file(k)
+        for k in keys:
+            work_thumbs.delete(self.settings.app_dir, k)
 
     def delete_work(self, key: str):
         """刪除作品的計時紀錄與縮圖（不刪畫作檔案）"""

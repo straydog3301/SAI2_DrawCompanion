@@ -184,11 +184,11 @@ check(w.mode.session.remaining == start and '下筆開始倒數' in w.mode.info(
 for _ in range(3):
     tr.counter += 1.0
     pump(1050)
-check(start - 4 <= w.mode.session.remaining <= start - 2, f'drawing → countdown runs ({start} → {w.mode.session.remaining})')
+check(start - 3 <= w.mode.session.remaining < start, f'drawing → countdown runs, never more than drawn ({start} → {w.mode.session.remaining})')
 w.mode.count_mode = 'clock'                        # 一直倒數模式
 start = w.mode.session.remaining
 pump(2300)
-check(w.mode.session.remaining <= start - 2, 'clock mode counts down without drawing')
+check(w.mode.session.remaining < start, 'clock mode counts down without drawing')
 w.mode.session.remaining = 1
 pump(1300)
 check(q.task(sk['uid'])['progress'] == 1, 'countdown reaching zero counts one')

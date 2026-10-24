@@ -152,12 +152,13 @@ check(not unnamed, f'icon-only buttons have names {[b.toolTip() for b in unnamed
 mw.cycle_page(1)
 check(mw.current == '練習', f'Ctrl+Tab → next page ({mw.current})')
 mw.cycle_page(-2)
-check(mw.current == '快捷鍵', 'wraps around backwards')
-nav = mw.nav['快捷鍵']
+last = mw._nav_order()[-1]                         # 側欄最後一頁
+check(mw.current == last, 'wraps around backwards')
+nav = mw.nav[last]
 qapp.sendEvent(nav, QKeyEvent(QEvent.KeyPress, Qt.Key_Down, Qt.NoModifier))
 check(mw.current == '今日', 'arrow key in sidebar moves')
 qapp.sendEvent(mw.nav['今日'], QKeyEvent(QEvent.KeyPress, Qt.Key_Up, Qt.NoModifier))
-check(mw.current == '快捷鍵', 'arrow up')
+check(mw.current == last, 'arrow up')
 
 # 滑鼠點按鈕時，輸入框的內容仍會確定（editingFinished）
 mw.show_page('寵物')

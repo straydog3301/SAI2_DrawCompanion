@@ -12,7 +12,7 @@
 
 - **免安裝**：下載 `DrawCompanion2.exe` 直接執行，不需要安裝 Python 或其他套件。需要 Windows 10／11（64 位元）；只有縮時錄影合成影片時需要另外安裝 ffmpeg
 - **與 1.x 並存**：2.0 是另一個執行檔 `DrawCompanion2.exe`。放在 `SAI2_DrawCompanion.exe` 同一個資料夾就共用同一份紀錄；1.x 執行中時 2.0 會暫停記錄，避免重複計時
-- **筆刷工坊、液化**：2.0 尚未包含（將在 2.x 重新開發），需要時請使用 1.x
+- **筆刷工坊、液化**：2.0 不提供。SAI2 2026-07-02 版起內建素材登錄（筆刷形狀、散布、筆刷紋理、紙張材質）與格子／網格變形，請直接使用 SAI2 的功能（舊版 SAI2 需要時可用 1.x）
 - **從原始碼執行**：`pip install -r requirements2.txt` 後執行 `python drawcompanion2.py`；加上 `--data-dir <資料夾>` 可以不碰正式紀錄
 - **打包**：執行 `build2.bat`，在專案根目錄與 `dist/` 產生 `DrawCompanion2.exe`
 - **回報問題**：設定 → 一般 → 關於與問題回報 → 匯出診斷資訊，附在 [Issue](https://github.com/straydog3301/SAI2_DrawCompanion/issues/new) 裡；測試項目見 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)

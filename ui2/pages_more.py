@@ -10,11 +10,11 @@ from datetime import datetime
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                               QScrollArea, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
 from core import data_text as DT
-from core import growth, stats, study_lessons, works
+from core import exclusions, growth, stats, study_lessons, works
 from core.daily_quests import QuestManager
 from ui2 import theme
 from ui2.charts import BarChart, MonthGrid, Sparkline
@@ -384,14 +384,32 @@ class WorksPage(QWidget):
         self.selected = None
         self.limit = self.PAGE
         self._tiles: dict[str, QLabel] = {}
+        self._row_widgets: dict[str, QWidget] = {}
+        self.select_mode = False
+        self.picked: set[str] = set()            # 批次刪除選取的作品
+        self.confirm_batch = False
+        self.confirm_exclude = None              # 詳細資料裡「不再記錄這個資料夾」等待確認的資料夾
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(20)
+        lay.setSpacing(16)
         head = PageHeader('作品', '在 SAI2 畫過的檔案；動筆時間、技能標籤、縮時影片都在這裡')
+        self.select_btn = button('選取', 'ghost', ic='check', tip='選取多個作品，一次刪除紀錄')
+        self.select_btn.setCheckable(True)
+        self.select_btn.toggled.connect(self._toggle_select)
+        excl = button('不記錄的資料夾', 'ghost', ic='hide')
+        excl.clicked.connect(lambda: (self.excl_card.setVisible(not self.excl_card.isVisible()), self._fill_exclusions()))
         export = button('匯出 CSV', ic='file')
         export.clicked.connect(self._export)
+        head.actions.addWidget(self.select_btn)
+        head.actions.addWidget(excl)
         head.actions.addWidget(export)
         lay.addWidget(head)
+        self.excl_card = Card('不記錄的資料夾', '這些資料夾裡的檔案不計時、不錄影、不算進每日任務（例如「下載」裡的參考圖）')
+        self.excl_box = QVBoxLayout()
+        self.excl_box.setSpacing(8)
+        self.excl_card.lay.addLayout(self.excl_box)
+        self.excl_card.hide()
+        lay.addWidget(self.excl_card)
         if self.svc.paused:
             lay.addWidget(label('1.x 正在執行：這裡只能檢視，修改紀錄請等 1.x 關閉後再做。', 'warn'))
         bar = QHBoxLayout()
@@ -408,19 +426,52 @@ class WorksPage(QWidget):
         self.sort.changed.connect(self._sort_changed)
         bar.addWidget(self.sort)
         lay.addLayout(bar)
+        self.sel_bar = QFrame()
+        self.sel_bar.setObjectName('selbar')
+        self.sel_bar.setStyleSheet(f'QFrame#selbar{{background:{theme.ACCENT_SOFT};border:1px solid {theme.ACCENT_BORDER};'
+                                   f'border-radius:12px;}}')
+        self.sel_lay = QHBoxLayout(self.sel_bar)
+        self.sel_lay.setContentsMargins(14, 8, 10, 8)
+        self.sel_bar.hide()
+        lay.addWidget(self.sel_bar)
+        # 清單與詳細資料各自捲動：清單很長時，點舊作品也看得到右邊的資訊
         body = QHBoxLayout()
         body.setSpacing(16)
         self.list_box = QVBoxLayout()
         self.list_box.setSpacing(8)
+        self.list_box.setContentsMargins(0, 0, 6, 0)
         lw = QWidget()
+        lw.setObjectName('wlist')
+        lw.setStyleSheet('QWidget#wlist{background:transparent;}')
         lw.setLayout(self.list_box)
-        body.addWidget(lw, 3)
+        self.list_scroll = self._scroll(lw)
+        body.addWidget(self.list_scroll, 3)
         self.detail = Card('')
-        self.detail.setMinimumWidth(360)
-        body.addWidget(self.detail, 2, Qt.AlignTop)
-        lay.addLayout(body)
-        lay.addStretch(1)
+        self.detail.setMinimumWidth(340)
+        dw = QWidget()
+        dw.setObjectName('wdetail')
+        dw.setStyleSheet('QWidget#wdetail{background:transparent;}')
+        dl = QVBoxLayout(dw)
+        dl.setContentsMargins(0, 0, 6, 0)
+        dl.addWidget(self.detail)
+        dl.addStretch(1)
+        self.detail_scroll = self._scroll(dw)
+        self.detail_scroll.setMinimumWidth(360)
+        body.addWidget(self.detail_scroll, 2)
+        lay.addLayout(body, 1)
         self._load()
+
+    @staticmethod
+    def _scroll(inner) -> QScrollArea:
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.NoFrame)
+        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sc.viewport().setObjectName('wvp')
+        sc.viewport().setStyleSheet('QWidget#wvp{background:transparent;}')
+        sc.setMinimumHeight(240)
+        sc.setWidget(inner)
+        return sc
 
     def _load(self):
         q = self.svc.quests
@@ -480,6 +531,7 @@ class WorksPage(QWidget):
     def _fill(self):
         _clear(self.list_box)
         self._tiles = {}
+        self._row_widgets = {}
         items = works.sort_rows(works.filter_rows(self.rows, self.search.text(), self.group.currentData() or ''),
                                 self.sort.value)
         if not items:
@@ -500,14 +552,18 @@ class WorksPage(QWidget):
         w = ClickFrame()
         w.setObjectName('wrow')
         w.setCursor(Qt.PointingHandCursor)
-        sel = r['key'] == self.selected
-        w.setStyleSheet(f"QFrame#wrow{{background:{theme.ACCENT_SOFT if sel else theme.CARD};"
-                        f"border:1px solid {theme.ACCENT_BORDER if sel else theme.BORDER};border-radius:12px;}}"
-                        f"QFrame#wrow:hover{{background:{theme.SURFACE2};}}")
-        w.clicked.connect(lambda k=r['key']: self._show(k))
+        self._row_widgets[r['key']] = w
+        self._style_row(r['key'])
+        w.clicked.connect(lambda k=r['key']: self._row_clicked(k))
         row = QHBoxLayout(w)
         row.setContentsMargins(14, 10, 14, 10)
         row.setSpacing(12)
+        if self.select_mode:
+            cb = QCheckBox()
+            cb.setChecked(r['key'] in self.picked)
+            cb.setAccessibleName(f"選取 {r['name']}")
+            cb.toggled.connect(lambda on, k=r['key']: self._pick(k, on))
+            row.addWidget(cb)
         tile = QLabel()
         tile.setObjectName('wthumb')
         tile.setFixedSize(64, 48)
@@ -564,6 +620,149 @@ class WorksPage(QWidget):
         bl.addLayout(row)
         return box
 
+    def _style_row(self, key):
+        w = self._row_widgets.get(key)
+        if w is None:
+            return
+        sel = key == self.selected or key in self.picked
+        try:
+            w.setStyleSheet(f"QFrame#wrow{{background:{theme.ACCENT_SOFT if sel else theme.CARD};"
+                            f"border:1px solid {theme.ACCENT_BORDER if sel else theme.BORDER};border-radius:12px;}}"
+                            f"QFrame#wrow:hover{{background:{theme.SURFACE2};}}")
+        except RuntimeError:
+            pass
+
+    def _row_clicked(self, key):
+        if self.select_mode:
+            cb = self._row_widgets[key].findChild(QCheckBox)
+            if cb is not None:
+                cb.setChecked(not cb.isChecked())
+            return
+        self._show(key)
+
+    # ── 批次刪除 ──
+    def _toggle_select(self, on):
+        self.select_mode = on
+        self.select_btn.setText('完成選取' if on else '選取')
+        self.picked.clear()
+        self.confirm_batch = False
+        self._fill()
+        self._fill_sel_bar()
+
+    def _pick(self, key, on):
+        (self.picked.add if on else self.picked.discard)(key)
+        self.confirm_batch = False
+        self._style_row(key)
+        self._fill_sel_bar()
+
+    def _visible_keys(self):
+        return [r['key'] for r in works.filter_rows(self.rows, self.search.text(), self.group.currentData() or '')]
+
+    def _fill_sel_bar(self):
+        _clear(self.sel_lay)
+        self.sel_bar.setVisible(self.select_mode)
+        if not self.select_mode:
+            return
+        n = len(self.picked)
+        self.sel_lay.addWidget(label(f'已選 {n} 個作品', 'body', wrap=False))
+        if self.confirm_batch and n:
+            self.sel_lay.addWidget(label('只刪除計時紀錄與縮圖，不會刪除畫作檔案。', 'caption'), 1)
+            ok = button(f'確定刪除 {n} 筆', 'primary')
+            ok.setStyleSheet('background:#b91c1c;')
+            ok.clicked.connect(self._delete_picked)
+            no = button('取消', 'ghost')
+            no.clicked.connect(lambda: (setattr(self, 'confirm_batch', False), self._fill_sel_bar()))
+            self.sel_lay.addWidget(ok)
+            self.sel_lay.addWidget(no)
+            return
+        self.sel_lay.addStretch(1)
+        all_btn = button('全選目前清單', 'ghost')
+        all_btn.setToolTip('選取搜尋與分組篩選後的所有作品')
+        all_btn.clicked.connect(self._pick_all)
+        clear_btn = button('清除選取', 'ghost')
+        clear_btn.clicked.connect(lambda: (self.picked.clear(), self._fill(), self._fill_sel_bar()))
+        dele = button('刪除選取的紀錄', 'primary')
+        dele.setStyleSheet('background:#b91c1c;')
+        dele.setEnabled(n > 0 and not self.svc.paused and self.svc.tracker is not None)
+        dele.clicked.connect(lambda: (setattr(self, 'confirm_batch', True), self._fill_sel_bar()))
+        for b in (all_btn, clear_btn, dele):
+            self.sel_lay.addWidget(b)
+
+    def _pick_all(self):
+        self.picked = set(self._visible_keys())
+        self._fill()
+        self._fill_sel_bar()
+
+    def _delete_picked(self):
+        keys = sorted(self.picked)
+        self.svc.delete_works(keys)
+        if self.selected in self.picked:
+            self.selected = None
+        self.picked.clear()
+        self.confirm_batch = False
+        self.ctl.say(f'已刪除 {len(keys)} 筆作品紀錄。', important=False)
+        self._load()
+        self._fill_sel_bar()
+
+    # ── 不記錄的資料夾 ──
+    def _rules(self):
+        return exclusions.normalize(self.s.get('exclude_folders', []))
+
+    def _set_rules(self, rules):
+        self.s.set('exclude_folders', rules)
+        self.s.save()
+
+    def _fill_exclusions(self):
+        _clear(self.excl_box)
+        rules = self._rules()
+        if not rules:
+            self.excl_box.addWidget(label('目前沒有。可以在下面輸入資料夾名稱，或在作品的詳細資料按「不再記錄這個資料夾」。', 'muted'))
+        keys = [r['key'] for r in self.rows]
+        for rule in rules:
+            row = QHBoxLayout()
+            n = len(exclusions.matching(keys, [rule]))
+            row.addWidget(label(exclusions.describe(rule), 'body'), 1)
+            if n:
+                row.addWidget(label(f'有 {n} 筆舊紀錄', 'caption', wrap=False))
+            rm = button('', 'ghost', ic='close', tip='恢復記錄這個資料夾')
+            rm.clicked.connect(lambda _=False, r=rule: (self._set_rules(exclusions.remove(self._rules(), r)),
+                                                        self._fill_exclusions()))
+            row.addWidget(rm)
+            self.excl_box.addLayout(row)
+        add_row = QHBoxLayout()
+        ed = QLineEdit()
+        ed.setPlaceholderText('資料夾名稱，例如「下載」（路徑中任何一層叫這個名字都不記錄）')
+        add = button('加入', 'ghost')
+
+        def do_add():
+            name = ed.text().strip().strip('\\/ ')
+            if not name:
+                return
+            self._set_rules(exclusions.add(self._rules(), 'folder', name))
+            self._fill_exclusions()
+        add.clicked.connect(do_add)
+        ed.returnPressed.connect(do_add)
+        add_row.addWidget(ed, 1)
+        add_row.addWidget(add)
+        self.excl_box.addLayout(add_row)
+        self.excl_box.addWidget(label('加入後立即生效；已有的紀錄不會自動刪除，可以用「選取」一次刪除。', 'caption'))
+        self.excl_edit = ed
+
+    def _exclude_folder(self, folder, delete_existing):
+        self._set_rules(exclusions.add(self._rules(), 'prefix', folder))
+        self.confirm_exclude = None
+        msg = f'之後不再記錄「{exclusions.folder_label(folder)}」裡的檔案。'
+        if delete_existing:
+            keys = exclusions.matching([r['key'] for r in self.rows], [{'kind': 'prefix', 'value': folder}])
+            self.svc.delete_works(keys)
+            if self.selected in keys:
+                self.selected = None
+            msg += f'已刪除 {len(keys)} 筆舊紀錄。'
+        self.ctl.say(msg, important=False)
+        self._load()
+        if self.excl_card.isVisible():
+            self._fill_exclusions()
+
     def _empty_detail(self):
         _clear(self.detail.lay)
         self.detail.lay.addWidget(label('選一個作品看詳細資料。', 'muted'))
@@ -575,7 +774,9 @@ class WorksPage(QWidget):
             return
         prev, self.selected = self.selected, key
         if prev != key:
-            self._fill()
+            self.confirm_exclude = None
+            self._style_row(prev)                # 只重新上色，不重建清單（才不會跳回最上面）
+            self._style_row(key)
         lay = self.detail.lay
         _clear(lay)
         editable = not self.svc.paused and self.svc.tracker is not None
@@ -668,8 +869,34 @@ class WorksPage(QWidget):
             merge_row.addWidget(target, 1)
             merge_row.addWidget(go)
             lay.addLayout(merge_row)
+            self._exclude_row(lay, key)
             self._delete_row(lay, key)
         lay.addStretch(1)
+
+    def _exclude_row(self, lay, key):
+        folder = exclusions.folder_of(key)
+        if not folder:
+            return
+        if self.confirm_exclude != folder:
+            b = button('不再記錄這個資料夾', 'ghost', ic='hide')
+            b.setToolTip(exclusions.folder_label(folder))
+            b.clicked.connect(lambda: (setattr(self, 'confirm_exclude', folder), self._show(key)))
+            lay.addWidget(b, 0, Qt.AlignLeft)
+            return
+        same = exclusions.matching([r['key'] for r in self.rows], [{'kind': 'prefix', 'value': folder}])
+        lay.addWidget(label(f'「{exclusions.folder_label(folder)}」與底下的子資料夾都不再記錄。'
+                            f'這個資料夾目前有 {len(same)} 筆紀錄。', 'caption'))
+        row = QHBoxLayout()
+        keep = button('只停止記錄', 'primary')
+        keep.clicked.connect(lambda: self._exclude_folder(folder, False))
+        drop = button(f'停止記錄並刪除 {len(same)} 筆', 'ghost')
+        drop.clicked.connect(lambda: self._exclude_folder(folder, True))
+        no = button('取消', 'ghost')
+        no.clicked.connect(lambda: (setattr(self, 'confirm_exclude', None), self._show(key)))
+        for b in (keep, drop, no):
+            row.addWidget(b)
+        row.addStretch(1)
+        lay.addLayout(row)
 
     def _delete_row(self, lay, key):
         holder = QHBoxLayout()
@@ -807,7 +1034,7 @@ class ToolsPage(QWidget):
         g.row('影片存放位置', '每個作品一個子資料夾', folder, stack=True)
         lay.addWidget(g)
 
-        later = Card('筆刷工坊、液化', '這兩個功能會在 2.x 重新設計；目前請繼續使用 1.x')
+        later = Card('與 1.x 並存')
         later.lay.addWidget(label('同時開著 1.x 時，2.0 會自動暫停記錄，避免兩邊重複計時；關閉 1.x 後就會繼續。', 'caption'))
         lay.addWidget(later)
         lay.addStretch(1)
