@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 執行測試：
-    python tests/run_tests.py            # 核心 + 介面（介面測試會開視窗，需要桌面環境）
+    python tests/run_tests.py            # 核心 + 2.0 介面（介面測試會開視窗，需要桌面環境）
     python tests/run_tests.py --core     # 只跑核心（不開視窗、不連網）
     python tests/run_tests.py --network  # 另外跑連網測試（美術館 API）
-每個測試檔以獨立程序執行，避免 Tk 與模組狀態互相影響。
+每個測試檔以獨立程序執行，避免 Qt 與模組狀態互相影響。1.x（Tk 版）不再維護，也不再測試。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import time
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TIMEOUT = {'core': 180, 'ui': 240, 'ui2': 240, 'network': 900}
+TIMEOUT = {'core': 180, 'ui2': 240, 'network': 900}
 
 
 def run(group: str) -> list[tuple[str, bool, str]]:
@@ -40,7 +40,7 @@ def run(group: str) -> list[tuple[str, bool, str]]:
 
 def main():
     args = set(sys.argv[1:])
-    groups = ['core'] if '--core' in args else ['core', 'ui', 'ui2']
+    groups = ['core'] if '--core' in args else ['core', 'ui2']
     if '--network' in args:
         groups.append('network')
     results = [r for g in groups for r in run(g)]
