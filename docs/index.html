@@ -118,6 +118,34 @@
   .box h3 { margin: 0 0 8px; font-size: 17px; }
   .box ul { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: 15px; }
   .box li { margin: 4px 0; }
+  /* SmartScreen 說明 */
+  .smart { margin-top: 22px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; }
+  .smart > h3 { margin: 0 0 6px; font-size: 20px; }
+  .smart > p { margin: 0 0 20px; color: var(--muted); font-size: 15px; }
+  .smart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+  @media (max-width: 820px) { .smart-grid { grid-template-columns: 1fr; } }
+  .smart h4 { margin: 0 0 6px; font-size: 16px; }
+  .smart .why p, .smart .why li { color: var(--muted); font-size: 15px; }
+  .smart .why p { margin: 0 0 16px; }
+  .smart .why ul { margin: 0 0 16px; padding-left: 1.2em; }
+  .smart .why li { margin: 4px 0; }
+  .howto { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 480px) { .howto { grid-template-columns: 1fr; } }
+  .howto figure { margin: 0; container-type: inline-size; }
+  .howto figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; }
+  .howto figcaption b { color: var(--text); }
+  .win { aspect-ratio: 523 / 492; background: #8a3aa6; color: #fff; padding: 7% 6%; border-radius: 6px;
+         font-family: "Segoe UI", "Microsoft JhengHei UI", sans-serif; display: flex; flex-direction: column;
+         font-size: 2.6cqw; line-height: 1.5; }
+  .win .t { font-size: 1.95em; line-height: 1.25; margin-bottom: .7em; }
+  .win .kv { margin-top: 1em; }
+  .win .kv span { display: inline-block; min-width: 5em; }
+  .win .btns { margin-top: auto; display: flex; justify-content: flex-end; gap: .8em; }
+  .win .btns span { border: 2px solid #fff; padding: .45em 1.2em; }
+  .win .btns .run { background: transparent; outline: 3px solid #fbbf6a; outline-offset: 2px; }
+  .win .btns .no { background: #fff; color: #000; }
+  .howto img { border-radius: 6px; }
+  .smart .alt { margin-top: 18px; font-size: 14px; color: var(--muted); }
   code { background: var(--bg2); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; font-size: .92em; }
 
   /* 回饋 */
@@ -155,7 +183,7 @@
       <a href="#feedback">回饋</a>
       <a href="#faq">常見問題</a>
     </div>
-    <a class="btn primary small" href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.2">下載測試版</a>
+    <a class="btn primary small" href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.0.0-beta.2/DrawCompanion2.exe">下載測試版</a>
   </div>
 </nav>
 
@@ -165,7 +193,7 @@
     <h1>陪你畫畫的<br><span class="hl">SAI2 桌面小夥伴</span></h1>
     <p class="lead">DrawCompanion 會在 PaintTool SAI2 旁邊安靜地陪著你：自動記錄每張作品畫了多久、每天排好練習任務，速寫和臨摹的參考圖用小窗開著，不占你的畫布。</p>
     <div class="cta">
-      <a class="btn primary" href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.2">
+      <a class="btn primary" href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.0.0-beta.2/DrawCompanion2.exe">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 21h16"/></svg>
         下載 DrawCompanion2.exe
       </a>
@@ -305,7 +333,7 @@
     <div class="steps">
       <div class="step">
         <h3>下載</h3>
-        <p>到 <a href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.2">GitHub 發布頁</a> 下載 <code>DrawCompanion2.exe</code>（約 35 MB）。</p>
+        <p><a href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.0.0-beta.2/DrawCompanion2.exe">點這裡下載</a> <code>DrawCompanion2.exe</code>（約 35 MB）。</p>
       </div>
       <div class="step">
         <h3>放好</h3>
@@ -329,11 +357,46 @@
       <div class="box">
         <h3>第一次執行時</h3>
         <ul>
-          <li>Windows 可能顯示 SmartScreen 警告（程式沒有數位簽章）：按「其他資訊 → 仍要執行」</li>
+          <li>Windows 可能顯示「Windows 已保護您的電腦」：按「其他資訊 → 仍要執行」（<a href="#smartscreen">說明</a>）</li>
           <li>執行中在工作管理員會看到兩個 DrawCompanion2.exe（啟動器＋本體），是正常的</li>
           <li>同時只會有一份在執行，重複開啟不會多開</li>
         </ul>
       </div>
+    </div>
+
+    <div class="smart" id="smartscreen">
+      <h3>第一次執行出現「Windows 已保護您的電腦」？</h3>
+      <p>這是正常的，按兩下就能繼續。之後再開啟就不會出現了。</p>
+      <div class="smart-grid">
+        <div class="why">
+          <h4>為什麼會出現</h4>
+          <p>這個視窗（顏色會跟著你的 Windows 主題色）是 Windows 內建的 Microsoft Defender SmartScreen。它會擋下「下載人數還不多、而且沒有數位簽章」的程式。DrawCompanion 是個人開發的免費工具，沒有購買每年數百美元的程式碼簽章憑證，測試版下載的人也還不多，所以 Windows 還「不認識」它。這不是偵測到病毒，視窗裡也沒有說找到任何威脅。</p>
+          <h4>為什麼可以放心</h4>
+          <ul>
+            <li>程式碼完全公開在 <a href="https://github.com/straydog3301/SAI2_DrawCompanion">GitHub</a>，任何人都可以檢查</li>
+            <li>透過 SAI2 的視窗標題判斷你在畫哪個檔案，不會修改 SAI2 的設定或你已有的作品檔</li>
+            <li>不需要系統管理員權限，紀錄只存在程式所在的資料夾</li>
+            <li>請只從這個網頁的下載按鈕下載；從其他地方取得的檔案無法保證內容相同</li>
+            <li>還是不放心的話，可以先把 exe 上傳到 <a href="https://www.virustotal.com/">VirusTotal</a> 用數十種防毒軟體掃描</li>
+          </ul>
+        </div>
+        <div class="howto">
+          <figure>
+            <img src="img/smartscreen.webp" width="523" height="492" loading="lazy" alt="Windows 已保護您的電腦：Microsoft Defender SmartScreen 已防止某個無法辨識的應用程式啟動，下方有「其他資訊」連結與「不要執行」按鈕">
+            <figcaption><b>1.</b> 點左邊的「<b>其他資訊</b>」文字連結（不要按「不要執行」）</figcaption>
+          </figure>
+          <figure>
+            <div class="win" role="img" aria-label="點了其他資訊之後：顯示應用程式 DrawCompanion2.exe、發行者 未知的發行者，下方多出「仍要執行」按鈕">
+              <div class="t">Windows 已保護您的電腦</div>
+              <div>Microsoft Defender SmartScreen 已防止某個無法辨識的應用程式啟動。執行此應用程式可能會讓您的電腦暴露在風險中。</div>
+              <div class="kv"><span>應用程式：</span>DrawCompanion2.exe<br><span>發行者：</span>未知的發行者</div>
+              <div class="btns"><span class="run">仍要執行</span><span class="no">不要執行</span></div>
+            </div>
+            <figcaption><b>2.</b> 確認應用程式是 <code>DrawCompanion2.exe</code>，按「<b>仍要執行</b>」</figcaption>
+          </figure>
+        </div>
+      </div>
+      <p class="alt">另一個方法：在 exe 上按右鍵 →「內容」→ 勾選下方的「解除封鎖」→ 確定，之後雙擊就不會再跳出提醒。公司或學校電腦若被管理員鎖定、沒有「仍要執行」按鈕，就需要請管理員協助。</p>
     </div>
   </div>
 </section>
@@ -346,12 +409,11 @@
         <p>2.0 是全新改寫的版本，正在找實際用 SAI2 畫畫的人一起測試。好用、難用、看不懂、壞掉，都想聽。</p>
         <ol>
           <li>照平常的習慣畫幾天圖</li>
-          <li>遇到問題時：<b>設定 → 一般 → 關於與問題回報 → 匯出診斷資訊</b>（不含 API 金鑰、本機路徑與作品檔名）</li>
-          <li>到 GitHub 開一個 Issue，寫下發生什麼事、怎麼重現，附上診斷資訊 zip 或截圖</li>
+          <li>遇到問題或有想法時，填寫下方的回饋表單，寫下發生什麼事、在哪個功能、怎麼重現</li>
+          <li>表單不需要登入 Google，聯絡方式可以不填</li>
         </ol>
         <div class="cta" style="justify-content:flex-start">
-          <a class="btn primary" href="https://github.com/straydog3301/SAI2_DrawCompanion/issues/new">回報問題或建議</a>
-          <a class="btn ghost" href="https://github.com/straydog3301/SAI2_DrawCompanion/blob/feat/v2-stage3/docs/RELEASE_CHECKLIST.md">完整測試清單</a>
+          <a class="btn primary" href="https://docs.google.com/forms/d/e/1FAIpQLSdmVgbIjduOo64vnu7S4OUdu1t54_-3mCNL4WLYcpwTzY8taw/viewform" target="_blank" rel="noopener">填寫回饋表單</a>
         </div>
       </div>
       <div>
@@ -379,6 +441,10 @@
     <details>
       <summary>需要安裝 Python 或其他程式嗎？</summary>
       <p>不需要。DrawCompanion2.exe 已經包含執行需要的所有東西，下載後直接執行。只有縮時錄影合成影片時需要另外安裝 ffmpeg。</p>
+    </details>
+    <details>
+      <summary>Windows 說「已保護您的電腦」，這個程式安全嗎？</summary>
+      <p>那是 SmartScreen 對「沒有數位簽章、下載人數還少」的程式的提醒，不是偵測到病毒。程式碼完全公開，按「其他資訊 → 仍要執行」即可；詳細步驟見 <a href="#smartscreen">第一次執行</a>。</p>
     </details>
     <details>
       <summary>可以和 1.x 一起用嗎？會不會重複記錄？</summary>
