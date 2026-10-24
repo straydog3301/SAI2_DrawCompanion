@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 import webbrowser
 
 from PySide6.QtCore import Qt, QTimer
@@ -1203,6 +1205,143 @@ def _sketch_size(ctl) -> QWidget:
     for wdg in (spins[0], times, spins[1]):
         wdg.setVisible(combo.currentData() == 'custom')
     return box
+
+
+# ── AI 評鑑 ──
+def ai_review_page(ctl) -> QWidget:
+    from core import ai_review as AR
+    s = ctl.settings
+    w, lay = _page('AI 評鑑', '課程打卡時，把課程目標、參考圖與你的畫布交給你自己的 AI 服務評分；分數決定是否進入下一課，不同意可以自己改。')
+
+    def cfg() -> dict:
+        return dict(s.get('ai_review', {}) or {})
+
+    def put(key, value):
+        s.set(f'ai_review.{key}', value)
+        s.save()
+
+    g = SettingGroup('使用 AI 評鑑', '需要你自己的 API 金鑰。推薦 Google AI Studio：申請免費，每天有免費額度')
+    g.row('課程打卡時請 AI 評分', '關閉時照常自評', _toggle(ctl, 'ai_review.enabled'))
+    provider = QComboBox()
+    for k, v in AR.PROVIDERS.items():
+        provider.addItem(v['name'], k)
+    provider.setCurrentIndex(max(0, provider.findData(cfg().get('provider', 'gemini'))))
+    provider.setFixedWidth(260)
+    g.row('AI 服務', 'OpenAI 相容：OpenAI、OpenRouter，或本機的 Ollama、LM Studio 等', provider)
+
+    key_box = QWidget()
+    kr = QHBoxLayout(key_box)
+    kr.setContentsMargins(0, 0, 0, 0)
+    key = QLineEdit(cfg().get('api_key', ''))
+    key.setEchoMode(QLineEdit.PasswordEchoOnEdit)
+    key.setPlaceholderText('未設定')
+    key.setFixedWidth(260)
+    key.textChanged.connect(lambda v: put('api_key', v.strip()))
+    get_key = button('取得免費金鑰', 'link')
+    get_key.clicked.connect(lambda: webbrowser.open(AR.PROVIDERS['gemini']['key_url']))
+    kr.addWidget(key)
+    kr.addWidget(get_key)
+    kr.addStretch(1)
+    g.row('API 金鑰', '只存在這台電腦；匯出設定與診斷資訊都不會包含', key_box)
+
+    base = QLineEdit(cfg().get('base_url', ''))
+    base.setPlaceholderText('https://api.openai.com/v1（本機 Ollama：http://localhost:11434/v1）')
+    base.setMinimumWidth(360)
+    base.textChanged.connect(lambda v: put('base_url', v.strip()))
+    base_row = g.row('服務網址', 'OpenAI 相容服務的 API 網址（結尾通常是 /v1）', base, stack=True)
+
+    model_box = QWidget()
+    mr = QHBoxLayout(model_box)
+    mr.setContentsMargins(0, 0, 0, 0)
+    model = QComboBox()
+    model.setEditable(True)
+    model.setMinimumWidth(260)
+    if cfg().get('model'):
+        model.addItem(cfg()['model'])
+    model.setCurrentText(cfg().get('model', ''))
+    model.lineEdit().setPlaceholderText('自動選擇')
+    model.currentTextChanged.connect(lambda v: put('model', v.strip()))
+    fetch = button('取得模型清單', 'ghost')
+    mr.addWidget(model)
+    mr.addWidget(fetch)
+    mr.addStretch(1)
+    g.row('模型', '要選能看圖的模型；Gemini 留白會用 gemini-2.5-flash（快、穩定）', model_box)
+
+    test_box = QWidget()
+    tr = QHBoxLayout(test_box)
+    tr.setContentsMargins(0, 0, 0, 0)
+    status = label('', 'caption')
+    test = button('測試連線', 'secondary')
+    tr.addWidget(status)
+    tr.addWidget(test)
+    g.row('連線測試', '確認金鑰與模型可以使用', test_box)
+    lay.addWidget(g)
+
+    def sync_provider(_i=None):
+        p = provider.currentData()
+        put('provider', p)
+        get_key.setVisible(p == 'gemini')
+        base_row.setVisible(p == 'openai')
+    provider.currentIndexChanged.connect(sync_provider)
+    sync_provider()
+
+    def run(job, done):
+        def work():
+            try:
+                out, err = job(), None
+            except AR.ReviewError as e:
+                out, err = None, str(e)
+            except Exception as e:
+                out, err = None, str(e)
+            ctl.work_done.emit(lambda: done(out, err))
+        threading.Thread(target=work, daemon=True).start()
+
+    def fetch_models():
+        fetch.setEnabled(False)
+        status.setText('讀取模型清單中…')
+
+        def done(names, err):
+            fetch.setEnabled(True)
+            if err:
+                status.setText(err)
+                return
+            cur = model.currentText().strip()
+            model.blockSignals(True)
+            model.clear()
+            model.addItems(names)
+            model.blockSignals(False)
+            model.setCurrentText(cur)
+            status.setText(f'找到 {len(names)} 個模型；較新的模型不一定比較快，可以用「測試連線」比較')
+        run(lambda: AR.list_models(cfg()), done)
+    fetch.clicked.connect(fetch_models)
+
+    def test_connection():
+        test.setEnabled(False)
+        status.setText('測試中…')
+
+        def job():
+            t0 = time.perf_counter()
+            name = AR.test_connection(cfg())
+            return name, time.perf_counter() - t0
+
+        def done(out, err):
+            test.setEnabled(True)
+            if err:
+                status.setText(f'無法使用：{err}')
+                return
+            name, secs = out
+            status.setText(f'可以使用（{name}，{secs:.0f} 秒）')
+        run(job, done)
+    test.clicked.connect(test_connection)
+
+    g = SettingGroup('隱私與費用')
+    for title, text in (('會傳送的內容', '畫布快照、參考圖、課程內容與你的心得，只傳給你選擇的 AI 服務'),
+                        ('免費額度', 'Google AI Studio 每天有上限，超過時這次改用自評；免費方案的內容可能被 Google 用來改善服務，介意的話可以改用付費方案或其他服務'),
+                        ('評分僅供參考', '不同意可以在打卡時改分數，紀錄會標示為手動修改')):
+        g.row(title, text)
+    lay.addWidget(g)
+    lay.addStretch(1)
+    return w
 
 
 # ── 快捷鍵 ──

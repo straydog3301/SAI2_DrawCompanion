@@ -805,9 +805,10 @@ class QuestManager:
 
     # ── 打卡 ──────────────────────────────────────────────────────────────
     def check_in(self, uid: str, note: str = '', self_report: bool = False,
-                 rating: int | None = None) -> str | None:
+                 rating: int | None = None, ai_review: dict | None = None) -> str | None:
         """打卡；未達標時需 self_report=True（自行回報）。成功回傳 None，失敗回傳原因。
-        rating：臨摹研究的自評 1~5；≥PASS_RATING 時推進學習路徑，結果記於 task['advanced_to']。"""
+        rating：臨摹研究的評分 1~5（自評，或 AI 評鑑的分數）；≥PASS_RATING 時推進學習路徑，結果記於 task['advanced_to']。
+        ai_review：AI 評鑑結果（分數、簡評；使用者改了分數時 overridden=True），記於 task['ai_review']。"""
         t = self.task(uid)
         if not t:
             return '找不到任務'
@@ -823,6 +824,8 @@ class QuestManager:
         t['note'] = (note or '').strip()
         if rating is not None:
             t['rating'] = max(1, min(5, int(rating)))
+        if ai_review:
+            t['ai_review'] = dict(ai_review, overridden=t.get('rating') != ai_review.get('score'))
         t['advanced_to'] = self._advance_lesson(t, t.get('rating'))
         if self.data.get('active_study') == uid:
             self.data['active_study'] = None

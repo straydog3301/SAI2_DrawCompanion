@@ -89,5 +89,6 @@ def lesson_attempts(quests, lesson_id: str) -> list[dict]:
                 ref = t.get('ref') or {}
                 out.append({'day': day, 'status': t.get('status'), 'rating': t.get('rating'),
                             'note': t.get('note') or '', 'snapshot': t.get('snapshot') or '',
+                            'ai_review': t.get('ai_review') or None,
                             'ref_title': ' / '.join(x for x in (ref.get('title'), ref.get('artist')) if x)})
     return out

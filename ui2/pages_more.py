@@ -166,10 +166,15 @@ class GrowthPage(QWidget):
             top = QHBoxLayout()
             top.addWidget(label(t['name'], 'body'), 1)
             text, kind = STATUS_CHIP.get(t['status'], ('', 'neutral'))
+            ai = t.get('ai_review')
             if t['status'] == 'done' and t['rating']:
-                text += f"・{t['rating']} 分"
+                text += f"・{'AI ' if ai and not ai.get('overridden') else ''}{t['rating']} 分"
             top.addWidget(Chip(text, kind))
             bl.addLayout(top)
+            if ai:
+                extra = f"（AI 評 {ai['score']} 分，已手動修改）" if ai.get('overridden') else ''
+                if ai.get('summary') or extra:
+                    bl.addWidget(label(f"AI 簡評：{ai.get('summary', '')}{extra}", 'caption'))
             sub = '　'.join(x for x in (t['progress'], t['skills']) if x)
             if sub:
                 bl.addWidget(label(sub, 'caption'))
@@ -333,8 +338,13 @@ class CoursesPage(QWidget):
                 col = QVBoxLayout()
                 if a['snapshot'] and os.path.isfile(a['snapshot']):
                     col.addWidget(_thumb(a['snapshot'], 96))
-                txt = a['day'][5:] + (f"・{a['rating']} 分" if a['rating'] else '')
-                col.addWidget(label(txt, 'caption', wrap=False))
+                ai = a.get('ai_review')
+                txt = a['day'][5:] + (f"・{'AI ' if ai and not ai.get('overridden') else ''}{a['rating']} 分"
+                                      if a['rating'] else '')
+                cap = label(txt, 'caption', wrap=False)
+                if ai and ai.get('summary'):
+                    cap.setToolTip(f"AI 簡評：{ai['summary']}")
+                col.addWidget(cap)
                 row.addLayout(col)
             row.addStretch(1)
             dl.addLayout(row)

@@ -551,11 +551,33 @@ class CompanionService:
         self.quests.save(force=True)
         return ready
 
-    def check_in(self, uid: str, note: str = '', rating: int | None = None, self_report: bool = False) -> str | None:
-        err = self.quests.check_in(uid, note, self_report=self_report, rating=rating)
+    def check_in(self, uid: str, note: str = '', rating: int | None = None, self_report: bool = False,
+                 ai_review: dict | None = None) -> str | None:
+        err = self.quests.check_in(uid, note, self_report=self_report, rating=rating, ai_review=ai_review)
         if not err:
             self.quests.save(force=True)
         return err
+
+    # ── AI 評鑑（課程打卡） ──
+    def ai_review_ready(self) -> bool:
+        from core import ai_review
+        return ai_review.ready(self.settings.get('ai_review', {}) or {})
+
+    def review_checkin(self, task: dict, lesson: dict, work_img, note: str = '') -> dict:
+        """把課程目標、參考圖與作品交給使用者設定的 AI 評分（在背景執行緒呼叫）；失敗丟 ai_review.ReviewError"""
+        from core import ai_review
+        from core.daily_quests import PASS_RATING
+        ref = None
+        path = (task.get('ref') or {}).get('cache')
+        if path and os.path.isfile(path):
+            try:
+                from PIL import Image
+                with Image.open(path) as im:
+                    ref = im.convert('RGB')
+            except OSError:
+                ref = None
+        return ai_review.review(self.settings.get('ai_review', {}) or {}, lesson, work_img, ref, note,
+                                pass_rating=PASS_RATING)
 
     def reroll(self, uid: str) -> str | None:
         new = self.quests.reroll(uid)

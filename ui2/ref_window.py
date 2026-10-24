@@ -19,7 +19,7 @@ from PIL import Image
 from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QPushButton, QSizeGrip, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QSizeGrip, QVBoxLayout, QWidget)
 
 from core import data_text as DT
 from core import sketch_source as SK, study_lessons, study_refs, study_tools as ST
@@ -216,30 +216,37 @@ def _drop_layout(lay):
 # ─── 打卡側滑面板 ────────────────────────────────────────────────────────
 
 class CheckinSheet(QFrame):
-    finished = Signal(object, str)       # (rating 或 None, 心得)
+    finished = Signal(object, str, object)   # (rating 或 None, 心得, AI 評鑑結果或 None)
     cancelled = Signal()
+    review_requested = Signal(str)           # 請 AI 評鑑（心得）
 
     def __init__(self, win):
         super().__init__(win)
         self.setObjectName('sheet')
         self.setStyleSheet(f'QFrame#sheet{{background:{theme.SURFACE};border-left:1px solid {theme.BORDER};}}')
-        self.lay = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        body = QWidget()
+        self.lay = QVBoxLayout(body)
         self.lay.setContentsMargins(16, 14, 16, 14)
         self.lay.setSpacing(10)
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
         self.rating = None
+        self.ai_result = None
+        self.ai_mode = False
+        self._rbtns = []
         self.hide()
 
-    def open(self, task: dict, lesson: dict | None, snapshot_pm, self_report: bool):
-        while self.lay.count():
-            it = self.lay.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
-            elif it.layout():
-                while it.layout().count():
-                    w = it.layout().takeAt(0).widget()
-                    if w:
-                        w.deleteLater()
+    def open(self, task: dict, lesson: dict | None, snapshot_pm, self_report: bool, ai: bool = False):
+        _clear_layout(self.lay)
         self.rating = None
+        self.ai_result = None
+        self.ai_mode = bool(ai and lesson)
+        self._rbtns = []
         head = QLabel(f'打卡：{task["name"]}')
         head.setProperty('h2', True)
         head.setWordWrap(True)
@@ -251,6 +258,10 @@ class CheckinSheet(QFrame):
             self.lay.addWidget(w)
         self.ok = QPushButton('完成打卡')
         self.ok.setProperty('primary', True)
+        self.rating_box = QWidget()
+        rl = QVBoxLayout(self.rating_box)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(6)
         if lesson:
             focus = QLabel(f'本次專注：{lesson["focus"]}')
             focus.setWordWrap(True)
@@ -261,9 +272,15 @@ class CheckinSheet(QFrame):
                 lb.setWordWrap(True)
                 lb.setProperty('muted', True)
                 self.lay.addWidget(lb)
+            # AI 評鑑的結果（等待中／分數與簡評／錯誤）
+            self.ai_box = QVBoxLayout()
+            self.ai_box.setSpacing(6)
+            self.lay.addLayout(self.ai_box)
+            self.rating_title = QLabel('你覺得這次做到了嗎？')
+            self.rating_title.setProperty('muted', True)
+            rl.addWidget(self.rating_title)
             row = QHBoxLayout()
             row.setSpacing(4)
-            self._rbtns = []
             for v, label in RATINGS:
                 b = QPushButton(f'{v}\n{label}')
                 b.setCheckable(True)
@@ -272,19 +289,24 @@ class CheckinSheet(QFrame):
                 b.clicked.connect(lambda _=False, x=v: self._pick(x))
                 row.addWidget(b)
                 self._rbtns.append(b)
-            self.lay.addLayout(row)
-            hint = QLabel(f'{PASS_RATING} 分以上進入下一課；低於 {PASS_RATING} 分下次換一張圖再練。')
-            hint.setProperty('muted', True)
-            hint.setWordWrap(True)
-            self.lay.addWidget(hint)
-            self.ok.setEnabled(False)
+            rl.addLayout(row)
+            self.hint = QLabel(f'{PASS_RATING} 分以上進入下一課；低於 {PASS_RATING} 分下次換一張圖再練。')
+            self.hint.setProperty('muted', True)
+            self.hint.setWordWrap(True)
+            rl.addWidget(self.hint)
+            self.lay.addWidget(self.rating_box)
+            if self.ai_mode:
+                self.rating_box.hide()
+                self.ok.setText('完成打卡並請 AI 評分')
+            else:
+                self.ok.setEnabled(False)
         self.note = QLineEdit()
         self.note.setPlaceholderText('留一句心得（可留白）')
         self.lay.addWidget(self.note)
         if snapshot_pm is not None:
             snap = QLabel()
             snap.setPixmap(snapshot_pm.scaled(QSize(120, 90), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            cap = QLabel('畫布快照（會出現在成長頁的單日明細）')
+            cap = QLabel('畫布快照（會出現在成長頁的單日明細）' + ('，也會交給 AI 評分' if self.ai_mode else ''))
             cap.setProperty('muted', True)
             cap.setWordWrap(True)
             row2 = QHBoxLayout()
@@ -293,21 +315,107 @@ class CheckinSheet(QFrame):
             self.lay.addLayout(row2)
         self.lay.addStretch(1)
         btns = QHBoxLayout()
-        back = QPushButton('再練一下')
-        back.clicked.connect(self.cancelled.emit)
-        self.ok.clicked.connect(lambda: self.finished.emit(self.rating, self.note.text().strip()))
-        btns.addWidget(back)
+        self.back = QPushButton('再練一下')
+        self.back.clicked.connect(self.cancelled.emit)
+        self.ok.clicked.connect(self._ok)
+        btns.addWidget(self.back)
         btns.addWidget(self.ok, 1)
         self.lay.addLayout(btns)
         self.show()
         self.raise_()
         self.note.setFocus()
 
+    def _ok(self):
+        if self.ai_mode and self.ai_result is None and self.rating is None:
+            self.review_requested.emit(self.note.text().strip())
+            return
+        self.finished.emit(self.rating, self.note.text().strip(), self.ai_result)
+
     def _pick(self, v):
         self.rating = v
         for i, b in enumerate(self._rbtns, 1):
             b.setChecked(i == v)
         self.ok.setEnabled(True)
+        if self.ai_result is not None:
+            same = v == self.ai_result['score']
+            self.hint.setText(self._pass_text(v) + ('' if same else '（你改了 AI 的分數，紀錄會標示為手動修改）'))
+
+    @staticmethod
+    def _pass_text(score: int) -> str:
+        return (f'{score} 分：達到 {PASS_RATING} 分，下次進入下一課。' if score >= PASS_RATING
+                else f'{score} 分：未達 {PASS_RATING} 分，下次換一張圖再練這一課。')
+
+    # ── AI 評鑑 ──
+    def show_waiting(self):
+        _clear_layout(self.ai_box)
+        lb = QLabel('AI 評鑑中…通常 5～20 秒')
+        lb.setStyleSheet(f'color:{theme.ACCENT_TEXT};font-weight:600;')
+        self.ai_box.addWidget(lb)
+        self.ok.setEnabled(False)
+        self.note.setEnabled(False)
+        self.back.setText('改用自評')
+        try:
+            self.back.clicked.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        self.back.clicked.connect(self.use_self_rating)
+
+    def _restore_back(self):
+        self.back.setText('再練一下')
+        try:
+            self.back.clicked.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        self.back.clicked.connect(self.cancelled.emit)
+        self.note.setEnabled(True)
+
+    def use_self_rating(self, message: str = ''):
+        """不等 AI（或 AI 失敗）：改用自評"""
+        self.ai_mode = False
+        self.ai_result = None
+        _clear_layout(self.ai_box)
+        if message:
+            lb = QLabel(message)
+            lb.setProperty('warn', True)
+            lb.setWordWrap(True)
+            self.ai_box.addWidget(lb)
+        self._restore_back()
+        self.rating_title.setText('這次改用自評：你覺得做到了嗎？')
+        self.rating_box.show()
+        self.ok.setText('完成打卡')
+        self.ok.setEnabled(self.rating is not None)
+
+    def show_result(self, res: dict):
+        self.ai_result = res
+        _clear_layout(self.ai_box)
+        score = QLabel(f"AI 評分　{res['score']} 分・{dict(RATINGS).get(res['score'], '')}")
+        score.setStyleSheet(f'font-size:15px;font-weight:700;color:{theme.ACCENT_TEXT};')
+        self.ai_box.addWidget(score)
+        if res.get('summary'):
+            s = QLabel(res['summary'])
+            s.setWordWrap(True)
+            self.ai_box.addWidget(s)
+        for title, key in (('做得好', 'strengths'), ('可以改進', 'improve')):
+            if res.get(key):
+                lb = QLabel(f'{title}：' + ''.join(f'\n・{x}' for x in res[key]))
+                lb.setWordWrap(True)
+                lb.setProperty('muted', True)
+                self.ai_box.addWidget(lb)
+        self._restore_back()
+        self.rating_title.setText('不同意的話可以改分數：')
+        self.rating_box.show()
+        self._pick(res['score'])
+        self.ok.setText('完成打卡')
+
+
+def _clear_layout(lay):
+    while lay.count():
+        it = lay.takeAt(0)
+        if it.widget():
+            it.widget().hide()                 # 馬上消失；deleteLater 要等下一輪事件才刪除
+            it.widget().deleteLater()
+        elif it.layout():
+            _clear_layout(it.layout())
 
 
 # ─── 外框 ────────────────────────────────────────────────────────────────
@@ -369,7 +477,9 @@ class RefWindow(QWidget):
         self.grip = QSizeGrip(self)
         self.grip.resize(14, 14)
         self.sheet = CheckinSheet(self)
-        self.sheet.finished.connect(lambda r, n: self._checkin_done(*self._checkin_ctx, r, n))
+        self.sheet.finished.connect(lambda r, n, ai: self._checkin_done(*self._checkin_ctx, r, n, ai))
+        self.sheet.review_requested.connect(self._request_review)
+        self._review_seq = 0
         self.sheet.cancelled.connect(self._close_sheet)
         self._checkin_ctx = (None, False)
         self.options = OptionsSheet(self)
@@ -653,11 +763,39 @@ class RefWindow(QWidget):
     def open_checkin(self, task: dict, lesson: dict | None, self_report: bool):
         snap = self._capture()
         self._checkin_snapshot = snap
-        self._enlarge(340, 460)
+        ai = bool(lesson) and self.ctl.service.ai_review_ready()
+        self._enlarge(340, 560 if ai else 460)
         self.sheet.setGeometry(0, 0, self.width(), self.height())
         self._checkin_ctx = (task['uid'], self_report)
-        self.sheet.open(task, lesson, to_pixmap(snap) if snap is not None else None, self_report)
+        self._checkin_task, self._checkin_lesson = task, lesson
+        self.sheet.open(task, lesson, to_pixmap(snap) if snap is not None else None, self_report, ai=ai)
         self.activateWindow()
+
+    def _request_review(self, note: str):
+        """打卡時請 AI 評分（背景執行緒）；按「改用自評」或關閉面板後回來的結果會被忽略"""
+        self._review_seq += 1
+        seq = self._review_seq
+        task, lesson, snap = self._checkin_task, self._checkin_lesson, getattr(self, '_checkin_snapshot', None)
+        self.sheet.show_waiting()
+
+        def work():
+            from core.ai_review import ReviewError
+            try:
+                res, err = self.ctl.service.review_checkin(task, lesson, snap, note), None
+            except ReviewError as e:
+                res, err = None, str(e)
+            except Exception as e:                      # 不讓評鑑的意外錯誤卡住打卡
+                res, err = None, f'AI 評鑑失敗：{e}'
+            self.ctl.work_done.emit(lambda: self._review_done(seq, res, err))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _review_done(self, seq, res, err):
+        if seq != self._review_seq or not self.sheet.isVisible() or not self.sheet.ai_mode:
+            return
+        if res is None:
+            self.sheet.use_self_rating(f'{err}。這次改用自評。')
+        else:
+            self.sheet.show_result(res)
 
     def _enlarge(self, min_w: int, min_h: int):
         """面板需要的空間比小窗大時暫時放大，關閉面板後還原"""
@@ -675,15 +813,17 @@ class RefWindow(QWidget):
         self.activateWindow()
 
     def _close_sheet(self):
+        self._review_seq += 1
         self.sheet.hide()
         self.options.hide()
         if self._normal_size is not None:
             self.resize(self._normal_size)
             self._normal_size = None
 
-    def _checkin_done(self, uid, self_report, rating, note):
+    def _checkin_done(self, uid, self_report, rating, note, ai=None):
         svc = self.ctl.service
-        err = svc.check_in(uid, note, rating=rating, self_report=self_report)
+        self._review_seq += 1                            # 之後才回來的評鑑結果不再使用
+        err = svc.check_in(uid, note, rating=rating, self_report=self_report, ai_review=ai)
         if err:
             self.ctl.say(err)
             return

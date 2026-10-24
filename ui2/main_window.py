@@ -27,7 +27,7 @@ LATER = '即將推出'
 NAV_MAIN = [('今日', 'home', ''), ('練習', 'sketch', ''), ('課程', 'study', ''), ('成長', 'flame', ''),
             ('作品', 'works', ''), ('工具', 'record', '')]
 NAV_SETTINGS = [('一般', 'settings'), ('寵物', 'play'), ('快捷面板', 'canvas'), ('每日任務', 'check'), ('規則', 'refresh'),
-                ('外觀', 'opacity'), ('參考圖來源', 'image'), ('快捷鍵', 'grid')]
+                ('外觀', 'opacity'), ('參考圖來源', 'image'), ('AI 評鑑', 'study'), ('快捷鍵', 'grid')]
 SETTINGS_ALIASES = {'設定': '一般'}
 CONTENT_MAX_W = 1080
 
@@ -260,6 +260,7 @@ class MainWindow(QWidget):
                     '規則': lambda l: l.addWidget(SP.RulesPage(self.ctl)),
                     '外觀': lambda l: l.addWidget(SP.appearance_page(self.ctl)),
                     '參考圖來源': lambda l: l.addWidget(SP.sources_page(self.ctl)),
+                    'AI 評鑑': lambda l: l.addWidget(SP.ai_review_page(self.ctl)),
                     '快捷鍵': lambda l: l.addWidget(SP.HotkeysPage(self.ctl))}
         builders.get(name, lambda l: l.addWidget(label(LATER, 'muted')))(lay)
         self._built.add(name)
