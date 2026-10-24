@@ -981,7 +981,7 @@ class WorksPage(QWidget):
 
 MULTIPLIERS = [(1, '1 倍（每 33 毫秒一張）'), (2, '2 倍'), (5, '5 倍（建議）'), (10, '10 倍'), (20, '20 倍'),
                (50, '50 倍'), (100, '100 倍（長時間作品）')]
-TARGETS = [('canvas', '只錄畫布（建議）'), ('canvas_float', '畫布（自動開隱藏浮動視窗）'), ('window', '整個 SAI2 視窗'),
+TARGETS = [('canvas', '只錄畫紙（建議）'), ('canvas_float', '畫紙（自動開隱藏浮動視窗）'), ('window', '整個 SAI2 視窗'),
            ('screen', '整個螢幕')]
 QUALITIES = [('compact', '精簡'), ('standard', '標準'), ('high', '高畫質'), ('lossless', '無損')]
 
@@ -997,7 +997,7 @@ class ToolsPage(QWidget):
         lay.setSpacing(24)
         lay.addWidget(PageHeader('工具', '縮時錄影會在背景錄下你畫圖的過程，畫完自動合成影片'))
 
-        rec = Card('縮時錄影', '只在動筆時擷取，停筆就暫停；所有檔案關閉時自動合成影片')
+        rec = Card('縮時錄影', '只在動筆時擷取，停筆就暫停；畫哪個作品就錄哪個，關閉 SAI2（或所有檔案）時每個作品各自合成影片')
         self.toggle = ToggleSwitch(bool(self.s.get('timelapse.enabled')))
         self.toggle.toggled.connect(self._toggle)
         rec.head.addWidget(self.toggle)
@@ -1014,7 +1014,8 @@ class ToolsPage(QWidget):
 
         g = SettingGroup('錄影設定')
         g.row('倍速', '影片播放速度；倍數越高，擷取間隔越長、影片越短', self._combo('timelapse.multiplier', MULTIPLIERS, int))
-        g.row('錄製範圍', '', self._combo('timelapse.target', TARGETS))
+        g.row('錄製範圍', '「畫紙」不含工作區與捲軸；放大畫面時錄看得到的部分',
+              self._combo('timelapse.target', TARGETS))
         g.row('畫質', '無損會佔用較多硬碟空間', self._combo('timelapse.quality', QUALITIES))
         g.row('影片 FPS', '', self._combo('timelapse.fps', [(24, '24'), (30, '30'), (60, '60')], int))
         folder = QWidget()
@@ -1033,6 +1034,15 @@ class ToolsPage(QWidget):
         fr.addWidget(openb)
         g.row('影片存放位置', '每個作品一個子資料夾', folder, stack=True)
         lay.addWidget(g)
+
+        self.recover_card = Card('未合成的錄影', '程式意外關閉、斷電或沒有 ffmpeg 時留下的錄影畫面，可以合成影片或捨棄')
+        self.recover_box = QVBoxLayout()
+        self.recover_box.setSpacing(8)
+        self.recover_card.lay.addLayout(self.recover_box)
+        self.recover_card.hide()
+        lay.addWidget(self.recover_card)
+        self._confirm_discard = None
+        self._refresh_recover()
 
         later = Card('與 1.x 並存')
         later.lay.addWidget(label('同時開著 1.x 時，2.0 會自動暫停記錄，避免兩邊重複計時；關閉 1.x 後就會繼續。', 'caption'))
@@ -1060,9 +1070,60 @@ class ToolsPage(QWidget):
         if d:
             ed.setText(os.path.normpath(d))
 
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._refresh_recover()
+
+    def _refresh_recover(self):
+        """未合成的錄影清單（掃資料夾，只在顯示頁面與操作後更新，不跟著每秒的狀態更新）"""
+        from core.timelapse import find_ffmpeg
+        _clear(self.recover_box)
+        items = self.svc.unexported_recordings()
+        self.recover_card.setVisible(bool(items))
+        if not items:
+            return
+        has_ffmpeg = find_ffmpeg()
+        if not has_ffmpeg:
+            self.recover_box.addWidget(label('找不到 ffmpeg：安裝 ffmpeg 並加入 PATH 後才能合成。', 'warn'))
+        for it in items:
+            row = QWidget()
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(0, 0, 0, 0)
+            when = datetime.fromtimestamp(it['time']).strftime('%m/%d %H:%M')
+            hl.addWidget(label(f"{it['name']}　{it['frames']} 張　{when}", 'body'), 1)
+            go = button('合成', 'primary')
+            go.setEnabled(has_ffmpeg)
+            go.clicked.connect(lambda _c=False, it=it: self._recover([it]))
+            confirming = self._confirm_discard == it['dir']
+            drop = button('確定捨棄' if confirming else '捨棄', 'secondary' if confirming else 'ghost')
+            drop.clicked.connect(lambda _c=False, it=it: self._discard(it))
+            hl.addWidget(go)
+            hl.addWidget(drop)
+            self.recover_box.addWidget(row)
+
+    def _recover(self, items):
+        self.ctl.recover_recordings(items)
+        self._confirm_discard = None
+        self._refresh_recover()
+        self.refresh()
+
+    def _discard(self, it):
+        if self._confirm_discard != it['dir']:
+            self._confirm_discard = it['dir']          # 第一次按：變成「確定捨棄」
+        else:
+            self._confirm_discard = None
+            self.svc.discard_recording(it)
+        self._refresh_recover()
+
     def _open_videos(self):
         os.makedirs(self.s.videos_dir, exist_ok=True)
         os.startfile(self.s.videos_dir)
+
+    def _export_now(self):
+        n = self.svc.export_recordings()
+        self.ctl.say(f'開始合成 {n} 部影片，完成後會通知你。' if n else '錄到的內容太少（沒有實際下筆），沒有合成。',
+                     important=False)
+        self.refresh()
 
     def _toggle(self, on):
         self.ctl.set_recording(on)
@@ -1091,6 +1152,17 @@ class ToolsPage(QWidget):
         else:
             self.status_box.addWidget(Chip('等待開檔', 'accent'), 0, Qt.AlignLeft)
             self.status_box.addWidget(label('在 SAI2 開啟（已存檔的）作品並動筆就會開始錄。', 'caption'))
+        waiting = info.get('waiting') or []
+        if waiting:
+            row = QWidget()
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(0, 0, 0, 0)
+            names = '、'.join(f.split(' _ ')[-1] for f in waiting[:3]) + (f' 等 {len(waiting)} 個' if len(waiting) > 3 else '')
+            hl.addWidget(label(f'也錄了：{names}（關閉 SAI2 時合成）', 'caption'), 1)
+            now = button('現在合成', 'ghost')
+            now.clicked.connect(self._export_now)
+            hl.addWidget(now)
+            self.status_box.addWidget(row)
         if info['exporting']:
             self.status_box.addWidget(label(f"有 {info['exporting']} 部影片正在合成", 'caption'))
         pct, msg = getattr(self.ctl, 'export_state', (None, ''))

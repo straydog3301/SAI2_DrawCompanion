@@ -109,6 +109,8 @@ class FakeRecorder:
         self.total_recorded_duration = 50.0
         self.export_threads = []
         self.switches = []
+        self.parked = []
+        self.exported = []
         self.stopped = False
 
     def start(self):
@@ -117,16 +119,31 @@ class FakeRecorder:
     def stop(self):
         self.stopped = True
 
+    per_file = False
+
     def switch_file(self, f):
         self.switches.append(f)
-        if f is None or self.enabled:
-            self.active_file = f if self.enabled else None
+        if self.active_file is not None and self.active_file != f:
+            self.parked.append(self.active_file)
+        self.active_file = f if self.enabled else None
+        if f in self.parked:
+            self.parked.remove(f)
+
+    def pending_files(self):
+        return ([self.active_file] if self.active_file else []) + self.parked
+
+    def export_all(self):
+        n = len(self.pending_files())
+        self.exported.append(self.pending_files())
+        self.active_file, self.parked = None, []
+        return n
 
 
 d2 = tmpdir()
 s2 = settings2.Settings2(d2)
+clock = [1000.0]
 svc = companion.CompanionService(s2, tracker_factory=FakeTracker, legacy_check=lambda: False,
-                                 recorder_factory=FakeRecorder)
+                                 recorder_factory=FakeRecorder, clock=lambda: clock[0])
 svc.start()
 r = svc.recorder
 check(isinstance(r, FakeRecorder) and r.output_dir == s2.videos_dir and r.multiplier == 5 and not r.enabled, 'recorder created')
@@ -136,13 +153,27 @@ check(not res.status.recording and r.active_file is None and svc.tracker.locked_
 svc.set_recording(True)
 check(s2.get('timelapse.enabled') and r.enabled, 'recording on + saved')
 res = svc.tick()
-check(res.status.recording and r.active_file == 'A.psd' and svc.tracker.locked_file == 'A.psd', 'locks current file')
+check(r.per_file and res.status.recording and r.active_file == 'A.psd' and svc.tracker.locked_file is None,
+      'records the current file without locking it')
 svc.tracker.cur = 'B.psd'
 svc.tick()
-check(r.active_file == 'A.psd', 'stays on the locked file while another is shown')
+check(r.active_file == 'B.psd' and r.pending_files() == ['B.psd', 'A.psd'] and not r.exported,
+      'follows the frontmost file; the first one is kept for later')
+check(svc.recording_info()['waiting'] == ['A.psd'], 'waiting works listed')
 svc.tracker.cur = None
 svc.tick()
-check(r.active_file is None, 'stops when all files are closed')
+clock[0] += 2
+svc.tick()
+check(not r.exported, 'no file for a moment (opening a file) → not merged yet')
+svc.tracker.cur = 'A.psd'
+svc.tick()
+check(r.active_file == 'A.psd' and not r.exported, 'back to A continues its recording')
+svc.tracker.cur = None
+svc.tick()
+clock[0] += 6
+svc.tick()
+check(len(r.exported) == 1 and sorted(r.exported[0]) == ['A.psd', 'B.psd'],
+      f'all files closed → every recorded work merged {r.exported}')
 svc.tracker.cur = 'A.psd'
 svc.tick()
 svc._on_export(40, '合成中')
@@ -157,7 +188,7 @@ check(svc.exporting_count() == 1 and svc.recording_info()['exporting'] == 1, 'ex
 info = svc.recording_info()
 check(info['enabled'] and info['active_file'] == 'A.psd' and info['video_seconds'] == 10.0, f'info {info}')
 svc.set_recording(False)
-check(r.switches[-1] is None and svc.tracker.locked_file is None and not s2.get('timelapse.enabled'), 'recording off exports')
+check(len(r.exported) == 2 and svc.tracker.locked_file is None and not s2.get('timelapse.enabled'), 'recording off exports')
 svc.stop()
 check(r.stopped and svc.recorder is None and svc.exporting_count() == 1, 'stop keeps tracking unfinished exports')
 ev.set()

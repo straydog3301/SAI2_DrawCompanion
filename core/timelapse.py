@@ -284,6 +284,135 @@ def make_even_dimensions(img: Image.Image) -> Image.Image:
     return img.crop((0, 0, new_w, new_h))
 
 
+SESSION_META = 'session.json'      # 暫存資料夾裡的錄影資訊（當機後復原用）
+
+
+def pick_output_size(sizes) -> tuple[int, int] | None:
+    """影片輸出尺寸：錄最多張的那個大小（一樣多時取面積大的），寬高取偶數。
+    錄影途中調整面板或視窗大小時，其他大小的影格等比例縮放並補邊，不拉伸"""
+    best = None
+    for key, n in (sizes or {}).items():
+        try:
+            w, h = (int(v) for v in (key.split('x') if isinstance(key, str) else key))
+        except Exception:
+            continue
+        if w < 2 or h < 2:
+            continue
+        rank = (int(n), w * h)
+        if best is None or rank > best[0]:
+            best = (rank, (w - w % 2, h - h % 2))
+    return best[1] if best else None
+
+
+def fit_filter(size: tuple[int, int]) -> str:
+    """ffmpeg 濾鏡：每張影格等比例縮放到輸出尺寸內，不足的地方補黑邊"""
+    w, h = size
+    return (f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=lanczos,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1")
+
+
+def frame_files(temp_dir: str) -> list[str]:
+    try:
+        names = os.listdir(temp_dir)
+    except OSError:
+        return []
+    return [os.path.join(temp_dir, n) for n in sorted(names)
+            if n.startswith('frame_') and n.lower().endswith(('.jpg', '.png'))]
+
+
+def frame_sizes(files) -> dict[str, int]:
+    """讀每張影格的檔頭取得大小（不解碼整張圖）"""
+    sizes: dict[str, int] = {}
+    for f in files:
+        try:
+            with Image.open(f) as im:
+                k = f'{im.width}x{im.height}'
+        except Exception:
+            continue
+        sizes[k] = sizes.get(k, 0) + 1
+    return sizes
+
+
+def normalize_frames(temp_dir: str, check_tail: int = 0) -> tuple[int, str]:
+    """整理暫存影格給 ffmpeg 讀：可選擇檢查最後幾張是否寫完整（當機時可能寫到一半）、
+    把編號補成連續（ffmpeg 讀圖片序列遇到缺號就會停）。回傳 (張數, 副檔名)"""
+    files = frame_files(temp_dir)
+    if not files:
+        return 0, 'jpg'
+    ext = max(('jpg', 'png'), key=lambda e: sum(1 for f in files if f.lower().endswith(e)))
+    for f in [f for f in files if not f.lower().endswith(ext)]:
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+    files = [f for f in files if f.lower().endswith(ext)]
+    for f in files[-check_tail:] if check_tail else []:
+        try:
+            with Image.open(f) as im:
+                im.load()
+        except Exception:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    files = frame_files(temp_dir)
+    for i, f in enumerate(files):
+        target = os.path.join(temp_dir, f'frame_{i:06d}.{ext}')
+        if f != target:
+            try:
+                os.replace(f, target)
+            except OSError:
+                pass
+    return len(files), ext
+
+
+def _subdir_from_temp_name(name: str) -> str:
+    import re
+    m = re.match(r'^(.*)_\d{8}_\d{6}$', name)
+    return (m.group(1) if m else name) or 'unknown'
+
+
+def find_unexported(output_dir: str, exclude=(), min_age: float = 120.0, now: float | None = None) -> list[dict]:
+    """找出沒有合成的錄影（程式當機、斷電或沒有 ffmpeg 時留下的暫存影格）。
+    exclude：正在錄或正在合成的資料夾；min_age：最近還在寫入的資料夾先跳過（可能是另一個程式正在錄）。
+    沒有任何影格的空資料夾直接清掉。"""
+    import json
+    root = os.path.join(output_dir, 'temp')
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return []
+    skip = {os.path.normcase(os.path.abspath(d)) for d in exclude if d}
+    now = time.time() if now is None else now
+    out = []
+    for name in names:
+        d = os.path.join(root, name)
+        if not os.path.isdir(d) or os.path.normcase(os.path.abspath(d)) in skip:
+            continue
+        files = frame_files(d)
+        try:
+            newest = max([os.path.getmtime(d)] + [os.path.getmtime(f) for f in files[-3:]])
+        except OSError:
+            continue
+        if now - newest < min_age:
+            continue
+        if not files:
+            shutil.rmtree(d, ignore_errors=True)
+            continue
+        try:
+            with open(os.path.join(d, SESSION_META), encoding='utf-8') as fp:
+                meta = json.load(fp)
+            if not isinstance(meta, dict):
+                meta = {}
+        except Exception:
+            meta = {}
+        subdir = meta.get('subdir') or _subdir_from_temp_name(name)
+        file_key = meta.get('file')
+        out.append({'dir': d, 'frames': len(files), 'file': file_key, 'subdir': subdir, 'meta': meta,
+                    'name': (file_key.split(' _ ')[-1] if file_key else subdir), 'time': newest})
+    return out
+
+
 def find_ffmpeg() -> bool:
     """檢查系統 PATH 中是否存在 ffmpeg 執行檔"""
     return shutil.which('ffmpeg') is not None
@@ -506,6 +635,16 @@ class TimelapseRecorder:
         self._cached_canvas_hwnd = None
         self._last_canvas_scan = 0.0
         self.needs_thumbnail = True
+        self._frame_sizes: dict[str, int] = {}   # 這段錄影各種影格大小的張數（合成時決定輸出尺寸）
+        self._recovering: set[str] = set()        # 正在復原合成的暫存資料夾
+        # 只錄畫紙：畫紙範圍每 PAPER_REFRESH 秒重新偵測一次（縮放、捲動畫面時跟著更新）
+        self.crop_paper = True
+        # 每個作品各自錄（2.0）：切換到其他檔案時先保留這段錄影，切回來接著錄，
+        # export_all() 時（SAI2 關閉、沒有開著的檔案、關閉錄影）才合成。1.x 維持鎖定第一個檔案
+        self.per_file = False
+        self._sessions: dict[str, dict] = {}       # 暫停中的錄影：{作品: 錄影資訊（含 temp_dir）}
+        self._pressed_seconds = 0.0                # 這段錄影實際下筆的秒數
+        self._paper = {'at': 0.0, 'size': None, 'box': None}
 
         # 檔名比對回呼：file_matcher(window_title) -> 解析後的圖檔 key (或 None)。
         # 由主程式設定 (含別名解析)，用於驗證錄製目標視窗是否屬於目前圖檔。
@@ -582,7 +721,9 @@ class TimelapseRecorder:
                 pass
         
         # 停止時若有正在進行的檔案，觸發最終導出
-        if self.active_file:
+        if self.per_file:
+            self.export_all()
+        elif self.active_file:
             self.switch_file(None)
         else:
             self._close_float_window()
@@ -594,6 +735,9 @@ class TimelapseRecorder:
 
     def switch_file(self, new_file: str | None):
         """當 active 畫布檔案變更或關閉時被呼叫"""
+        if self.per_file:
+            self._switch_per_file(new_file)
+            return
         with self._lock:
             should_be_recording = self.enabled and (new_file is not None)
             is_currently_recording = (self.active_file is not None) and (self.temp_dir is not None)
@@ -613,28 +757,156 @@ class TimelapseRecorder:
                 self._close_float_window()
 
             if should_be_recording and (self.active_file != new_file or self.temp_dir is None):
-                # 開始錄製新檔案
+                self._begin_session(new_file)
+
+    def _begin_session(self, new_file: str):
+        """開始錄一個新檔案（呼叫時已持有鎖）"""
+        # 開始錄製新檔案
+        self.active_file = new_file
+        self.frame_count = 0
+        self._pressed_seconds = 0.0
+        self.total_recorded_duration = 0.0
+        self.is_actively_recording = False
+        # 重置 canvas_float 模式的失敗狀態，新圖檔重新嘗試建立浮動檢視
+        self._float_fail_count = 0
+        self._float_given_up = False
+        self._float_last_attempt = 0.0
+        
+        # 計算該圖檔對應的影片子目錄
+        file_subdir = file_key_to_subdir(new_file)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        temp_name = f"{file_subdir}_{timestamp}"
+        self.temp_dir = os.path.join(self.output_dir, "temp", temp_name)
+        # 記錄目前影片子目錄，導出時使用
+        self._current_subdir = file_subdir
+        self._frame_sizes = {}
+        try:
+            os.makedirs(self.temp_dir, exist_ok=True)
+            self._write_meta()
+        except Exception:
+            self.temp_dir = None
+
+    def _park_active(self):
+        """把目前這段錄影暫存起來（呼叫時已持有鎖）"""
+        if self.active_file is not None and self.temp_dir:
+            info = self._session_info()
+            info['temp_dir'] = self.temp_dir
+            self._write_meta(info, self.temp_dir)
+            self._sessions[self.active_file] = info
+        self.active_file = None
+        self.temp_dir = None
+        self.frame_count = 0
+        self.total_recorded_duration = 0.0
+        self._frame_sizes = {}
+        self._pressed_seconds = 0.0
+        self.is_actively_recording = False
+
+    def _switch_per_file(self, new_file: str | None):
+        """跟著目前最上層的檔案：舊的那段先保留，新的檔案接著它自己之前的錄影繼續錄"""
+        with self._lock:
+            if not self.enabled:
+                new_file = None
+            if new_file == self.active_file and (new_file is None or self.temp_dir):
+                return
+            if self.active_file is not None:
+                self._park_active()
+                self._close_float_window()
+            if new_file is None:
+                return
+            parked = self._sessions.pop(new_file, None)
+            if parked and os.path.isdir(parked.get('temp_dir') or ''):
                 self.active_file = new_file
-                self.frame_count = 0
-                self.total_recorded_duration = 0.0
+                self.temp_dir = parked['temp_dir']
+                self._current_subdir = parked.get('subdir') or file_key_to_subdir(new_file)
+                self.frame_count = int(parked.get('frames') or 0)
+                self.total_recorded_duration = float(parked.get('duration') or 0.0)
+                self._frame_sizes = dict(parked.get('sizes') or {})
+                self._pressed_seconds = float(parked.get('pressed') or 0.0)
                 self.is_actively_recording = False
-                # 重置 canvas_float 模式的失敗狀態，新圖檔重新嘗試建立浮動檢視
                 self._float_fail_count = 0
                 self._float_given_up = False
                 self._float_last_attempt = 0.0
-                
-                # 計算該圖檔對應的影片子目錄
-                file_subdir = file_key_to_subdir(new_file)
-                
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                temp_name = f"{file_subdir}_{timestamp}"
-                self.temp_dir = os.path.join(self.output_dir, "temp", temp_name)
-                # 記錄目前影片子目錄，導出時使用
-                self._current_subdir = file_subdir
-                try:
-                    os.makedirs(self.temp_dir, exist_ok=True)
-                except Exception:
-                    self.temp_dir = None
+            else:
+                self._begin_session(new_file)
+
+    def pending_files(self) -> list[str]:
+        """錄過、還沒合成的作品（正在錄的在最前面）"""
+        with self._lock:
+            return ([self.active_file] if self.active_file else []) + [f for f in self._sessions if f != self.active_file]
+
+    def export_all(self) -> int:
+        """合成所有錄過的作品（正在錄的與暫停中的）；下筆太少的（只是看看的參考圖）直接捨棄。回傳開始合成的部數"""
+        with self._lock:
+            sessions = list(self._sessions.items())
+            self._sessions = {}
+            if self.active_file is not None and self.temp_dir:
+                info = self._session_info()
+                info['temp_dir'] = self.temp_dir
+                sessions.append((self.active_file, info))
+            self.active_file = None
+            self.temp_dir = None
+            self.frame_count = 0
+            self.total_recorded_duration = 0.0
+            self._frame_sizes = {}
+            self._pressed_seconds = 0.0
+            self.is_actively_recording = False
+        self._close_float_window()
+        n = 0
+        for name, info in sessions:
+            d = info.get('temp_dir')
+            frames = int(info.get('frames') or 0)
+            if not d:
+                continue
+            if frames <= 0 or (self.per_file and float(info.get('pressed') or 0.0) < self.MIN_DRAW_SECONDS):
+                shutil.rmtree(d, ignore_errors=True)
+                continue
+            info['file'] = name
+            self._write_meta(info, d)
+            self._trigger_export(name, d, frames, info)
+            n += 1
+        return n
+
+    PAPER_REFRESH = 0.3
+    MIN_DRAW_SECONDS = 3.0      # 每個作品各自錄時，下筆不到這麼久的錄影（例如只是看參考圖）不合成
+
+    def _paper_crop(self, img: Image.Image) -> Image.Image:
+        """把畫布視窗的擷取畫面裁成只有畫紙（去掉外框、捲軸與工作區）"""
+        c = self._paper
+        now = time.time()
+        if c['box'] is None or c['size'] != img.size or now - c['at'] >= self.PAPER_REFRESH:
+            try:
+                from core.canvas_crop import paper_box
+                c['box'] = paper_box(img)
+            except Exception:
+                c['box'] = (0, 0, img.width, img.height)
+            c['size'], c['at'] = img.size, now
+        l, t, r, b = c['box']
+        if r - l < 2 or b - t < 2:
+            return img
+        return img.crop(c['box'])
+
+    def _session_info(self) -> dict:
+        """目前這段錄影的資訊（合成與當機復原用）"""
+        with self._lock:
+            return {'file': self.active_file, 'subdir': getattr(self, '_current_subdir', None),
+                    'duration': float(self.total_recorded_duration), 'multiplier': int(self.multiplier or 1),
+                    'fps': int(self.fps or 30), 'quality': self.quality_preset, 'sizes': dict(self._frame_sizes),
+                    'frames': int(self.frame_count), 'started': os.path.basename(self.temp_dir or '')[-15:],
+                    'pressed': round(float(self._pressed_seconds), 2)}
+
+    def _write_meta(self, info: dict | None = None, temp_dir: str | None = None):
+        import json
+        temp_dir = temp_dir or self.temp_dir
+        if not temp_dir:
+            return
+        try:
+            tmp = os.path.join(temp_dir, SESSION_META + '.tmp')
+            with open(tmp, 'w', encoding='utf-8') as fp:
+                json.dump(info or self._session_info(), fp, ensure_ascii=False)
+            os.replace(tmp, os.path.join(temp_dir, SESSION_META))
+        except Exception:
+            pass
 
     def _title_matches_file(self, title: str, active_file: str | None) -> bool:
         """以主程式提供的 file_matcher 驗證視窗標題是否屬於目前錄製的圖檔。
@@ -918,6 +1190,9 @@ class TimelapseRecorder:
 
             # 正在動筆中（或處於緩衝期內）！
             self.is_actively_recording = True
+            if _mouse_pressed():
+                with self._lock:
+                    self._pressed_seconds += dt
             
             # 累計動筆時間
             active_draw_accum += dt
@@ -939,6 +1214,7 @@ class TimelapseRecorder:
             target_hwnd = None
             fallback_msg = ""
             img = None
+            is_canvas = False       # 這張是畫布視窗（可以裁成只有畫紙）
 
             # 預先獲取 main_hwnd，儘量避免重複掃描
             main_hwnd = self.sai_main_hwnd
@@ -972,6 +1248,7 @@ class TimelapseRecorder:
                                 img = img.crop((offset_x, offset_y, offset_x + client_w, offset_y + client_h))
                         except Exception:
                             pass
+                        is_canvas = True
                 if img is None and not self._float_given_up:
                     # 浮動視窗尚未建立成功 → 本影格暫時退回一般畫布邏輯
                     fallback_msg = " " + _tr("timelapse.status.float_pending", "(浮動視窗準備中)")
@@ -1048,6 +1325,7 @@ class TimelapseRecorder:
                                 
                                 if rel_right > rel_left and rel_bottom > rel_top:
                                     img = img.crop((rel_left, rel_top, rel_right, rel_bottom))
+                                    is_canvas = True
                                 else:
                                     img = None
                             except Exception:
@@ -1069,6 +1347,7 @@ class TimelapseRecorder:
                                 
                                 if client_w > 0 and client_h > 0:
                                     img = img.crop((offset_x, offset_y, offset_x + client_w, offset_y + client_h))
+                                is_canvas = True
                             except Exception:
                                 pass
                 else:
@@ -1095,9 +1374,18 @@ class TimelapseRecorder:
                     except Exception:
                         img = None
 
+            if img and is_canvas and self.crop_paper:
+                img = self._paper_crop(img)
+
             if img:
                 # 確保寬高為偶數，避免 FFmpeg 因 yuv420p 要求寬高必為偶數而合成失敗
                 img = make_even_dimensions(img)
+                size_key = f'{img.width}x{img.height}'
+                with self._lock:
+                    self._frame_sizes[size_key] = self._frame_sizes.get(size_key, 0) + 1
+                if frame_count % 30 == 0:
+                    self._write_meta()
+
                 
                 ext = "png" if self.quality_preset == "lossless" else "jpg"
                 frame_path = os.path.join(temp_dir, f"frame_{frame_count:06d}.{ext}")
@@ -1148,32 +1436,78 @@ class TimelapseRecorder:
                     except Exception:
                         pass
 
-    def _trigger_export(self, filename: str, temp_dir: str, frame_count: int):
-        """啟動背景執行緒，將暫存圖檔合成影片"""
+    def _trigger_export(self, filename: str, temp_dir: str, frame_count: int, job: dict | None = None):
+        """啟動背景執行緒，將暫存圖檔合成影片。
+        job 是這段錄影的資訊快照：切換到下一個檔案後錄影器的時間、倍速會被重設，合成時不能再讀"""
+        if job is None:
+            job = self._session_info()
+            job['file'] = filename
+            self._write_meta(job, temp_dir)
         t = threading.Thread(
             target=self._export_worker_wrapper,
-            args=(filename, temp_dir, frame_count),
+            args=(filename, temp_dir, frame_count, job),
             daemon=True
         )
         with self._lock:
             self.export_threads.append(t)
         t.start()
 
-    def _export_worker_wrapper(self, filename: str, temp_dir: str, frame_count: int):
+    def _export_worker_wrapper(self, filename: str, temp_dir: str, frame_count: int, job: dict | None = None):
         try:
-            self._export_worker(filename, temp_dir, frame_count)
+            self._export_worker(filename, temp_dir, frame_count, job)
         finally:
             with self._lock:
                 if threading.current_thread() in self.export_threads:
                     self.export_threads.remove(threading.current_thread())
+                self._recovering.discard(os.path.normcase(os.path.abspath(temp_dir)))
+
+    def busy_dirs(self) -> list[str]:
+        """正在錄或正在合成的暫存資料夾（找未合成的錄影時要跳過）"""
+        with self._lock:
+            return [d for d in [self.temp_dir] + list(self._recovering)
+                    + [x.get('temp_dir') for x in self._sessions.values()] if d]
+
+    def find_unexported(self, min_age: float = 120.0) -> list[dict]:
+        return find_unexported(self.output_dir, self.busy_dirs(), min_age=min_age)
+
+    def recover(self, item: dict) -> bool:
+        """合成一段沒有合成的錄影（find_unexported 的項目）；已經在合成的不會重複開始"""
+        d = item.get('dir')
+        key = os.path.normcase(os.path.abspath(d or ''))
+        if not d or not os.path.isdir(d):
+            return False
+        with self._lock:
+            if key in self._recovering or key == os.path.normcase(os.path.abspath(self.temp_dir or '')):
+                return False
+            self._recovering.add(key)
+        meta = item.get('meta') or {}
+        job = {'file': item.get('file') or meta.get('file'), 'subdir': item.get('subdir') or meta.get('subdir'),
+               'multiplier': int(meta.get('multiplier') or self.multiplier or 1),
+               'fps': int(meta.get('fps') or self.fps or 30), 'duration': float(meta.get('duration') or 0.0),
+               'sizes': meta.get('sizes') or {}, 'recovered': True, 'quality': meta.get('quality')}
+        self._trigger_export(job['file'] or job['subdir'] or 'unknown', d, int(item.get('frames') or 0), job)
+        return True
+
+    def discard(self, item: dict) -> bool:
+        """刪除一段沒有合成的錄影的暫存影格"""
+        d = item.get('dir')
+        if not d or os.path.normcase(os.path.abspath(d)) in {os.path.normcase(os.path.abspath(x)) for x in self.busy_dirs()}:
+            return False
+        if os.path.basename(os.path.dirname(os.path.abspath(d))) != 'temp':
+            return False
+        shutil.rmtree(d, ignore_errors=True)
+        return not os.path.isdir(d)
 
 
-    def _export_worker(self, filename: str, temp_dir: str, frame_count: int):
+    def _export_worker(self, filename: str, temp_dir: str, frame_count: int, job: dict | None = None):
         """ffmpeg 合成背景工作程序"""
-        ext = "png" if self.quality_preset == "lossless" else "jpg"
+        job = job or {}
+        recovered = bool(job.get('recovered'))
+        quality = job.get('quality') or self.quality_preset
+        ext = "png" if quality == "lossless" else "jpg"
 
         # 等待所有佇列中的影格檔案完全寫入磁碟，確保不丟影格，防範 shutil.rmtree 造成的競態衝突
-        if frame_count > 0:
+        if frame_count > 0 and not recovered:
             last_frame_name = f"frame_{frame_count-1:06d}.{ext}"
             last_frame_path = os.path.join(temp_dir, last_frame_name)
             
@@ -1185,8 +1519,15 @@ class TimelapseRecorder:
                 time.sleep(0.05)
 
         if not find_ffmpeg():
+            # 保留影格：裝好 ffmpeg 後可以在「工具」頁合成（會被當成未合成的錄影找到）
             if self.on_status_msg:
-                self.on_status_msg(_tr("timelapse.status.ffmpeg_missing"))
+                self.on_status_msg(_tr("timelapse.status.ffmpeg_missing_kept",
+                                       "❌ 找不到 ffmpeg，影片沒有合成；錄下的畫面已保留，安裝 ffmpeg 後可以再合成。"))
+            return
+
+        # 整理影格：當機留下的錄影先檢查最後幾張是否完整；編號補成連續
+        frame_count, ext = normalize_frames(temp_dir, check_tail=3 if recovered else 0)
+        if frame_count <= 0:
             shutil.rmtree(temp_dir, ignore_errors=True)
             return
 
@@ -1194,22 +1535,26 @@ class TimelapseRecorder:
 
         # 出輸到該圖檔對應的子目錄
         with self._lock:
-            subdir = getattr(self, '_current_subdir', None) or file_key_to_subdir(filename)
+            subdir = job.get('subdir') or getattr(self, '_current_subdir', None) or file_key_to_subdir(filename)
         video_dir = os.path.join(self.output_dir, subdir)
         os.makedirs(video_dir, exist_ok=True)
         output_filename = f"{timestamp}.mp4"
         output_path = os.path.join(video_dir, output_filename)
 
         with self._lock:
-            total_dur = self.total_recorded_duration
-            multiplier = self.multiplier
+            total_dur = float(job['duration']) if 'duration' in job else self.total_recorded_duration
+            multiplier = int(job.get('multiplier') or self.multiplier or 1)
+        out_fps = int(job.get('fps') or self.fps or 30)
 
-        # 計算適合的輸入影格率以維持設定的播放倍速
+        # 計算適合的輸入影格率以維持設定的播放倍速（當機復原時若沒有時間紀錄，用擷取間隔推算）
         if total_dur > 0.1 and frame_count > 0:
             input_fps = (frame_count / total_dur) * multiplier
             input_fps = min(120.0, max(1.0, input_fps))
         else:
-            input_fps = self.fps
+            input_fps = out_fps
+
+        # 固定輸出尺寸：錄最多張的大小；其他大小的影格等比例縮放並補邊
+        size = pick_output_size(job.get('sizes')) or pick_output_size(frame_sizes(frame_files(temp_dir)))
 
         if self.on_status_msg:
             self.on_status_msg(_tr("timelapse.status.ffmpeg_exporting", name=output_filename, count=frame_count))
@@ -1218,11 +1563,11 @@ class TimelapseRecorder:
         input_pattern = os.path.join(temp_dir, f'frame_%06d.{ext}')
         
         crf_val = '22'
-        if self.quality_preset == 'compact':
+        if quality == 'compact':
             crf_val = '26'
-        elif self.quality_preset == 'high':
+        elif quality == 'high':
             crf_val = '18'
-        elif self.quality_preset == 'lossless':
+        elif quality == 'lossless':
             # 使用 CRF 1 代替 0。因為 CRF 0 (H.264 Lossless) 會強制使用 High 4:2:0 Predictive Profile，
             # 導致 Windows 內建「媒體播放器」無法解碼播放。CRF 1 具備極致的近無損畫質且 100% 相容。
             crf_val = '1'
@@ -1232,12 +1577,13 @@ class TimelapseRecorder:
             'ffmpeg', '-y',
             '-framerate', f"{input_fps:.3f}",
             '-i', input_pattern,
+        ] + (['-vf', fit_filter(size)] if size else []) + [
             '-c:v', 'libx264',
             '-preset', 'fast',
             '-crf', crf_val,
             '-pix_fmt', 'yuv420p',
             '-movflags', '+faststart',
-            '-r', str(self.fps),
+            '-r', str(out_fps),
             '-progress', '-',
             output_path
         ]
@@ -1289,15 +1635,16 @@ class TimelapseRecorder:
                 self.on_export_progress(0, _tr("timelapse.status.ffmpeg_error", err=str(e)))
         finally:
             # 影片匯出完成（或失敗）後，將最後一幀存為 last_frame.jpg 小圖
-            self._save_last_frame(temp_dir, video_dir)
-            # 清理暫存資料夾
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            self._save_last_frame(temp_dir, video_dir, ext)
+            # 清理暫存資料夾（合成失敗時保留，之後可以再試）
+            if process is not None and process.returncode == 0:
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def _save_last_frame(self, temp_dir: str, video_dir: str):
+    def _save_last_frame(self, temp_dir: str, video_dir: str, ext: str | None = None):
         """將暫存區中編號最大的一幀複製為 last_frame.jpg，供 hover 縮圖預覽使用"""
         try:
             import glob
-            ext = "png" if self.quality_preset == "lossless" else "jpg"
+            ext = ext or ("png" if self.quality_preset == "lossless" else "jpg")
             frames = sorted(glob.glob(os.path.join(temp_dir, f'frame_*.{ext}')))
             if not frames:
                 return

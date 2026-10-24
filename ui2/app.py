@@ -183,6 +183,8 @@ class CompanionApp(QObject):
             self.say('偵測到 1.x 的自動啟動監視器：開 SAI2 時它會另外啟動 1.x，兩版會同時記錄。要移除嗎？',
                      actions=[('移除', remove), ('保留', lambda: None)])
             return
+        if self._recover_prompt():
+            return
         if self.service.paused:
             self.say('1.x 正在執行，2.0 先暫停記錄，避免重複計時。關閉 1.x 後會自動繼續。')
         elif self._usage_prompt():
@@ -190,6 +192,28 @@ class CompanionApp(QObject):
         elif failed_hotkeys:
             self.say('有快捷鍵被其他程式佔用：' + '、'.join(hotkeys.ACTIONS[a][0] for a in failed_hotkeys)
                      + '。可以到設定修改。', actions=[('設定', lambda: self.open_settings('快捷鍵'))])
+
+    def _recover_prompt(self) -> bool:
+        """上次有沒合成的縮時錄影（當機、斷電）時，問要不要合成。沒有 ffmpeg 時不問，到「工具」頁處理"""
+        from core.timelapse import find_ffmpeg
+        pending = self.service.unexported_recordings()
+        if not pending or not find_ffmpeg():
+            return False
+        names = '、'.join(dict.fromkeys(p['name'] for p in pending[:3]))
+        more = f'等 {len(pending)} 段' if len(pending) > 1 else ''
+        self.say(f'上次有沒合成的縮時錄影（{names}{more}），可能是程式意外關閉。要現在合成影片嗎？',
+                 actions=[('合成', self.recover_recordings),
+                          ('之後再說', lambda: self.say('之後可以在「工具」頁合成或捨棄。', important=False))],
+                 seconds=20)
+        return True
+
+    def recover_recordings(self, items=None):
+        n = self.service.recover_recordings(items)
+        if n:
+            self.say(f'開始合成 {n} 段錄影，完成後會通知你。', important=False)
+        else:
+            self.say('沒有可以合成的錄影。', important=False)
+        return n
 
     def _usage_prompt(self, now: datetime | None = None) -> bool:
         """使用滿 3 天後各問一次（§16）：依實際動筆時間建議每日練習時間、要不要開機啟動。一次只問一件"""
@@ -585,7 +609,7 @@ class CompanionApp(QObject):
         self.service.set_recording(on)
         if on:
             from core.timelapse import find_ffmpeg
-            msg = '縮時錄影開始：開啟作品並動筆就會錄下來，所有檔案關閉時自動合成影片。'
+            msg = '縮時錄影開始：在 SAI2 畫哪個作品就錄哪個，每個作品各自一部；關閉 SAI2 時自動合成影片。'
             if not find_ffmpeg():
                 msg += '\n（找不到 ffmpeg，影片無法合成，請先安裝）'
             self.say(msg, important=False)

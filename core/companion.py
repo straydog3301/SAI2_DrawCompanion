@@ -103,6 +103,7 @@ class CompanionService:
         self._rec_lock = threading.Lock()
         self._rec_export: list = []
         self._rec_frames = 0
+        self._no_file_since = None          # SAI2 沒有開著任何檔案（或已關閉）的開始時間
 
     # ── 啟停 ──
     def start(self):
@@ -289,6 +290,8 @@ class CompanionService:
         cfg = self.settings.get('timelapse', {}) or {}
         r = factory(output_dir=self.settings.videos_dir, fps=int(cfg.get('fps', 30)))
         self.recorder = r
+        if hasattr(r, 'per_file'):
+            r.per_file = True                 # 跟著最上層的檔案，每個作品各自錄
         self.apply_recorder_settings()
         r.needs_thumbnail = False
 
@@ -323,22 +326,30 @@ class CompanionService:
             self._old_recorders.append(self.recorder)
             self.recorder = None
 
+    NO_FILE_EXPORT_DELAY = 5.0   # 沒有開著的檔案持續這麼久才合成（開檔時標題會短暫沒有檔名）
+
     def _sync_recorder(self, state: dict, st):
-        """與 1.x 相同：開始錄某個檔案後鎖定它，直到所有檔案關閉才停止並合成"""
+        """跟著 SAI2 最上層的檔案錄：切到別的檔案時，原本那段先保留，切回來接著錄；
+        SAI2 關閉或沒有開著任何檔案時，才把每個錄過的作品各自合成影片。
+        （1.x 會鎖定第一個開始錄的檔案，換檔畫圖時錄不到、動筆時間也會記到舊檔案，2.0 不鎖定）"""
         r, tr = self.recorder, self.tracker
         if r is None:
             return
+        tr.locked_file = None
         cur = state.get('current_file')
-        if r.enabled:
-            if tr.locked_file is None and cur is not None:
-                tr.locked_file = tr.resolve_alias(cur)
+        r.switch_file(cur if r.enabled else None)
+        no_file = (not state.get('sai2_running') or
+                   (cur is None and not state.get('raw_current_file') and not state.get('excluded_file')))
+        pending = r.pending_files() if hasattr(r, 'pending_files') else []
+        if no_file and pending:
+            now = self._clock()
+            if self._no_file_since is None:
+                self._no_file_since = now
+            elif now - self._no_file_since >= self.NO_FILE_EXPORT_DELAY:
+                self._no_file_since = None
+                r.export_all()
         else:
-            tr.locked_file = None
-        if r.enabled and r.active_file is not None:
-            if cur is None:
-                r.switch_file(None)
-        else:
-            r.switch_file(cur)
+            self._no_file_since = None
         st.recording = bool(r.enabled)
         st.rec_file = r.active_file
         st.rec_frames = r.frame_count if r.active_file else 0
@@ -352,7 +363,10 @@ class CompanionService:
             if not on:
                 if self.tracker is not None:
                     self.tracker.locked_file = None
-                self.recorder.switch_file(None)
+                if hasattr(self.recorder, 'export_all'):
+                    self.recorder.export_all()     # 關閉錄影：每個錄過的作品各自合成
+                else:
+                    self.recorder.switch_file(None)
 
     def exporting_count(self) -> int:
         n = 0
@@ -366,12 +380,40 @@ class CompanionService:
         r = self.recorder
         if r is None:
             return {'available': False, 'enabled': bool(self.settings.get('timelapse.enabled')), 'active_file': None,
-                    'frames': 0, 'video_seconds': 0.0, 'exporting': self.exporting_count()}
+                    'frames': 0, 'video_seconds': 0.0, 'exporting': self.exporting_count(), 'waiting': []}
         dur = float(getattr(r, 'total_recorded_duration', 0.0) or 0.0)
         mult = max(1, int(r.multiplier or 1))
+        pending = [f for f in (r.pending_files() if hasattr(r, 'pending_files') else []) if f != r.active_file]
         return {'available': True, 'enabled': bool(r.enabled), 'active_file': r.active_file,
                 'frames': r.frame_count if r.active_file else 0, 'video_seconds': dur / mult,
-                'exporting': self.exporting_count()}
+                'exporting': self.exporting_count(), 'waiting': pending}
+
+    def export_recordings(self) -> int:
+        """現在就把錄過的作品各自合成影片（不必等 SAI2 關閉）"""
+        r = self.recorder
+        return r.export_all() if r is not None and hasattr(r, 'export_all') else 0
+
+    # ── 未合成的錄影（程式當機、斷電或沒有 ffmpeg 時留下的影格） ──
+    def unexported_recordings(self, min_age: float = 120.0) -> list[dict]:
+        r = self.recorder
+        if r is None or not hasattr(r, 'find_unexported'):
+            return []
+        try:
+            return r.find_unexported(min_age=min_age)
+        except Exception:
+            return []
+
+    def recover_recordings(self, items=None) -> int:
+        """合成未合成的錄影；回傳開始合成的段數"""
+        r = self.recorder
+        if r is None or not hasattr(r, 'recover'):
+            return 0
+        items = self.unexported_recordings() if items is None else items
+        return sum(1 for it in items if r.recover(it))
+
+    def discard_recording(self, item: dict) -> bool:
+        r = self.recorder
+        return bool(r is not None and hasattr(r, 'discard') and r.discard(item))
 
     # ── 作品與統計（1.x 執行中時唯讀資料檔） ──
     def _persisted(self) -> dict:
