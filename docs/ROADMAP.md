@@ -1,6 +1,6 @@
 # 2.0 之後的優化計劃
 
-> 狀態：草案（2026-10-23）。2.0 階段 0～5 已完成，在 `feat/v2-stage3` 分支，尚未合併到 `main`、尚未發布。
+> 狀態：草案（2026-10-24）。2.0 階段 0～5 已完成並合併到 `main`；目前以 v2.0.0-beta.2 測試版公開測試，尚未正式發布。
 > 2.0 的設計與已決定事項見 [UI_2.0_PLAN.md](UI_2.0_PLAN.md)；程式結構見 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 目前進度
@@ -56,7 +56,8 @@
 ### 1.4 發布流程
 - ~~版本號 `2.0.0` 集中定義~~（`core/version.py`）
 - ~~`CHANGELOG.md`~~、~~README 的 2.0 說明~~（已完成）
-- 實機測試通過後：`feat/v2-stage3` 開 PR 合併到 `main`，GitHub Release 附上 `DrawCompanion2.exe`
+- ~~`feat/v2-stage3` 合併到 `main`~~（2026-10-24）
+- 實機測試通過後：GitHub Release 發布正式版並附上 `DrawCompanion2.exe`
 
 ---
 
