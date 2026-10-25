@@ -60,7 +60,8 @@ DEFAULTS: dict = {
     # 課程打卡的 AI 評鑑（core/ai_review.py）：使用者自己的金鑰；provider：gemini / openai（OpenAI 相容）
     'ai_review': {'enabled': False, 'provider': 'gemini', 'api_key': '', 'model': '', 'base_url': ''},   # canvas_dir 空白 = 文件\SAI2 練習；canvas_side：長邊 px
     'timelapse': {'enabled': False, 'multiplier': 5, 'target': 'canvas', 'quality': 'standard', 'fps': 30,
-                  'output_dir': ''},      # output_dir 空白 = APP_DIR/videos
+                  'output_dir': '',       # output_dir 空白 = APP_DIR/videos
+                  'float_hotkey': ''},    # SAI2「新增檢視」的快捷鍵（canvas_float 模式用；SAI2 預設沒有，要自己指定）
     'works': {'groups': {}, 'sort': 'recent', 'thumbnails': True},   # thumbnails：存檔、停筆時自動擷取作品縮圖
     'ref': {                              # 參考小窗：位置與寬度依模式分別記住
         'sketch': {'w': 240, 'x': None, 'y': None},

@@ -9,7 +9,7 @@ import threading
 from datetime import datetime
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QKeySequence, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
@@ -991,7 +991,7 @@ class WorksPage(QWidget):
 
 MULTIPLIERS = [(1, '1 倍（每 33 毫秒一張）'), (2, '2 倍'), (5, '5 倍（建議）'), (10, '10 倍'), (20, '20 倍'),
                (50, '50 倍'), (100, '100 倍（長時間作品）')]
-TARGETS = [('canvas', '只錄畫紙（建議）'), ('canvas_float', '畫紙（自動開隱藏浮動視窗）'), ('window', '整個 SAI2 視窗'),
+TARGETS = [('canvas', '只錄畫紙（建議）'), ('canvas_float', '畫紙（隱藏浮動檢視，不受縮放旋轉影響）'), ('window', '整個 SAI2 視窗'),
            ('screen', '整個螢幕')]
 QUALITIES = [('compact', '精簡'), ('standard', '標準'), ('high', '高畫質'), ('lossless', '無損')]
 
@@ -1024,8 +1024,14 @@ class ToolsPage(QWidget):
 
         g = SettingGroup('錄影設定')
         g.row('倍速', '影片播放速度；倍數越高，擷取間隔越長、影片越短', self._combo('timelapse.multiplier', MULTIPLIERS, int))
-        g.row('錄製範圍', '「畫紙」不含工作區與捲軸；放大畫面時錄看得到的部分',
-              self._combo('timelapse.target', TARGETS))
+        target = self._combo('timelapse.target', TARGETS)
+        g.row('錄製範圍', '「畫紙」不含工作區與捲軸；放大畫面時錄看得到的部分', target)
+        self.float_row = g.row('SAI2「新增檢視」的快捷鍵',
+                               '隱藏浮動檢視模式會替目前的畫布開一個新檢視，移到螢幕外錄影，你縮放、旋轉、捲動畫面都不影響影片。'
+                               'SAI2 預設沒有這個快捷鍵：請先在 SAI2 的快捷鍵設定替「新增檢視」指定一組，再在這裡按下相同的組合',
+                               self._float_key_editor(), stack=True)
+        target.currentIndexChanged.connect(lambda _i: self._sync_float_row())
+        self._sync_float_row()
         g.row('畫質', '無損會佔用較多硬碟空間', self._combo('timelapse.quality', QUALITIES))
         g.row('影片 FPS', '', self._combo('timelapse.fps', [(24, '24'), (30, '30'), (60, '60')], int))
         folder = QWidget()
@@ -1059,6 +1065,51 @@ class ToolsPage(QWidget):
         lay.addWidget(later)
         lay.addStretch(1)
         self.refresh()
+
+    def _float_key_editor(self) -> QWidget:
+        from PySide6.QtWidgets import QKeySequenceEdit
+        box = QWidget()
+        row = QHBoxLayout(box)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.float_key = QKeySequenceEdit(QKeySequence(self.s.get('timelapse.float_hotkey', '') or ''))
+        self.float_key.setMaximumSequenceLength(1)
+        self.float_key.setFixedWidth(200)
+        inner = self.float_key.findChild(QLineEdit)
+        if inner:
+            inner.setPlaceholderText('點這裡後按下快捷鍵')
+        self.float_key.editingFinished.connect(self._float_key_changed)
+        clear = button('清除', 'ghost')
+        clear.clicked.connect(lambda: (self.float_key.clear(), self._float_key_changed()))
+        row.addWidget(self.float_key)
+        row.addWidget(clear)
+        row.addStretch(1)
+        return box
+
+    def _float_key_changed(self):
+        from core import hotkeys
+        text = self.float_key.keySequence().toString(QKeySequence.PortableText)
+        try:
+            text = hotkeys.normalize(text) if text else ''
+        except ValueError as e:
+            self.float_row.set_note(str(e))
+            return
+        self._set('timelapse.float_hotkey', text)
+        self._sync_float_row()
+
+    def _sync_float_row(self):
+        """只在選了隱藏浮動檢視時顯示；沒設定或和 2.0 自己的快捷鍵相同時提醒"""
+        from core import hotkeys
+        show = self.s.get('timelapse.target') == 'canvas_float'
+        self.float_row.setVisible(show)
+        key = self.s.get('timelapse.float_hotkey', '') or ''
+        same = hotkeys.clash(key, self.s.get('hotkeys', {})) if key else None
+        if not key:
+            note = '還沒設定：錄影時會改用「只錄畫紙」'
+        elif same:
+            note = f'和 2.0 的「{same}」相同，按鍵會被 2.0 攔走、送不到 SAI2；請換一組，或到「設定 › 快捷鍵」改掉 2.0 的'
+        else:
+            note = ''
+        self.float_row.set_note(note)
 
     def _combo(self, key, options, cast=str):
         cb = QComboBox()

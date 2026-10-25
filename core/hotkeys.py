@@ -76,6 +76,30 @@ def normalize(text: str) -> str:
     return format_hotkey(*parse(text))
 
 
+_MOD_VK = ((MOD_CONTROL, 0x11), (MOD_ALT, 0x12), (MOD_SHIFT, 0x10), (MOD_WIN, 0x5B))
+
+
+def key_sequence(text: str) -> list[int]:
+    """模擬按鍵用：'Ctrl+Alt+N' → [Ctrl, Alt, N] 的虛擬鍵碼（依序按下、反序放開）"""
+    mods, vk = parse(text)
+    return [code for m, code in _MOD_VK if mods & m] + [vk]
+
+
+def clash(text: str, bindings: dict[str, str]) -> str | None:
+    """text 和 2.0 自己的哪個快捷鍵相同（相同時 2.0 會先攔走，送不到 SAI2）；回傳動作名稱"""
+    try:
+        norm = normalize(text)
+    except ValueError:
+        return None
+    for action, other in (bindings or {}).items():
+        try:
+            if other and normalize(other) == norm:
+                return ACTIONS.get(action, (action,))[0]
+        except ValueError:
+            continue
+    return None
+
+
 def conflicts(bindings: dict[str, str]) -> dict[str, str]:
     """回傳 {動作: 說明}：同一組合被兩個動作使用、或和 1.x 預設相同"""
     out: dict[str, str] = {}
