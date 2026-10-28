@@ -2,7 +2,7 @@
 
 **PaintTool SAI Ver.2 的桌面小夥伴**：在 SAI2 旁邊安靜地陪你畫畫，自動記錄每張作品畫了多久、每天排好練習任務，速寫和臨摹的參考圖用小窗開著，不占你的畫布。
 
-**介紹網頁：<https://straydog3301.github.io/SAI2_DrawCompanion/>**　·　**下載：[v2.0.0-beta.4](https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.4)**　·　**回饋：[填寫表單](https://docs.google.com/forms/d/e/1FAIpQLSdmVgbIjduOo64vnu7S4OUdu1t54_-3mCNL4WLYcpwTzY8taw/viewform)**
+**介紹網頁：<https://straydog3301.github.io/SAI2_DrawCompanion/>**　·　**下載：[v2.0.0-beta.5](https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v2.0.0-beta.5)**　·　**回饋：[填寫表單](https://docs.google.com/forms/d/e/1FAIpQLSdmVgbIjduOo64vnu7S4OUdu1t54_-3mCNL4WLYcpwTzY8taw/viewform)**
 
 > 目前是 2.0 測試版。1.x（Tk 版）已停止維護與測試，舊版仍可從 [v1.7.0](https://github.com/straydog3301/SAI2_DrawCompanion/releases/tag/v1.7.0) 下載。
 
