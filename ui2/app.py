@@ -264,7 +264,18 @@ class CompanionApp(QObject):
         if st.unsaved_file and st.drawing and st.unsaved_file not in self._reminded_unsaved:
             self._reminded_unsaved.add(st.unsaved_file)
             self.brain.trigger('remind')
-            self.say(f'「{st.unsaved_file}」還沒存檔，存檔後畫圖時間才會被記錄。')
+            self.say(f'「{st.unsaved_file}」還沒存檔：動筆時間和錄影照常記錄，存檔時會接到作品上。',
+                     actions=[('現在存檔', lambda: self.send_sai2_keys([0x11, 0x53]))], important=False)
+        for kind, old, new in res.saves:
+            from core.unsaved import temp_name
+            from core.file_paths import display_name
+            if kind == 'adopt':
+                self.say(f'「{temp_name(old)}」存成了「{display_name(new)}」，剛才的動筆時間和錄影都接上了。', important=False)
+            elif kind == 'ask':
+                self.say(f'剛才的「{temp_name(old)}」是存成了「{display_name(new)}」嗎？',
+                         actions=[('是', lambda o=old, n=new: (self.service.adopt_unsaved(o, n),
+                                                               self.say('好，已經接上了。', important=False))),
+                                  ('不是', lambda: None)], seconds=20)
         if res.ready:
             self.on_ready(res.ready)
             self._rule_events.add('quest_ready')
@@ -505,6 +516,17 @@ class CompanionApp(QObject):
         procs = self.backend.find_processes()
         return procs[0][1] if procs and procs[0][1] else ''
 
+    def send_sai2_keys(self, vks: list[int]) -> bool:
+        """切到 SAI2 後送出快捷鍵（新增畫布 Ctrl+N、存檔 Ctrl+S）；SAI2 沒開時回傳 False"""
+        if not self.focus_sai2():
+            return False
+
+        def press():
+            from core.timelapse import _press_keys
+            _press_keys(vks)
+        QTimer.singleShot(250, press)                       # 等 SAI2 真的到前景
+        return True
+
     def focus_sai2(self) -> bool:
         procs = self.backend.find_processes(self.opener._extra_names())
         if not procs:
@@ -680,6 +702,9 @@ class CompanionApp(QObject):
                 self.say('正在開啟 SAI2…', important=False, seconds=3)
             else:
                 self.say('還不知道 SAI2 裝在哪裡。', actions=[('指定 SAI2', lambda: self._ask_exe_then(None))])
+        elif key == 'new_canvas':
+            if not self.send_sai2_keys([0x11, 0x4E]):        # Ctrl+N：SAI2 的新增畫布（你的預設尺寸清單）
+                self.say('SAI2 還沒開啟。', actions=[('開啟 SAI2', lambda: self.run_slot('open_sai2'))])
         elif key == 'snapshot':
             self._snapshot()
         elif key == 'works':

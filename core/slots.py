@@ -25,6 +25,7 @@ BUILTIN = {
     'record': ('錄影', 'record', '縮時錄影：開始／停止'),
     'works': ('作品', 'works', '打開最近作品所在的資料夾'),
     'open_sai2': ('SAI2', 'open_sai2', '開啟或切換到 SAI2'),
+    'new_canvas': ('新畫布', 'canvas', '在 SAI2 開新畫布（SAI2 的新增畫布視窗；不用先存檔也會記錄）'),
     'main': ('主視窗', 'home', '打開主視窗（今日）'),
     'growth': ('成長', 'flame', '打開成長頁'),
 }

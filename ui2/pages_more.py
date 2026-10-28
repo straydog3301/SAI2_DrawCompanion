@@ -11,7 +11,7 @@ from datetime import datetime
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QKeySequence, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QPushButton, QScrollArea, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from core import data_text as DT
 from core import exclusions, growth, stats, study_lessons, works
@@ -777,6 +777,92 @@ class WorksPage(QWidget):
         _clear(self.detail.lay)
         self.detail.lay.addWidget(label('選一個作品看詳細資料。', 'muted'))
 
+    def _video_tools(self, key, lay):
+        """合併這個作品的錄影片段、匯出指定長度的縮時（core/video_tools.py；背景執行）"""
+        from core import video_tools as V
+        folder = works.video_dir(self.s.videos_dir, key)
+        segs = V.segments(folder)
+        if not segs:
+            return
+        if not V.available():
+            lay.addWidget(label('合併片段、匯出指定長度需要 ffmpeg（加入 PATH）。', 'caption'))
+            return
+        row = QHBoxLayout()
+        merge = button(f'合併 {len(segs)} 段影片', 'secondary')
+        merge.setEnabled(len(segs) >= 2)
+        merge.setToolTip('依時間接成一部（原始片段保留）；解析度不同時等比例縮放並補邊，不會變形')
+        length = QSpinBox()
+        length.setRange(5, 600)
+        length.setSuffix(' 秒')
+        length.setValue(int(self.s.get('works.export_seconds', 60) or 60))
+        length.setFixedWidth(100)
+        export = button('匯出縮時', 'secondary')
+        export.setToolTip('把全部片段接起來，等比例加速成指定長度（片段比較短時不放慢）')
+        row.addWidget(merge)
+        row.addSpacing(12)
+        row.addWidget(label('長度', 'caption', wrap=False))
+        row.addWidget(length)
+        row.addWidget(export)
+        row.addStretch(1)
+        lay.addLayout(row)
+        status = label('', 'caption')
+        lay.addWidget(status)
+
+        def run(job, describe):
+            merge.setEnabled(False)
+            export.setEnabled(False)
+            status.setText('處理中… 0%')
+            last = [-1]
+
+            def progress(pct):
+                if pct != last[0]:
+                    last[0] = pct
+                    self.ctl.work_done.emit(lambda p=pct: status.setText(f'處理中… {p}%'))
+
+            def work():
+                try:
+                    res, err = job(progress), None
+                except V.VideoError as e:
+                    res, err = None, str(e)
+                except Exception as e:                  # ffmpeg 不在、檔案被占用…
+                    res, err = None, f'處理失敗：{e}'
+                self.ctl.work_done.emit(lambda: done(res, err))
+
+            def done(res, err):
+                if err:
+                    if self.selected == key:
+                        status.setText(err)
+                        merge.setEnabled(len(segs) >= 2)
+                        export.setEnabled(True)
+                    self.ctl.say(err)
+                    return
+                path = res['path']
+                self.ctl.say(describe(res), actions=[('播放', lambda: os.startfile(path)),
+                                                     ('影片資料夾', lambda: os.startfile(folder))])
+                if self.selected == key:
+                    self._show(key)
+            threading.Thread(target=work, daemon=True).start()
+
+        def length_text(sec):
+            return f'{int(round(sec))} 秒' if sec < 60 else stats.fmt_duration(sec)
+
+        def resize_note(res):
+            n = len(res['resized'])
+            return f'，其中 {n} 段解析度不同，已等比例縮放並補邊' if n else ''
+
+        merge.clicked.connect(lambda: run(
+            lambda p: V.merge(folder, p),
+            lambda r: f"已把 {r['segments']} 段影片合併成一部（{length_text(r['duration'])}）{resize_note(r)}。"))
+
+        def do_export():
+            secs = length.value()
+            self.s.set('works.export_seconds', secs)
+            self.s.save()
+            run(lambda p: V.export_length(folder, secs, p),
+                lambda r: (f"已匯出 {int(round(r['duration']))} 秒的縮時影片{resize_note(r)}。" if r['speed'] < 1 else
+                           f"影片原本只有 {length_text(r['source_duration'])}，沒有超過 {secs} 秒，所以沒有加速{resize_note(r)}。"))
+        export.clicked.connect(do_export)
+
     def _show(self, key):
         r = next((x for x in self.rows if x['key'] == key), None)
         if r is None:
@@ -859,6 +945,7 @@ class WorksPage(QWidget):
             vb = button('影片資料夾', 'ghost', ic='works')
             vb.clicked.connect(lambda: os.startfile(works.video_dir(self.s.videos_dir, key)))
             lay.addWidget(vb, 0, Qt.AlignLeft)
+            self._video_tools(key, lay)
         else:
             lay.addWidget(label('還沒有影片。在「工具」開啟縮時錄影後，畫這個檔案就會錄下來。', 'caption'))
 

@@ -136,8 +136,6 @@ def general_page(ctl) -> QWidget:
           '開著 SAI2 時會自動填入', 'sai2.exe (*.exe)'), stack=True)
     g.row('停筆多久不算動筆', '超過這段時間沒有下筆，就不計入動筆時間（下次啟動生效）',
           _spin(ctl, 'idle_timeout', 3, 120, ' 秒', float))
-    g.row('記錄還沒存檔的新畫布', '預設不記錄：未存檔的畫布多半是暫時貼參考圖用（下次啟動生效）',
-          _toggle(ctl, 'track_unsaved'))
     lay.addWidget(g)
 
     g = SettingGroup('資料')

@@ -10,7 +10,7 @@ block_tk()
 CORE = ['paths', 'sai2_win', 'i18n', 'tracker', 'timelapse', 'brush_assets', 'daily_quests', 'growth',
         'snapshots', 'study_lessons', 'study_refs', 'psd_writer', 'single_instance', 'sai2_launcher',
         'hotkeys', 'settings2', 'pet_pack', 'pet_builtin', 'pet_state', 'file_paths', 'companion', 'autostart',
-        'sketch_source', 'study_tools', 'stats', 'works', 'slots', 'rules', 'backup', 'bubble_skin', 'onboarding', 'data_text', 'version', 'diagnostics', 'work_thumbs', 'exclusions', 'canvas_crop', 'ai_review']
+        'sketch_source', 'study_tools', 'stats', 'works', 'slots', 'rules', 'backup', 'bubble_skin', 'onboarding', 'data_text', 'version', 'diagnostics', 'work_thumbs', 'exclusions', 'canvas_crop', 'ai_review', 'unsaved', 'video_tools']
 for m in CORE:
     importlib.import_module('core.' + m)
 check(len(CORE) == len([f for f in os.listdir(os.path.join(REPO, 'core')) if f.endswith('.py') and f != '__init__.py']),
