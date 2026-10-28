@@ -148,6 +148,24 @@
   .smart .alt { margin-top: 18px; font-size: 14px; color: var(--muted); }
   code { background: var(--bg2); border: 1px solid var(--line); padding: 1px 6px; border-radius: 6px; font-size: .92em; }
 
+  /* 近期更新 */
+  .updates { max-width: 860px; margin: 0 auto; }
+  .update-how { text-align: center; color: var(--muted); font-size: 15px; margin: -24px 0 28px; }
+  .rel { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 26px; margin: 14px 0; }
+  .rel summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-weight: 700; padding-right: 28px; }
+  .rel summary::-webkit-details-marker { display: none; }
+  .rel summary::after { content: "＋"; position: absolute; right: 24px; top: 24px; color: var(--accent-text); }
+  .rel[open] summary::after { content: "－"; }
+  .rel .ver { font-size: 18px; }
+  .rel .date { color: var(--muted); font-weight: 400; font-size: 14px; }
+  .tag { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-text); }
+  .tag.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+  .rel .lead2 { color: var(--muted); margin: 12px 0 4px; font-size: 15px; }
+  .rel h4 { margin: 14px 0 4px; font-size: 15px; }
+  .rel ul { margin: 4px 0 0; padding-left: 1.2em; color: var(--muted); font-size: 15px; }
+  .rel li { margin: 5px 0; }
+  .rel li b { color: var(--text); font-weight: 500; }
+
   /* 回饋 */
   .feedback { background: linear-gradient(160deg, var(--accent-soft), var(--card)); border: 1px solid var(--line);
               border-radius: 24px; padding: 40px; display: grid; grid-template-columns: 1.2fr 1fr; gap: 36px; }
@@ -180,6 +198,7 @@
     <div class="links">
       <a href="#features">功能</a>
       <a href="#start">開始使用</a>
+      <a href="#updates">更新紀錄</a>
       <a href="#feedback">回饋</a>
       <a href="#faq">常見問題</a>
     </div>
@@ -399,6 +418,62 @@
       </div>
       <p class="alt">另一個方法：在 exe 上按右鍵 →「內容」→ 勾選下方的「解除封鎖」→ 確定，之後雙擊就不會再跳出提醒。公司或學校電腦若被管理員鎖定、沒有「仍要執行」按鈕，就需要請管理員協助。</p>
     </div>
+  </div>
+</section>
+
+<section id="updates">
+  <div class="wrap updates">
+    <div class="sec-title">
+      <h2>近期更新</h2>
+      <p>每一版修了什麼，方便你決定要不要更新</p>
+    </div>
+    <p class="update-how">更新方式：下載新版 <code>DrawCompanion2.exe</code> 覆蓋舊的就好，紀錄與設定都會保留。</p>
+
+    <details class="rel" open>
+      <summary><span class="ver">v2.0.0-beta.4</span><span class="tag">目前版本</span><span class="tag warn">建議更新</span><span class="date">2026-10-28</span></summary>
+      <p class="lead2">修正新版 SAI2（2026-10）的檔案路徑問題。用新版 SAI2 的人請一定要更新。</p>
+      <h4>修正</h4>
+      <ul>
+        <li><b>作品打不開、被記成新的一筆</b>：新版 SAI2 標題的路徑寫法改了（多了「本機」、桌面上的檔案只顯示檔名），造成快捷面板與作品頁開不了作品，同一個作品也被記成好幾筆。現在不論從哪裡開啟都記在同一筆，第一次啟動會自動把多出來的紀錄併回原本那一筆（時間相加）</li>
+      </ul>
+      <h4>改善</h4>
+      <ul>
+        <li><b>縮時錄影「隱藏浮動檢視」</b>：新版 SAI2 的「新增檢視」預設沒有快捷鍵。先在 SAI2 替它指定一組（例如 Ctrl+Shift+N），再到「工具」頁填入相同的組合就能用；沒設定時改用「只錄畫紙」</li>
+        <li>錄影遇到問題時，寵物會說明原因</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.0.0-beta.3</span><span class="date">2026-10-24</span></summary>
+      <h4>新功能</h4>
+      <ul>
+        <li><b>AI 評鑑（可關閉，預設關閉）</b>：課程打卡時用你自己的 AI 金鑰評分並附簡評，決定是否進入下一課；不同意可以改分數</li>
+        <li><b>作品頁</b>：清單與詳細資料各自捲動、一次刪除多筆紀錄、設定「不記錄的資料夾」（例如「下載」）</li>
+      </ul>
+      <h4>改善與修正</h4>
+      <ul>
+        <li><b>只留下畫紙</b>：作品縮圖、研究比對、打卡快照與縮時錄影都不再包含 SAI2 的外框、捲軸與工作區</li>
+        <li><b>錄影跟著目前畫的作品</b>：換檔畫圖時不再只錄第一個檔案，動筆時間也記到正確的作品；每個作品各自一部影片</li>
+        <li><b>影片不再變形</b>：錄影途中調整面板或視窗大小時，等比例縮放補邊</li>
+        <li><b>錄影不再遺失</b>：程式當機或斷電留下的錄影，下次啟動時可以合成</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.0.0-beta.2</span><span class="date">2026-10-24</span></summary>
+      <ul>
+        <li><b>速寫換圖卡住</b>：線上圖庫有一張圖下載卡住時，之後都不會換圖；現在會先在背景抓好下一張，卡住會自動解鎖</li>
+        <li>速寫改為「下筆時才倒數」，開始一輪時自動建立 A4 橫向畫布並在 SAI2 開啟</li>
+        <li>快捷面板的「最近開啟」改為作品縮圖；存檔、停筆時自動擷取作品縮圖</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.0.0-beta.1</span><span class="date">2026-10-23</span></summary>
+      <ul>
+        <li>第一個 2.0 測試版：桌面寵物與快捷面板、參考小窗、每日任務與課程、成長、作品、縮時錄影、客製化</li>
+      </ul>
+    </details>
   </div>
 </section>
 
