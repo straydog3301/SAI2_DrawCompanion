@@ -271,6 +271,9 @@ class CompanionApp(QObject):
         self._run_rules(st)
         for pct, msg in res.export:
             self._on_export(pct, msg)
+        for msg in res.messages:                    # 錄影器的問題（例如無法建立浮動檢視）；正常的狀態不打擾
+            if msg.startswith(('⚠', '❌')):
+                self.say(msg.lstrip('⚠️❌ ').strip(), actions=[('錄影設定', lambda: self.open_main('工具'))])
         if res.thumbs and self._main is not None and self._main.current == '作品':
             page = self._main.page_widget('作品', 'WorksPage')
             if page is not None:
@@ -776,6 +779,7 @@ class CompanionApp(QObject):
                 self._hk_ids[i] = action
             else:
                 failed[action] = '已被其他程式佔用'
+        self.service.apply_recorder_settings()      # SAI2「新增檢視」的快捷鍵不能和 2.0 的相同
         return failed
 
     def _on_hotkey(self, hid: int):

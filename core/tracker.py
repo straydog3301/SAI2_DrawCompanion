@@ -99,7 +99,9 @@ def extract_filename(title: str) -> str | None:
     fname = fname.lstrip('/\\')
     fname = fname.replace('/', '_').replace('\\', '_')
 
-    return fname
+    # 新版 SAI2 的路徑寫法（「本機 _ …」、桌面上的檔案只有檔名…）換成舊版的寫法，同一個檔案只有一筆紀錄
+    from core.file_paths import canonical_key
+    return canonical_key(fname, bare_is_desktop=is_app_first)
 
 
 def is_saved_filename(name: str | None) -> bool:
@@ -436,8 +438,9 @@ class DrawTracker:
                     except Exception:
                         pass
 
-                # 1. 優先透過 aliases 將別名解析為對應的主圖檔
+                # 1. 優先透過 aliases 將別名解析為對應的主圖檔；只差大小寫的沿用既有紀錄
                 if filename and 'aliases' in self._persist:
+                    filename = self._existing_key(filename)
                     if filename in self._persist['aliases']:
                         filename = self._persist['aliases'][filename]
                 
@@ -791,6 +794,18 @@ class DrawTracker:
             self.locked_file             = None
         self._refresh_snapshot()
         self.save()
+
+    def _existing_key(self, name: str) -> str:
+        """沒有這筆紀錄、但有只差大小寫的（舊版 SAI2 顯示「Auer0807」、新版「auer0807」）就用既有的那筆"""
+        files = self._persist.get('files', {})
+        aliases = self._persist.get('aliases', {})
+        if name in files or name in aliases:
+            return name
+        n = len(files) + len(aliases)
+        if getattr(self, '_fold_size', None) != n:
+            self._fold = {k.casefold(): k for k in list(aliases) + list(files)}
+            self._fold_size = n
+        return self._fold.get(name.casefold(), name)
 
     def resolve_alias(self, name: str | None) -> str | None:
         """將別名解析為主圖檔名稱 (執行緒安全，支援多層鏈防護)。"""

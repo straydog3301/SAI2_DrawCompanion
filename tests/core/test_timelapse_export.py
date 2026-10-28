@@ -124,6 +124,36 @@ pf.enabled = False
 pf.switch_file('桌面 _ 作品A.sai2')
 check(pf.active_file is None, 'nothing recorded while recording is off')
 
+# ─── 隱藏浮動檢視：SAI2「新增檢視」的快捷鍵要使用者設定；沒設定時不送按鍵 ──
+from core import companion, hotkeys, settings2  # noqa: E402
+check(hotkeys.key_sequence('Ctrl+Shift+F8') == [0x11, 0x10, 0x77], 'key sequence: modifiers then key')
+check(hotkeys.clash('ctrl+alt+n', {'sketch_next': 'Ctrl+Alt+N'}) == '速寫：下一張', "same as 2.0's own hotkey")
+check(hotkeys.clash('Ctrl+Shift+N', {'sketch_next': 'Ctrl+Alt+N'}) is None, 'no clash')
+fr = TL.TimelapseRecorder(output_dir=tmpdir(), fps=30)
+fr.float_keys = None
+pressed, msgs = [], []
+orig_press = TL._press_keys
+TL._press_keys = lambda vks: pressed.append(vks)
+fr.on_status_msg = msgs.append
+fr.sai_pid = os.getpid()
+check(fr._ensure_float_window(12345, 'A _ a.sai2') is None and not pressed, 'no shortcut set → no keys sent to SAI2')
+check(fr._float_given_up and msgs and '新增檢視' in msgs[0], 'falls back to paper-only and says why')
+TL._press_keys = orig_press
+s2 = settings2.Settings2(tmpdir())
+svc = companion.CompanionService(s2, legacy_check=lambda: False, recorder_factory=TL.TimelapseRecorder)
+svc.recorder = TL.TimelapseRecorder(output_dir=s2.videos_dir, fps=30)
+svc.apply_recorder_settings()
+check(svc.recorder.float_keys is None, 'default: not set (new SAI2 has no default shortcut)')
+s2.set('timelapse.float_hotkey', 'Ctrl+Shift+N')
+svc.apply_recorder_settings()
+check(svc.recorder.float_keys == [0x11, 0x10, 0x4E], 'uses the shortcut the user set')
+s2.set('timelapse.float_hotkey', 'Ctrl+Alt+N')
+svc.apply_recorder_settings()
+check(svc.recorder.float_keys is None, "same as 2.0's sketch hotkey → not used (2.0 would intercept it)")
+svc._on_rec_status('⚠️ 問題')
+svc._on_rec_status('⚠️ 問題')
+check(svc._rec_msgs == ['⚠️ 問題'], 'recorder messages queued once')
+
 # ─── 實際合成（需要 ffmpeg） ──
 if TL.find_ffmpeg():
     def probe(path):

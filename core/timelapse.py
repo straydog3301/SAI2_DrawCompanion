@@ -650,7 +650,9 @@ class TimelapseRecorder:
         # 由主程式設定 (含別名解析)，用於驗證錄製目標視窗是否屬於目前圖檔。
         self.file_matcher = None
 
-        # canvas_float 模式狀態：自動建立的隱藏浮動視窗
+        # canvas_float 模式狀態：自動建立的隱藏浮動視窗。float_keys：SAI2「新增檢視」的快捷鍵（虛擬鍵碼），
+        # 新版 SAI2 預設沒有這個快捷鍵，要使用者在 SAI2 指定後告訴我們；None = 沒設定，不送按鍵、改用一般畫布模式
+        self.float_keys: list[int] | None = [0x11, 0x12, 0x4E]
         self._float_hwnd = None
         self._float_last_attempt = 0.0
         self._float_fail_count = 0
@@ -951,6 +953,13 @@ class TimelapseRecorder:
 
         if not main_hwnd or self._float_given_up:
             return None
+        if not self.float_keys:
+            self._float_given_up = True
+            if self.on_status_msg:
+                self.on_status_msg(_tr(
+                    "timelapse.status.float_no_key",
+                    "⚠️ 還沒設定 SAI2「新增檢視」的快捷鍵，這次改用只錄畫紙"))
+            return None
         # 建立需要模擬按鍵：使用者按著筆/滑鼠時避開，且限制重試頻率
         now = time.time()
         if now - self._float_last_attempt < 10.0 or _mouse_pressed():
@@ -970,7 +979,7 @@ class TimelapseRecorder:
                 except Exception:
                     return None
 
-            _press_keys([0x11, 0x12, 0x4E])  # Ctrl + Alt + N (開新浮動檢視)
+            _press_keys(list(self.float_keys))  # SAI2「新增檢視」的快捷鍵（開新浮動檢視）
 
             # 等待新視窗出現 (最多 2.5 秒)，出現後再等一小段讓視窗完成初始化
             new_wins: dict[int, tuple[str, str, int]] = {}
@@ -998,8 +1007,8 @@ class TimelapseRecorder:
                     self._float_given_up = True
                     if self.on_status_msg:
                         self.on_status_msg(_tr(
-                            "timelapse.status.float_failed",
-                            "⚠️ 無法建立浮動檢視（請確認 SAI2 的 Ctrl+Alt+N 為「新增檢視視窗」），已改用一般畫布模式錄製"))
+                            "timelapse.status.float_failed_key",
+                            "⚠️ 無法建立浮動檢視：請確認 SAI2「新增檢視」的快捷鍵和設定的相同。這次改用只錄畫紙"))
                 return None
 
             # 從新視窗中挑選目標：sflRootWindow > 標題含目前圖檔名 > 面積最大

@@ -68,6 +68,7 @@ class Status:
 @dataclass
 class TickResult:
     status: Status
+    messages: list = field(default_factory=list)    # 錄影器的狀態訊息（例如無法建立浮動檢視）
     ready: list = field(default_factory=list)       # 剛達標的任務
     events: list = field(default_factory=list)      # legacy_paused / legacy_resumed / new_day / exe_found
     export: list = field(default_factory=list)      # 影片合成進度 [(百分比, 訊息)]
@@ -102,6 +103,7 @@ class CompanionService:
         self._old_recorders: list = []      # 停止後仍在合成影片的錄影器
         self._rec_lock = threading.Lock()
         self._rec_export: list = []
+        self._rec_msgs: list = []
         self._rec_frames = 0
         self._no_file_since = None          # SAI2 沒有開著任何檔案（或已關閉）的開始時間
 
@@ -130,9 +132,36 @@ class CompanionService:
             idle_timeout=float(self.settings.get('idle_timeout', 10.0)),
             track_unsaved=bool(self.settings.get('track_unsaved', False)))
         self.tracker.is_excluded = self.is_excluded       # 每次都讀設定：改了排除清單馬上生效
+        self._migrate_keys()
         self.tracker.start()
         self._counter = None
         self._start_recorder()
+
+    def _migrate_keys(self):
+        """新版 SAI2 的路徑寫法（「本機 _ …」、桌面上的檔案只有檔名…）留下的紀錄，併入舊寫法的那一筆
+        （時間相加、之後同一個檔案都記在一起；縮圖一起搬）。已經是標準寫法的不會動，所以每次啟動都可以執行"""
+        from collections import Counter
+        from core import file_paths, work_thumbs
+        tr = self.tracker
+        files = (getattr(tr, '_persist', None) or {}).get('files')
+        if not files or not hasattr(tr, 'add_alias'):
+            return
+        names = file_paths.shell_names()
+        sep = file_paths.SEP
+        user = names['user'].casefold()
+        labels = Counter(k.split(sep)[0] for k in files if sep in k and k.split(sep)[0].casefold() == user)
+        if labels:
+            file_paths.set_user_label(labels.most_common(1)[0][0])
+        fold = {k.casefold(): k for k in files}
+        for key in list(files):
+            bare = sep not in key
+            canon = file_paths.canonical_key(
+                key, bare_is_desktop=bare and os.path.isfile(os.path.join(names['desktop_dir'], key)))
+            canon = fold.get(canon.casefold(), canon)
+            if canon != key:
+                tr.add_alias(key, canon)
+                work_thumbs.move(self.settings.app_dir, key, canon)
+                fold[canon.casefold()] = canon
 
     def _stop_tracking(self):
         self._stop_recorder()
@@ -190,6 +219,7 @@ class CompanionService:
         self._sync_recorder(state, st)
         with self._rec_lock:
             res.export, self._rec_export = self._rec_export, []
+            res.messages, self._rec_msgs = self._rec_msgs, []
             res.thumbs, self._thumb_done = self._thumb_done, []
         dt = 1.0 if self._last_tick is None else max(0.0, min(5.0, t - self._last_tick))
         self._last_tick = t
@@ -301,7 +331,13 @@ class CompanionService:
         r.file_matcher = matcher
         r.on_frame_captured = lambda n, _thumb, _msg: setattr(self, '_rec_frames', n)
         r.on_export_progress = self._on_export
+        r.on_status_msg = self._on_rec_status
         r.start()
+
+    def _on_rec_status(self, msg):
+        with self._rec_lock:
+            if msg not in self._rec_msgs:
+                self._rec_msgs.append(str(msg))
 
     def _on_export(self, pct, msg):
         with self._rec_lock:
@@ -318,6 +354,17 @@ class CompanionService:
         r.target_mode = cfg.get('target', 'canvas')
         r.quality_preset = cfg.get('quality', 'standard')
         r.idle_timeout = float(self.settings.get('idle_timeout', 10.0))
+        if hasattr(r, 'float_keys'):
+            from core import hotkeys
+            try:
+                key = cfg.get('float_hotkey') or ''
+                # 和 2.0 自己的快捷鍵相同時送不到 SAI2（會被 2.0 攔走），當作沒設定
+                r.float_keys = (hotkeys.key_sequence(key)
+                                if key and not hotkeys.clash(key, self.settings.get('hotkeys', {})) else None)
+            except ValueError:
+                r.float_keys = None
+            r._float_given_up = False
+            r._float_fail_count = 0
         r.enabled = bool(cfg.get('enabled', False))
 
     def _stop_recorder(self):
