@@ -133,6 +133,43 @@ def _new_record() -> dict:
     }
 
 
+def _sai2_dialog_owner(fg_hwnd) -> int | None:
+    """前景是 SAI2 的對話視窗（存檔、開檔、新增畫布…，會停用主視窗）時回傳主視窗"""
+    try:
+        owner = win32gui.GetWindow(fg_hwnd, 4)          # GW_OWNER
+        if owner and not win32gui.IsWindowEnabled(owner) and 'painttool sai' in win32gui.GetWindowText(owner).lower():
+            return owner
+    except Exception:
+        pass
+    return None
+
+
+def _sai2_doc_windows(main_hwnd) -> int | None:
+    """SAI2 主視窗裡的文件視窗數量（每開一張畫布多一個；存檔不會變）"""
+    if not main_hwnd:
+        return None
+    try:
+        if not win32gui.IsWindow(main_hwnd):
+            return None
+        sizes = []
+
+        def _cb(h, _):
+            try:
+                if win32gui.GetClassName(h) == 'sflChildWindow':
+                    l, t, r, b = win32gui.GetWindowRect(h)
+                    sizes.append(max(0, r - l) * max(0, b - t))
+            except Exception:
+                pass
+            return True
+        win32gui.EnumChildWindows(main_hwnd, _cb, None)
+        if not sizes:
+            return None
+        big = max(sizes)
+        return sum(1 for a in sizes if a >= big * 0.25)
+    except Exception:
+        return None
+
+
 def _scan_sai2() -> tuple[str | None, bool, str, bool]:
     """
     掃描所有可見視窗，判定 PaintTool SAI 是否正在執行，以及是否在前景。
@@ -260,6 +297,12 @@ class DrawTracker:
 
         # 視窗掃描快取
         self._last_win_scan = 0.0
+        # 未存檔的畫布：暫時名稱用「這次 SAI2 開始執行的時間」區分；存檔時併到正式作品（core/unsaved.py）
+        from core.unsaved import SaveWatcher
+        self._save_watch = SaveWatcher()
+        self._sai_session = None
+        self._sai_main = None
+        self._save_events: list = []
         self._cached_fg_hwnd = None
         self._cached_filename = None
         self._cached_is_foreground = False
@@ -425,9 +468,19 @@ class DrawTracker:
                 # ── 解析別名與鎖定處理 ──
                 raw_detected_file = filename
 
-                # 0. 未存檔的新畫布 (無副檔名) 依設定決定是否追蹤
-                if filename and not self.track_unsaved and not is_saved_filename(filename):
-                    filename = None
+                # 0. 未存檔的新畫布 (無副檔名)：track_unsaved 時記在暫時名稱底下（存檔時併到正式作品），否則不追蹤
+                if sai_running and self._sai_session is None:
+                    from core.unsaved import session_tag
+                    self._sai_session = session_tag()
+                    self._save_watch.reset()
+                elif not sai_running:
+                    self._sai_session = None
+                if filename and not is_saved_filename(filename):
+                    if self.track_unsaved:
+                        from core.unsaved import temp_key
+                        filename = temp_key(filename, self._sai_session or 'x')
+                    else:
+                        filename = None
 
                 # 0b. 排除的資料夾：當作沒有開檔（不計時、不錄影、不提醒存檔）
                 excluded_file = None
@@ -444,6 +497,10 @@ class DrawTracker:
                     if filename in self._persist['aliases']:
                         filename = self._persist['aliases'][filename]
                 
+                # 1b. 存檔的那一刻：未存檔的畫布存成了檔案 → 時間併到正式作品（錄影、縮圖由 companion 處理）
+                if self.track_unsaved and sai_running:
+                    self._watch_save(filename, fg_hwnd)
+
                 # 2. 如果設定了鎖定，強制將 filename 覆寫為鎖定圖檔
                 if self.locked_file is not None:
                     if sai_running:
@@ -546,7 +603,18 @@ class DrawTracker:
             total_old_open = self._base_open + session_open
             total_old_draw = self._base_draw + session_draw
 
-            is_rename = (not is_saved_filename(old) and is_saved_filename(new_file))
+            # 還沒寫入每日統計的動筆時間（上次自動存檔之後畫的）先寫進去，換檔後才不會從今日總計漏掉
+            delta_draw = session_draw - self._session_draw_flushed
+            if delta_draw > 0.0:
+                today = datetime.now().strftime('%Y-%m-%d')
+                daily = self._persist.setdefault('daily_history', {})
+                daily[today] = daily.get(today, 0.0) + delta_draw
+                self._session_draw_flushed = session_draw
+
+            # 舊做法（1.x）：未存檔 → 已存檔就當作存檔改名、時間併過去。暫時名稱（2.0）改由存檔偵測處理
+            # （core/unsaved.py；單純切分頁時兩邊的時間各自分開）
+            from core.unsaved import is_temp
+            is_rename = (not is_saved_filename(old) and is_saved_filename(new_file) and not is_temp(old))
 
             if is_rename:
                 # 重新命名：把舊的未存檔紀錄從 persist 中移除，準備合併至新檔
@@ -597,7 +665,8 @@ class DrawTracker:
         # 2. 切換至新檔案
         self._cur_file = new_file
 
-        is_rename = (old and not is_saved_filename(old) and is_saved_filename(new_file))
+        from core.unsaved import is_temp
+        is_rename = (old and not is_saved_filename(old) and is_saved_filename(new_file) and not is_temp(old))
 
         if not is_rename:
             # 如果不是重新命名，這是一個全新的檔案工作階段
@@ -795,6 +864,36 @@ class DrawTracker:
         self._refresh_snapshot()
         self.save()
 
+    def _watch_save(self, filename, fg_hwnd):
+        owner = _sai2_dialog_owner(fg_hwnd) if fg_hwnd else None
+        if owner:
+            self._sai_main = owner
+        event = self._save_watch.observe(filename, bool(owner), lambda: _sai2_doc_windows(self._sai_main))
+        if not event:
+            return
+        kind, old, new = event
+        if kind == 'adopt':
+            self.add_alias(old, new)
+        with self._lock:
+            self._save_events.append(event)
+
+    def key_for_name(self, name: str | None) -> str | None:
+        """標題解析出的名稱 → 目前用的紀錄名稱（未存檔的畫布是暫時名稱；別名解析到主圖檔）"""
+        if not name:
+            return None
+        if not is_saved_filename(name):
+            if not self.track_unsaved:
+                return None
+            from core.unsaved import temp_key
+            return temp_key(name, self._sai_session or 'x')
+        return self.resolve_alias(self._existing_key(name))
+
+    def pop_save_events(self) -> list:
+        """[('adopt'|'ask'|'saveas', 舊名稱, 新名稱)]：給 companion 處理錄影、縮圖與詢問"""
+        with self._lock:
+            out, self._save_events = self._save_events, []
+        return out
+
     def _existing_key(self, name: str) -> str:
         """沒有這筆紀錄、但有只差大小寫的（舊版 SAI2 顯示「Auer0807」、新版「auer0807」）就用既有的那筆"""
         files = self._persist.get('files', {})
@@ -853,6 +952,9 @@ class DrawTracker:
             if 'aliases' not in self._persist:
                 self._persist['aliases'] = {}
             aliases = self._persist['aliases']
+            # 正在追蹤的就是別名：先把這次還沒寫入的時間寫進紀錄，合併時才不會漏掉
+            if self._cur_file == alias_name:
+                self._flush_session()
 
             # 攤平目標：若 target 本身是別名，改指向其最終主圖檔
             target_name = self._resolve_alias_locked(target_name)
@@ -890,8 +992,9 @@ class DrawTracker:
             if self._cur_file == alias_name:
                 self._cur_file = target_name
                 if target_name in self._persist['files']:
-                    self._base_open = self._persist['files'][target_name]['open_seconds'] - self._session_open_accum
-                    self._base_draw = self._persist['files'][target_name]['draw_seconds'] - self._session_draw_accum
+                    now = time.monotonic()      # 紀錄已含這次的時間，基準要扣掉整段（含進行中的那一段）
+                    self._base_open = self._persist['files'][target_name]['open_seconds'] - self._current_session_open(now)
+                    self._base_draw = self._persist['files'][target_name]['draw_seconds'] - self._current_session_draw(now)
                 else:
                     self._base_open = 0.0
                     self._base_draw = 0.0

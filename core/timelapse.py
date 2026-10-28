@@ -26,6 +26,9 @@ def file_key_to_subdir(key: str) -> str:
     格式：「本機磁碟 (D:) _ 2026 _ test_2.sai2」
     結果：　2026_test_2（去除磁碟標籤段、副檔名，段間以 _ 連接）
     """
+    from core.unsaved import VIDEO_FOLDER, is_temp
+    if is_temp(key):
+        return VIDEO_FOLDER                  # 最後都沒存檔的畫布
     if ' _ ' in key:
         parts = key.split(' _ ')
         import re
@@ -832,6 +835,21 @@ class TimelapseRecorder:
             else:
                 self._begin_session(new_file)
 
+    def rename_file(self, old: str, new: str):
+        """存檔或另存新檔後，這段錄影改記到新的檔名（之後接著錄同一段、合成到新檔名的資料夾）"""
+        with self._lock:
+            if old == new:
+                return
+            if self.active_file == old:
+                self.active_file = new
+                self._current_subdir = file_key_to_subdir(new)
+                self._write_meta()
+            elif old in self._sessions and new not in self._sessions and new != self.active_file:
+                info = self._sessions.pop(old)
+                info.update({'file': new, 'subdir': file_key_to_subdir(new)})
+                self._sessions[new] = info
+                self._write_meta(info, info.get('temp_dir'))
+
     def pending_files(self) -> list[str]:
         """錄過、還沒合成的作品（正在錄的在最前面）"""
         with self._lock:
@@ -1549,6 +1567,11 @@ class TimelapseRecorder:
         os.makedirs(video_dir, exist_ok=True)
         output_filename = f"{timestamp}.mp4"
         output_path = os.path.join(video_dir, output_filename)
+        n = 2
+        while os.path.exists(output_path):          # 同一秒合成好幾部（例如好幾張沒存檔的畫布）時不覆蓋
+            output_filename = f"{timestamp}_{n}.mp4"
+            output_path = os.path.join(video_dir, output_filename)
+            n += 1
 
         with self._lock:
             total_dur = float(job['duration']) if 'duration' in job else self.total_recorded_duration

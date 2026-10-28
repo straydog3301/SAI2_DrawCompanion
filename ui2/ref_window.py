@@ -1073,8 +1073,6 @@ class StudyMode:
         self.last_phase = idx
         st = self.ctl.last_status
         studying = self.q.active_study == self.uid
-        if st is not None and st.unsaved_file and studying:
-            return '畫布尚未存檔，動筆不會計時（按「畫布」建立練習畫布）', '', QuestManager.progress_ratio(t), True
         if t['status'] == 'ready':
             return f'{phase}（已達標，可以打卡）', f"{int(t['progress'] // 60)}/{t['target'] // 60} 分", 1.0, False
         if not studying:
@@ -1475,8 +1473,7 @@ class SketchMode:
             left += '（暫停）'
         elif self.count_mode == 'draw' and not self.drawing and s.current is not None \
                 and self.ctl.service.draw_counter() is not None:
-            st = self.ctl.last_status
-            left += '　在已存檔的畫布上下筆才倒數' if st is not None and st.unsaved_file else '　下筆開始倒數'
+            left += '　下筆開始倒數'
         if self.loading and self.win.base is not None:
             left = '載入下一張…'
         elif self.load_error and self.win.base is not None:

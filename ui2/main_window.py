@@ -222,6 +222,10 @@ class MainWindow(QWidget):
         self._update_status_chip()
         if not self.isVisible():
             self.show()
+        if self.isMinimized():
+            # 最小化時從寵物面板點「控制中心」：還原成原本的視窗（最大化前就最大化）並回到最上層
+            self.setWindowState((self.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive)
+            self.showMaximized() if self.windowState() & Qt.WindowMaximized else self.showNormal()
         self.raise_()
         self.activateWindow()
         self._timer.start()
@@ -425,7 +429,7 @@ class MainWindow(QWidget):
         if name:
             box.addWidget(label(name, 'h2'))
         if st.unsaved_file:
-            box.addWidget(label('這張畫布還沒存檔，存檔後才會記錄時間', 'warn'))
+            box.addWidget(label('這張畫布還沒存檔：照常記錄，存檔時會接到作品上', 'caption'))
         box.addWidget(label(f'本次動筆 {_fmt_min(st.session_draw)}　今天 {_fmt_min(st.today_draw)}', 'caption'))
 
     def on_tracking_changed(self):

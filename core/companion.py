@@ -68,6 +68,7 @@ class Status:
 @dataclass
 class TickResult:
     status: Status
+    saves: list = field(default_factory=list)       # 存檔事件 [('adopt'|'ask'|'saveas', 舊名稱, 新名稱)]
     messages: list = field(default_factory=list)    # 錄影器的狀態訊息（例如無法建立浮動檢視）
     ready: list = field(default_factory=list)       # 剛達標的任務
     events: list = field(default_factory=list)      # legacy_paused / legacy_resumed / new_day / exe_found
@@ -130,12 +131,33 @@ class CompanionService:
         self.tracker = self._tracker_factory(
             data_path=self.settings.data_path,
             idle_timeout=float(self.settings.get('idle_timeout', 10.0)),
-            track_unsaved=bool(self.settings.get('track_unsaved', False)))
+            track_unsaved=True)      # 未存檔的畫布照常記錄（暫時名稱），存檔時併到正式作品（core/unsaved.py）
         self.tracker.is_excluded = self.is_excluded       # 每次都讀設定：改了排除清單馬上生效
         self._migrate_keys()
         self.tracker.start()
         self._counter = None
         self._start_recorder()
+
+    def _handle_saves(self) -> list:
+        """未存檔的畫布存成檔案：錄影與縮圖跟著改到正式作品（時間已由追蹤器合併）；另存新檔時錄影接著錄"""
+        pop = getattr(self.tracker, 'pop_save_events', None)
+        events = pop() if pop else []
+        for kind, old, new in events:
+            if kind in ('adopt', 'saveas') and self.recorder is not None and hasattr(self.recorder, 'rename_file'):
+                self.recorder.rename_file(old, new)
+            if kind == 'adopt':
+                from core import work_thumbs
+                work_thumbs.move(self.settings.app_dir, old, new)
+        return events
+
+    def adopt_unsaved(self, old: str, new: str):
+        """使用者確認「剛才的未存檔畫布就是這個檔案」"""
+        if self.tracker is not None:
+            self.tracker.add_alias(old, new)
+        if self.recorder is not None and hasattr(self.recorder, 'rename_file'):
+            self.recorder.rename_file(old, new)
+        from core import work_thumbs
+        work_thumbs.move(self.settings.app_dir, old, new)
 
     def _migrate_keys(self):
         """新版 SAI2 的路徑寫法（「本機 _ …」、桌面上的檔案只有檔名…）留下的紀錄，併入舊寫法的那一筆
@@ -203,7 +225,11 @@ class CompanionService:
         st.sai2_running = bool(state.get('sai2_running'))
         st.current_file = state.get('current_file')
         raw = state.get('raw_current_file')
-        st.unsaved_file = raw if raw and not st.current_file and st.sai2_running else None
+        from core import unsaved
+        if unsaved.is_temp(st.current_file):
+            st.unsaved_file = unsaved.temp_name(st.current_file)    # 照常記錄，只是還沒存檔
+        else:
+            st.unsaved_file = raw if raw and not st.current_file and st.sai2_running else None
         st.excluded_file = state.get('excluded_file')
         st.session_draw = float(state.get('session_draw') or 0.0)
         st.drawing = delta > 0
@@ -216,6 +242,7 @@ class CompanionService:
             res.events.append('new_day')
         self.quests.save(force=bool(res.ready))
 
+        res.saves = self._handle_saves()
         self._sync_recorder(state, st)
         with self._rec_lock:
             res.export, self._rec_export = self._rec_export, []
@@ -327,7 +354,10 @@ class CompanionService:
 
         def matcher(title):
             name = extract_filename(title or '')
-            return self.tracker.resolve_alias(name) if name and self.tracker is not None else None
+            if not name or self.tracker is None:
+                return None
+            key_for = getattr(self.tracker, 'key_for_name', None)
+            return key_for(name) if key_for else self.tracker.resolve_alias(name)
         r.file_matcher = matcher
         r.on_frame_captured = lambda n, _thumb, _msg: setattr(self, '_rec_frames', n)
         r.on_export_progress = self._on_export
@@ -472,9 +502,13 @@ class CompanionService:
             return {}
 
     def all_files(self) -> dict:
+        """作品紀錄（不含未存檔畫布的暫時紀錄）"""
+        from core.unsaved import is_temp
         if self.tracker is not None:
-            return self.tracker.get_state().get('files', {})
-        return self._persisted().get('files', {})
+            files = self.tracker.get_state().get('files', {})
+        else:
+            files = self._persisted().get('files', {})
+        return {k: v for k, v in files.items() if not is_temp(k)}
 
     def daily_history(self) -> dict:
         if self.tracker is not None:
@@ -501,9 +535,10 @@ class CompanionService:
                     files = json.load(f).get('files', {})
             except (OSError, ValueError):
                 files = {}
+        from core.unsaved import is_temp
         rows = [{'key': k, 'name': display_name(k), 'last_seen': v.get('last_seen', ''),
                  'draw_seconds': float(v.get('draw_seconds', 0.0))}
-                for k, v in files.items() if v.get('last_seen')]
+                for k, v in files.items() if v.get('last_seen') and not is_temp(k)]
         rows.sort(key=lambda r: r['last_seen'], reverse=True)
         return rows[:n]
 
