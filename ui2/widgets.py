@@ -8,8 +8,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Property, QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import Property, QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QAbstractButton, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout,
                                QWidget)
 
@@ -366,3 +366,18 @@ class Stepper(QWidget):
         lay.addWidget(spin, 1)
         lay.addWidget(plus)
         self.setFixedWidth(theme.size(width))
+
+
+def set_clipboard(text: str | None = None, image=None, tries: int = 20) -> bool:
+    """寫入剪貼簿並讀回確認。Windows 剪貼簿剛被別的程式（例如剪貼簿歷程）佔用時會寫不進去，
+    就每 50ms 再試一次（最多約 1 秒），不卡住畫面。回傳這一次是否已寫入"""
+    cb = QGuiApplication.clipboard()
+    if image is not None:
+        cb.setImage(image)
+        ok = not cb.image().isNull()
+    else:
+        cb.setText(text)
+        ok = cb.text() == text
+    if not ok and tries > 1:
+        QTimer.singleShot(50, lambda: set_clipboard(text, image, tries - 1))
+    return ok

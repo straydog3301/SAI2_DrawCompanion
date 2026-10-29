@@ -27,6 +27,7 @@ from core.daily_quests import PASS_RATING, QuestManager
 from ui2 import theme, winutil
 from ui2.icons import icon
 from ui2.pet_window import to_pixmap
+from ui2.widgets import set_clipboard
 
 INFO_H = 30
 OPACITY_STEPS = (1.0, 0.85, 0.7, 0.55)
@@ -1682,7 +1683,7 @@ class ReferenceMode:
 
     def _picked(self, color):
         code = color.name().upper()
-        QGuiApplication.clipboard().setText(code)
+        set_clipboard(text=code)
         self.copied, self._copied_at = code, time.monotonic()
         self.win.flash_info()
         self.win._tick()
