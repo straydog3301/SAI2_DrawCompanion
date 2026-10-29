@@ -44,6 +44,27 @@ LIGHT = dict(
 IS_LIGHT = False
 ACCENT_KEY = 'purple'
 MOTION = True                 # False = 減少動態效果（開關不做滑動動畫）
+SCALE = 1.0                   # 文字大小（設定 › 外觀）：字級與放文字的元件尺寸一起縮放
+SCALES = [(0.75, '75%'), (0.9, '90%'), (1.0, '100%'), (1.1, '110%'), (1.25, '125%'), (1.5, '150%')]
+
+
+def px(n: float) -> int:
+    """依文字大小縮放的像素值：字級，以及要放得下文字的寬高（固定寬度的欄位、按鈕高度…）"""
+    return int(round(n * SCALE))
+
+
+def size(n: float) -> int:
+    """放文字的固定寬高（欄位、按鈕、面板寬度）：只放大不縮小——字變小時元件維持原本大小，內距才不會不夠"""
+    return int(round(n * max(1.0, SCALE)))
+
+
+def scale_css(css: str) -> str:
+    """把樣式裡的 font-size、min-height 依文字大小縮放（個別元件自己設定的樣式也用這個）"""
+    import re
+    if SCALE == 1.0:
+        return css
+    return re.sub(r'(font-size|min-height)(\s*:\s*)(\d+(?:\.\d+)?)px',
+                  lambda m: f'{m.group(1)}{m.group(2)}{px(float(m.group(3)))}px', css)
 
 
 def _blend(a: str, b: str, t: float) -> str:
@@ -80,9 +101,11 @@ def system_is_light() -> bool:
         return False
 
 
-def apply(accent: str = 'purple', mode: str = 'dark') -> str:
-    """更新色票與 QSS，回傳 QSS"""
+def apply(accent: str = 'purple', mode: str = 'dark', scale: float | None = None) -> str:
+    """更新色票、文字大小與 QSS，回傳 QSS"""
     g = globals()
+    if scale is not None:
+        g['SCALE'] = min(2.0, max(0.75, float(scale)))
     light = mode == 'light' or (mode == 'system' and system_is_light())
     pal = LIGHT if light else DARK
     g.update(pal)
@@ -99,7 +122,7 @@ def apply(accent: str = 'purple', mode: str = 'dark') -> str:
     g['NAV_SELECTED_TEXT'] = _blend(light_text, '#000000', 0.2) if light else '#ffffff'   # 對比 ≥ 4.5
     g['PET_BODY'] = _blend(acc, '#2b2640', 0.18)       # 內建角色「墨墨」跟隨主色
     g['HEAT'] = [pal['HEAT0'], _blend(pal['HEAT0'], btn, 0.3), _blend(pal['HEAT0'], btn, 0.6), btn]   # 深一階：格內數字才看得清楚
-    g['QSS'] = build_qss()
+    g['QSS'] = scale_css(build_qss())
     return g['QSS']
 
 

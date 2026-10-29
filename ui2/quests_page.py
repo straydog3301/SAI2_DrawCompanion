@@ -244,9 +244,9 @@ class QuestsPage(QWidget):
             b.setCheckable(True)
             b.setChecked(sk['id'] in (tpl.get('skills') or {}))
             b.setProperty('sid', sk['id'])
-            b.setStyleSheet('QPushButton{padding:5px 10px;border-radius:14px;font-size:12px;}'
+            b.setStyleSheet(theme.scale_css('QPushButton{padding:5px 10px;border-radius:14px;font-size:12px;}'
                             f'QPushButton:checked{{background:{theme.ACCENT_SOFT};color:{theme.ACCENT_TEXT};'
-                            f'border:1px solid {theme.ACCENT_BORDER};}}')
+                            f'border:1px solid {theme.ACCENT_BORDER};}}'))
             chips.addWidget(b, i // 4, i % 4)
             skill_btns.append(b)
         cl.addLayout(chips)
@@ -383,7 +383,7 @@ class QuestsPage(QWidget):
         ic = QLineEdit()
         ic.setPlaceholderText('圖示')
         ic.setMaxLength(2)
-        ic.setFixedWidth(70)
+        ic.setFixedWidth(theme.size(70))
         nm = QLineEdit()
         nm.setPlaceholderText('新技能名稱（最多 12 字）')
         nm.setMaxLength(12)

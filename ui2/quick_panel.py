@@ -117,7 +117,7 @@ class ProgressRing(QWidget):
         p.drawArc(r, 90 * 16, -int(360 * 16 * max(0.0, min(1.0, self.ratio))))
         p.setPen(QColor(theme.TEXT))
         f = p.font()
-        f.setPixelSize(13)
+        f.setPixelSize(theme.px(13))
         f.setBold(True)
         p.setFont(f)
         p.drawText(self.rect(), Qt.AlignCenter, self.text)
@@ -135,7 +135,7 @@ class QuickPanel(QWidget):
         self.card = QFrame()
         self.card.setObjectName('card')
         self.card.setStyleSheet(f'QFrame#card{{background:{theme.SURFACE};border:1px solid {theme.BORDER};border-radius:18px;}}')
-        self.card.setFixedWidth(PANEL_W)
+        self.card.setFixedWidth(theme.size(PANEL_W))
         fx = QGraphicsDropShadowEffect(self.card)
         fx.setBlurRadius(36)
         fx.setOffset(0, 10)
@@ -238,7 +238,7 @@ class QuickPanel(QWidget):
         if link_text:
             b = QPushButton(link_text)
             b.setProperty('flat', True)
-            b.setStyleSheet(f'color:{theme.ACCENT_TEXT};padding:2px 6px;font-size:12px;')
+            b.setStyleSheet(theme.scale_css(f'color:{theme.ACCENT_TEXT};padding:2px 6px;font-size:12px;'))
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(link_fn)
             row.addWidget(b)
@@ -267,9 +267,9 @@ class QuickPanel(QWidget):
         b.setCursor(Qt.PointingHandCursor)
         b.setToolTip(f'{r["name"]}　{_rel_time(r["last_seen"])}\n點一下在 SAI2 開啟')
         b.setAccessibleName(f'在 SAI2 開啟 {r["name"]}')
-        b.setStyleSheet(f'QPushButton#recentTile{{background:{theme.SURFACE2};border:none;border-radius:10px;padding:0;'
+        b.setStyleSheet(theme.scale_css(f'QPushButton#recentTile{{background:{theme.SURFACE2};border:none;border-radius:10px;padding:0;'
                         f'font-size:11px;color:{theme.MUTED};}}'
-                        f'QPushButton#recentTile:hover{{border:2px solid {theme.ACCENT_BORDER};}}')
+                        f'QPushButton#recentTile:hover{{border:2px solid {theme.ACCENT_BORDER};}}'))
         pm = load_pixmap(self.ctl.service.thumb_of(r['key']))
         if pm is not None:
             b.setIcon(QIcon(rounded_thumb(pm, RECENT_W, RECENT_H, 10, b.devicePixelRatioF() or 1.0)))
@@ -301,7 +301,7 @@ class QuickPanel(QWidget):
             if on:
                 b.setText('錄影中')
             b.setIconSize(QSize(20, 20))
-            b.setFixedHeight(60)
+            b.setFixedHeight(theme.size(60))
             b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             b.setCursor(Qt.PointingHandCursor)
             b.setToolTip(tip)
@@ -401,7 +401,7 @@ class QuestList(QWidget):
         if link_text:
             b = QPushButton(link_text)
             b.setProperty('flat', True)
-            b.setStyleSheet(f'color:{theme.ACCENT_TEXT};padding:2px 6px;font-size:12px;')
+            b.setStyleSheet(theme.scale_css(f'color:{theme.ACCENT_TEXT};padding:2px 6px;font-size:12px;'))
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(link_fn)
             row.addWidget(b)
@@ -443,12 +443,13 @@ class QuestList(QWidget):
         col = QVBoxLayout()
         col.setSpacing(4)
         name = _label(DT.task_name(t))
-        name.setStyleSheet('font-size:13px;font-weight:600;' if not done else f'font-size:13px;color:{theme.MUTED};')
+        name.setWordWrap(True)                     # 長的課程名稱、放大文字或較長的語言時換行，不被截斷
+        name.setStyleSheet(theme.scale_css('font-size:13px;font-weight:600;' if not done else f'font-size:13px;color:{theme.MUTED};'))
         col.addWidget(name)
         line = QHBoxLayout()
         line.setSpacing(8)
         bar = ProgressBar(QuestManager.progress_ratio(t), theme.SUCCESS if done else theme.ACCENT, 4)
-        bar.setMinimumWidth(60)
+        bar.setMinimumWidth(theme.size(60))
         line.addWidget(bar, 1)
         prog = _label(QuestManager.progress_text(t), muted=True)
         line.addWidget(prog)
@@ -468,13 +469,13 @@ class QuestList(QWidget):
                     b.setProperty('primary', True)
                 b.clicked.connect(lambda _=False, u=t['uid']: self._go(u))
             b.setCursor(Qt.PointingHandCursor)
-            b.setFixedHeight(34)
-            b.setMinimumWidth(64)
+            b.setFixedHeight(theme.size(34))
+            b.setMinimumWidth(theme.size(64))
             row.addWidget(b)
             more = QPushButton()
             more.setIcon(icon('more'))
             more.setProperty('flat', True)
-            more.setFixedSize(30, 34)
+            more.setFixedSize(theme.size(30), theme.size(34))
             more.setToolTip('更多')
             more.clicked.connect(lambda _=False, tt=t, bb=more: self._more_menu(tt, bb))
             row.addWidget(more)
@@ -509,7 +510,7 @@ class QuestList(QWidget):
                 self._star_btns = []
                 for n in range(1, 6):
                     b = QPushButton(str(n))
-                    b.setFixedSize(44, 36)
+                    b.setFixedSize(theme.size(44), theme.size(36))
                     b.setCheckable(True)
                     b.clicked.connect(lambda _=False, v=n: self._pick_rating(v))
                     self._star_btns.append(b)

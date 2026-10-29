@@ -10,6 +10,9 @@ from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 PATHS = {
+    'paste': 'M9 3h6v3H9zM8 4.5H6a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5.5a1 1 0 0 0-1-1h-2',
+    'eyedrop': 'M19.5 4.5a2.5 2.5 0 0 0-3.5 0L13 7.5 12 6.5 10.5 8l1 1-7 7V20h4l7-7 1 1L18 12.5l-1-1 2.5-3a2.5 2.5 0 0 0 0-4z',
+    'trash': 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
     'sketch': 'M13 2 3 14h9l-1 8 10-12h-9z',
     'study': 'M3 5h18v14H3zM3 15l5-5 5 5 3-3 5 5',
     'snapshot': 'M4 7h3l2-3h6l2 3h3v13H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',

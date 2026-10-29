@@ -82,7 +82,7 @@ class StatusCapsule(QWidget):
         p.drawEllipse(QRectF(12, H / 2 - 4, 8, 8))
         p.setPen(QColor('#f2f1f6'))
         f = p.font()
-        f.setPixelSize(13)
+        f.setPixelSize(theme.px(13))
         f.setBold(True)
         p.setFont(f)
         p.drawText(QRectF(26, 0, self.width() - 64, H), Qt.AlignVCenter | Qt.AlignLeft, self.text)

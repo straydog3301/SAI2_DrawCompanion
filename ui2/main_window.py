@@ -52,7 +52,7 @@ class WeekBars(QWidget):
         cw = self.width() / len(self.days)
         today = datetime.now().strftime('%Y-%m-%d')
         f = p.font()
-        f.setPixelSize(11)
+        f.setPixelSize(theme.px(11))
         p.setFont(f)
         for i, (d, sec) in enumerate(self.days):
             h = max(6, int((self.height() - 26) * sec / top))
@@ -110,7 +110,7 @@ class MainWindow(QWidget):
     def _sidebar(self) -> QWidget:
         outer = QWidget()
         outer.setObjectName('sidebar')
-        outer.setFixedWidth(236)
+        outer.setFixedWidth(theme.size(236))
         ol = QVBoxLayout(outer)
         ol.setContentsMargins(0, 0, 0, 0)
         ol.setSpacing(0)
