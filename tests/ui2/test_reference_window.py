@@ -150,6 +150,10 @@ r = v.image_rect()
 for frac, want in ((0.25, '#FF0000'), (0.75, '#0000FF')):
     p = QPointF(r.x() + r.width() * frac, r.y() + r.height() / 2)
     v.mousePressEvent(QMouseEvent(QMouseEvent.MouseButtonPress, p, v.mapToGlobal(p), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    for _ in range(75):                              # 剪貼簿被佔用時程式會稍後重試寫入
+        if QGuiApplication.clipboard().text() == want:
+            break
+        pump(20)
     check(QGuiApplication.clipboard().text() == want and want in w.mode.info()[0], f'picked {want}')
 w.mode.toggle_pick()
 check(not v.picking, 'pick mode off')

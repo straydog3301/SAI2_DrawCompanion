@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QInputDialog, QLabe
 from core import notes as N
 from ui2 import theme, winutil
 from ui2.icons import icon
-from ui2.widgets import button, label
+from ui2.widgets import button, label, set_clipboard
 
 IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif')
 
@@ -107,21 +107,6 @@ class ImagePreview(QDialog):
     def copy(self):
         set_clipboard(image=self.pm.toImage())
         self.copy_btn.setText('已複製')
-
-
-def set_clipboard(text: str | None = None, image=None, tries: int = 20) -> bool:
-    """寫入剪貼簿並讀回確認。Windows 剪貼簿剛被別的程式（例如剪貼簿歷程）佔用時會寫不進去，
-    就每 50ms 再試一次（最多約 1 秒），不卡住畫面。回傳這一次是否已寫入"""
-    cb = QGuiApplication.clipboard()
-    if image is not None:
-        cb.setImage(image)
-        ok = not cb.image().isNull()
-    else:
-        cb.setText(text)
-        ok = cb.text() == text
-    if not ok and tries > 1:
-        QTimer.singleShot(50, lambda: set_clipboard(text, image, tries - 1))
-    return ok
 
 
 class NoteText(QTextBrowser):
