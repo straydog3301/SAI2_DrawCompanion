@@ -64,6 +64,7 @@ DEFAULTS: dict = {
                   'float_hotkey': ''},    # SAI2「新增檢視」的快捷鍵（canvas_float 模式用；SAI2 預設沒有，要自己指定）
     'works': {'groups': {}, 'sort': 'recent', 'thumbnails': True,    # thumbnails：存檔、停筆時自動擷取作品縮圖
               'export_seconds': 60},                                 # 匯出縮時的長度（core/video_tools.py）
+    'notes': {'pinned': True, 'geometry': []},   # 浮動筆記（ui2/notes_window.py；筆記本身是 notes/*.md）
     'ref': {                              # 參考小窗：位置與寬度依模式分別記住
         'sketch': {'w': 240, 'x': None, 'y': None},
         'study': {'w': 260, 'x': None, 'y': None},

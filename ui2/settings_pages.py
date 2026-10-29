@@ -1364,7 +1364,7 @@ class HotkeysPage(QWidget):
         reset.clicked.connect(self._reset)
         head.actions.addWidget(reset)
         lay.addWidget(head)
-        groups = [('寵物與面板', ('panel', 'toggle_pet', 'open_sai2', 'snapshot', 'record_toggle')),
+        groups = [('寵物與面板', ('panel', 'toggle_pet', 'open_sai2', 'snapshot', 'record_toggle', 'notes')),
                   ('參考小窗', ('ref_toggle', 'click_through', 'compare')),
                   ('速寫', ('sketch_next', 'sketch_pause'))]
         self.edits, self.rows = {}, {}

@@ -612,6 +612,21 @@ class CompanionApp(QObject):
             self.focus_sai2()
         return w
 
+    def toggle_notes(self):
+        """浮動筆記：沒開就打開，開著就關掉（關掉時會存檔）"""
+        from ui2.notes_window import NotesWindow
+        w = getattr(self, 'notes_win', None)
+        if w is not None and w.isVisible():
+            w.close()
+            return
+        if w is None:
+            w = NotesWindow(self)
+            w.closed.connect(lambda: setattr(self, 'notes_win', None))
+            self.notes_win = w
+        w.show()
+        w.raise_()
+        w.activateWindow()
+
     def _ref_closed(self, w):
         if self.ref_win is w:
             self.ref_win = None
@@ -705,6 +720,8 @@ class CompanionApp(QObject):
                 self.say('還不知道 SAI2 裝在哪裡。', actions=[('指定 SAI2', lambda: self._ask_exe_then(None))])
         elif key == 'reference':
             self.open_ref('reference', None)
+        elif key == 'notes':
+            self.toggle_notes()
         elif key == 'new_canvas':
             if not self.send_sai2_keys([0x11, 0x4E]):        # Ctrl+N：SAI2 的新增畫布（你的預設尺寸清單）
                 self.say('SAI2 還沒開啟。', actions=[('開啟 SAI2', lambda: self.run_slot('open_sai2'))])
@@ -832,6 +849,8 @@ class CompanionApp(QObject):
             self.run_slot(action)
         elif action == 'record_toggle':
             self.run_slot('record')
+        elif action == 'notes':
+            self.toggle_notes()
         elif action == 'ref_toggle':
             if self.ref_win is not None:
                 self.ref_win.toggle_visible()
@@ -875,6 +894,8 @@ class CompanionApp(QObject):
         self._tick_timer.stop()
         if self.ref_win is not None:
             self.ref_win.close()
+        if getattr(self, 'notes_win', None) is not None:
+            self.notes_win.close()           # 編輯中的筆記會先存檔
         self.service.stop()                  # 停止錄影時會把正在錄的檔案送去合成
         self.settings.save()
         self.hub.close()
