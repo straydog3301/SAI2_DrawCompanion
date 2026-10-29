@@ -48,7 +48,7 @@ def _path_field(ctl, key: str, title: str, placeholder: str = '未設定', file_
     row.setSpacing(8)
     ed = QLineEdit(ctl.settings.get(key, '') or '')
     ed.setPlaceholderText(placeholder)
-    ed.setMinimumWidth(320)
+    ed.setMinimumWidth(theme.size(320))
     pick = button('瀏覽…')
 
     def choose():
@@ -147,7 +147,7 @@ def general_page(ctl) -> QWidget:
     lang = QComboBox()
     lang.addItem('繁體中文')
     lang.setEnabled(False)
-    lang.setFixedWidth(150)
+    lang.setFixedWidth(theme.size(150))
     g.row('語言', '目前只有繁體中文；英文、日文預計在 2.1 加入', lang)
     lay.addWidget(g)
 
@@ -226,7 +226,7 @@ class PetPage(QWidget):
         col.addWidget(label('角色', 'caption'))
         pick = QHBoxLayout()
         self.pack_combo = QComboBox()
-        self.pack_combo.setMinimumWidth(240)
+        self.pack_combo.setMinimumWidth(theme.size(240))
         reload_btn = button('重新整理', 'ghost', ic='refresh')
         pick.addWidget(self.pack_combo, 1)
         pick.addWidget(reload_btn)
@@ -312,9 +312,9 @@ class PetPage(QWidget):
         sl.setRange(lo, hi)
         val = int(float(self.s.get(key, lo)) * scale)
         sl.setValue(val)
-        sl.setFixedWidth(220)
+        sl.setFixedWidth(theme.size(220))
         lb = label(fmt(val), 'muted', wrap=False)
-        lb.setFixedWidth(56)
+        lb.setFixedWidth(theme.size(56))
 
         def changed(v):
             lb.setText(fmt(v))
@@ -361,9 +361,9 @@ class PetPage(QWidget):
         self.bubble_scale = QSlider(Qt.Horizontal)
         lo, hi = bubble_skin.SCALES
         self.bubble_scale.setRange(int(lo * 100), int(hi * 100))
-        self.bubble_scale.setFixedWidth(160)
+        self.bubble_scale.setFixedWidth(theme.size(160))
         self.bubble_scale_lb = label('', 'muted', wrap=False)
-        self.bubble_scale_lb.setFixedWidth(44)
+        self.bubble_scale_lb.setFixedWidth(theme.size(44))
         self.bubble_scale.valueChanged.connect(self._bubble_scale_changed)
         sr.addWidget(self.bubble_scale)
         sr.addWidget(self.bubble_scale_lb)
@@ -540,7 +540,7 @@ class PetPage(QWidget):
         row.setContentsMargins(4, 10, 4, 10)
         row.setSpacing(12)
         name = label(pet_pack.STATE_LABELS[st], 'body', wrap=False)
-        name.setFixedWidth(64)
+        name.setFixedWidth(theme.size(64))
         row.addWidget(name)
         spec = pack.states.get(st)
         if spec:
@@ -557,7 +557,7 @@ class PetPage(QWidget):
             fr.setValue(int(spec.get('frames') or 1))
             fr.setPrefix('格數 ')
             fr.setToolTip('橫排精靈圖的格數；1 = 單張圖')
-            fr.setFixedWidth(110)
+            fr.setFixedWidth(theme.size(110))
             fr.editingFinished.connect(lambda f=fr: self._set_frames(pack, st, f.value()))
             row.addWidget(fr)
         see = button('預覽', 'ghost')
@@ -789,7 +789,7 @@ class PanelPage(QWidget):
         top.addWidget(label(f'第 {i + 1} 格', 'body', wrap=False))
         top.addStretch(1)
         kind = QComboBox()
-        kind.setMinimumWidth(200)
+        kind.setMinimumWidth(theme.size(200))
         kind.addItem('（空）', None)
         for k, (text, _ic, _tip) in self.SL.BUILTIN.items():
             kind.addItem(text if k != 'open_sai2' else '開啟 SAI2', k)
@@ -806,7 +806,7 @@ class PanelPage(QWidget):
             name = QLineEdit(entry.get('label', ''))
             name.setPlaceholderText('按鈕文字（最多 6 字）')
             name.setMaxLength(6)
-            name.setFixedWidth(150)
+            name.setFixedWidth(theme.size(150))
             target = QLineEdit(entry.get('target', ''))
             target.setPlaceholderText({'url': 'https://…', 'program': '程式路徑（.exe）', 'path': '檔案或資料夾路徑'}[entry['type']])
             form.addWidget(name)
@@ -961,7 +961,7 @@ class RulesPage(QWidget):
             w.setRange(1, 600)
             w.setValue(int(value or 60))
             w.setSuffix(' 分')
-            w.setFixedWidth(110)
+            w.setFixedWidth(theme.size(110))
             return w, lambda: w.value(), w.editingFinished
         if kind == 'choice':
             w = QComboBox()
@@ -973,7 +973,7 @@ class RulesPage(QWidget):
             w = QLineEdit('' if value is None else str(value))
             w.setPlaceholderText(placeholder)
             if kind == 'time':
-                w.setFixedWidth(90)
+                w.setFixedWidth(theme.size(90))
             return w, lambda: w.text().strip(), w.editingFinished
         return None, lambda: '', None
 
@@ -1105,6 +1105,14 @@ def appearance_page(ctl) -> QWidget:
     seg = Segmented(list(theme.MODES.items()), ctl.settings.get('theme.mode', 'dark'))
     seg.changed.connect(lambda v: ctl.set_theme(mode=v))
     g.row('深色／淺色', '「跟隨 Windows」會依系統的應用程式模式切換', seg)
+    size = QComboBox()
+    for v, text in theme.SCALES:
+        size.addItem(text, v)
+    cur_scale = float(ctl.settings.get('theme.text_scale', 1.0) or 1.0)
+    size.setCurrentIndex(min(range(size.count()), key=lambda i: abs(size.itemData(i) - cur_scale)))
+    size.setMinimumWidth(theme.size(120))
+    size.currentIndexChanged.connect(lambda _i: ctl.set_theme(scale=size.currentData()))
+    g.row('文字大小', '主視窗、快捷面板、對話泡泡與參考小窗的文字一起放大或縮小', size)
     lay.addWidget(g)
     g = SettingGroup('無障礙', '主視窗可以用 Ctrl+Tab 切換頁面、Tab 移動到各個按鈕，側欄可以用上下鍵')
 
@@ -1134,7 +1142,7 @@ def sources_page(ctl) -> QWidget:
         ed = QLineEdit(ctl.settings.get(f'sources.{key}', '') or '')
         ed.setEchoMode(QLineEdit.PasswordEchoOnEdit)
         ed.setPlaceholderText('未設定')
-        ed.setFixedWidth(260)
+        ed.setFixedWidth(theme.size(260))
         ed.textChanged.connect(lambda v, k=key: (ctl.settings.set(f'sources.{k}', v.strip()), ctl.settings.save()))
         link = button('申請', 'link')
         link.clicked.connect(lambda _=False, u=url: webbrowser.open(u))
@@ -1150,7 +1158,7 @@ def sources_page(ctl) -> QWidget:
     for v in (1500, 2000, 3000, 4000):
         side.addItem(f'長邊 {v} px', v)
     side.setCurrentIndex(max(0, side.findData(int(ctl.settings.get('study.canvas_side', 2000)))))
-    side.setFixedWidth(150)
+    side.setFixedWidth(theme.size(150))
     side.currentIndexChanged.connect(lambda _i: (ctl.settings.set('study.canvas_side', side.currentData()), ctl.settings.save()))
     g.row('研究畫布尺寸', '依參考圖的比例決定寬高', side)
     g.row('開始速寫時自動建立畫布', '一輪速寫用同一張畫布，並在 SAI2 開啟；也可以按小窗上的「畫布」按鈕', _toggle(ctl, 'sketch.auto_canvas'))
@@ -1187,7 +1195,7 @@ def _sketch_size(ctl) -> QWidget:
         sp.setRange(CANVAS_MIN, CANVAS_MAX)
         sp.setSuffix(' px')
         sp.setValue(int(s.get(key, 3508 if key.endswith('w') else 2480)))
-        sp.setFixedWidth(110)
+        sp.setFixedWidth(theme.size(110))
         sp.valueChanged.connect(lambda v, k=key: (s.set(k, int(v)), s.save()))
         spins.append(sp)
     times = QLabel('×')
@@ -1224,7 +1232,7 @@ def ai_review_page(ctl) -> QWidget:
     for k, v in AR.PROVIDERS.items():
         provider.addItem(v['name'], k)
     provider.setCurrentIndex(max(0, provider.findData(cfg().get('provider', 'gemini'))))
-    provider.setFixedWidth(260)
+    provider.setFixedWidth(theme.size(260))
     g.row('AI 服務', 'OpenAI 相容：OpenAI、OpenRouter，或本機的 Ollama、LM Studio 等', provider)
 
     key_box = QWidget()
@@ -1233,7 +1241,7 @@ def ai_review_page(ctl) -> QWidget:
     key = QLineEdit(cfg().get('api_key', ''))
     key.setEchoMode(QLineEdit.PasswordEchoOnEdit)
     key.setPlaceholderText('未設定')
-    key.setFixedWidth(260)
+    key.setFixedWidth(theme.size(260))
     key.textChanged.connect(lambda v: put('api_key', v.strip()))
     get_key = button('取得免費金鑰', 'link')
     get_key.clicked.connect(lambda: webbrowser.open(AR.PROVIDERS['gemini']['key_url']))
@@ -1244,7 +1252,7 @@ def ai_review_page(ctl) -> QWidget:
 
     base = QLineEdit(cfg().get('base_url', ''))
     base.setPlaceholderText('https://api.openai.com/v1（本機 Ollama：http://localhost:11434/v1）')
-    base.setMinimumWidth(360)
+    base.setMinimumWidth(theme.size(360))
     base.textChanged.connect(lambda v: put('base_url', v.strip()))
     base_row = g.row('服務網址', 'OpenAI 相容服務的 API 網址（結尾通常是 /v1）', base, stack=True)
 
@@ -1253,7 +1261,7 @@ def ai_review_page(ctl) -> QWidget:
     mr.setContentsMargins(0, 0, 0, 0)
     model = QComboBox()
     model.setEditable(True)
-    model.setMinimumWidth(260)
+    model.setMinimumWidth(theme.size(260))
     if cfg().get('model'):
         model.addItem(cfg()['model'])
     model.setCurrentText(cfg().get('model', ''))
@@ -1356,7 +1364,7 @@ class HotkeysPage(QWidget):
         reset.clicked.connect(self._reset)
         head.actions.addWidget(reset)
         lay.addWidget(head)
-        groups = [('寵物與面板', ('panel', 'toggle_pet', 'open_sai2', 'snapshot', 'record_toggle')),
+        groups = [('寵物與面板', ('panel', 'toggle_pet', 'open_sai2', 'snapshot', 'record_toggle', 'notes')),
                   ('參考小窗', ('ref_toggle', 'click_through', 'compare')),
                   ('速寫', ('sketch_next', 'sketch_pause'))]
         self.edits, self.rows = {}, {}
@@ -1369,7 +1377,7 @@ class HotkeysPage(QWidget):
                 row.setContentsMargins(0, 0, 0, 0)
                 ed = QKeySequenceEdit(QKeySequence(self.s.get(f'hotkeys.{action}', '') or ''))
                 ed.setMaximumSequenceLength(1)
-                ed.setFixedWidth(200)
+                ed.setFixedWidth(theme.size(200))
                 inner = ed.findChild(QLineEdit)
                 if inner:
                     inner.setPlaceholderText('點這裡後按下快捷鍵')

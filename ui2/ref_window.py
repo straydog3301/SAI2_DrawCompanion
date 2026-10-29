@@ -16,7 +16,7 @@ import time
 import webbrowser
 
 from PIL import Image
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QScrollArea, QSizeGrip, QVBoxLayout, QWidget)
@@ -63,6 +63,13 @@ class ImageView(QWidget):
         self.guide = 'none'
         self.message = ''
         self._drag = None
+        self._pan_drag = None
+        self.zoomable = False            # 參照模式：滾輪縮放、拖曳平移、雙擊回到整張
+        self.zoom = 1.0
+        self.pan = QPointF(0, 0)
+        self.picking = False             # 吸色：點一下取得顏色
+        self.on_pick = None
+        self._pick_img = None
         self.setMouseTracking(True)
 
     def image_rect(self) -> QRect:
@@ -70,7 +77,50 @@ class ImageView(QWidget):
             return self.rect()
         s = self.pm.size() / self.pm.devicePixelRatio()
         s.scale(self.size(), Qt.KeepAspectRatio)
-        return QRect((self.width() - s.width()) // 2, (self.height() - s.height()) // 2, s.width(), s.height())
+        w, h = s.width() * self.zoom, s.height() * self.zoom
+        cx, cy = self.width() / 2 + self.pan.x(), self.height() / 2 + self.pan.y()
+        return QRect(int(cx - w / 2), int(cy - h / 2), int(w), int(h))
+
+    def reset_zoom(self):
+        self.zoom = 1.0
+        self.pan = QPointF(0, 0)
+        self.update()
+
+    def _clamp_pan(self):
+        r = self.image_rect()
+        mx, my = max(0.0, (r.width() - self.width()) / 2), max(0.0, (r.height() - self.height()) / 2)
+        self.pan = QPointF(max(-mx, min(mx, self.pan.x())), max(-my, min(my, self.pan.y())))
+
+    def wheelEvent(self, e):
+        if not self.zoomable or self.pm is None:
+            return super().wheelEvent(e)
+        steps = e.angleDelta().y() / 120
+        z0 = self.zoom
+        z1 = max(1.0, min(16.0, z0 * (1.25 ** steps)))
+        if z1 == 1.0:
+            self.reset_zoom()
+        else:
+            c = QPointF(self.width() / 2, self.height() / 2)
+            cur = e.position()
+            self.pan = cur - c - (cur - c - self.pan) * (z1 / z0)       # 游標下的那一點縮放後還在游標下
+            self.zoom = z1
+            self._clamp_pan()
+        self.update()
+        self.win.info.update()
+
+    def pick_color(self, pos) -> QColor | None:
+        """畫面上的一點 → 圖片的顏色（看到的樣子：含灰階、分階）"""
+        if self.pm is None:
+            return None
+        r = self.image_rect()
+        if not r.contains(pos):
+            return None
+        if self._pick_img is None or self._pick_img[0] is not self.pm:
+            self._pick_img = (self.pm, self.pm.toImage())
+        img = self._pick_img[1]
+        x = int((pos.x() - r.x()) / max(1, r.width()) * img.width())
+        y = int((pos.y() - r.y()) / max(1, r.height()) * img.height())
+        return img.pixelColor(min(img.width() - 1, max(0, x)), min(img.height() - 1, max(0, y)))
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -92,29 +142,48 @@ class ImageView(QWidget):
             for x1, y1, x2, y2 in ST.guide_lines(self.guide, r.width(), r.height()):
                 p.drawLine(int(r.x() + x1), int(r.y() + y1), int(r.x() + x2), int(r.y() + y2))
 
-    # 拖曳移動整個小窗
+    # 拖曳移動整個小窗（參照模式放大時改成平移圖片；吸色時點一下取色）
     def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self._drag = e.globalPosition().toPoint() - self.win.pos()
+        if e.button() != Qt.LeftButton:
+            return
+        if self.picking:
+            color = self.pick_color(e.position().toPoint())
+            if color is not None and self.on_pick:
+                self.on_pick(color)
+            return
+        if self.zoomable and self.zoom > 1.0:
+            self._pan_drag = (e.position(), QPointF(self.pan))
+            return
+        self._drag = e.globalPosition().toPoint() - self.win.pos()
 
     def mouseMoveEvent(self, e):
-        if self._drag is not None and e.buttons() & Qt.LeftButton:
+        if self._pan_drag is not None and e.buttons() & Qt.LeftButton:
+            start, pan0 = self._pan_drag
+            self.pan = pan0 + (e.position() - start)
+            self._clamp_pan()
+            self.update()
+        elif self._drag is not None and e.buttons() & Qt.LeftButton:
             self.win.move(e.globalPosition().toPoint() - self._drag)
 
     def mouseReleaseEvent(self, _e):
+        self._pan_drag = None
         if self._drag is not None:
             self._drag = None
             self.win.save_geometry()
 
     def mouseDoubleClickEvent(self, _e):
-        self.win.toggle_expand()
+        if self.zoomable:
+            self.reset_zoom()
+            self.win.info.update()
+        else:
+            self.win.toggle_expand()
 
 
 class InfoBar(QWidget):
     def __init__(self, win):
         super().__init__(win)
         self.win = win
-        self.setFixedHeight(INFO_H)
+        self.setFixedHeight(theme.size(INFO_H))
         self.setCursor(Qt.PointingHandCursor)
         self.left = ''
         self.right = ''
@@ -130,18 +199,18 @@ class InfoBar(QWidget):
         p.fillRect(QRect(0, 0, self.width(), 3), QColor('#2c2b35'))
         p.fillRect(QRect(0, 0, int(self.width() * max(0.0, min(1.0, self.ratio))), 3), QColor(theme.ACCENT))
         f = p.font()
-        f.setPixelSize(12)
+        f.setPixelSize(theme.px(12))
         p.setFont(f)
         if self.hint:
             p.setPen(QColor('#c4b5fd'))
-            p.drawText(QRect(10, 3, self.width() - 20, INFO_H - 3), Qt.AlignVCenter | Qt.AlignLeft,
+            p.drawText(QRect(10, 3, self.width() - 20, self.height() - 3), Qt.AlignVCenter | Qt.AlignLeft,
                        p.fontMetrics().elidedText(self.hint, Qt.ElideRight, self.width() - 20))
             return
         p.setPen(QColor('#fbbf6a' if self.warn else '#f2f1f6'))       # 資訊列固定深色底
-        p.drawText(QRect(10, 3, self.width() - 80, INFO_H - 3), Qt.AlignVCenter | Qt.AlignLeft,
+        p.drawText(QRect(10, 3, self.width() - 80, self.height() - 3), Qt.AlignVCenter | Qt.AlignLeft,
                    p.fontMetrics().elidedText(self.left, Qt.ElideRight, self.width() - 90))
         p.setPen(QColor('#c4b5fd'))
-        p.drawText(QRect(self.width() - 80, 3, 70, INFO_H - 3), Qt.AlignVCenter | Qt.AlignRight, self.right)
+        p.drawText(QRect(self.width() - 80, 3, 70, self.height() - 3), Qt.AlignVCenter | Qt.AlignRight, self.right)
 
     def mouseReleaseEvent(self, _e):
         self.win.toggle_expand()
@@ -285,7 +354,7 @@ class CheckinSheet(QFrame):
                 b = QPushButton(f'{v}\n{label}')
                 b.setCheckable(True)
                 b.setMinimumHeight(48)
-                b.setStyleSheet('QPushButton{font-size:11px;padding:4px 2px;}QPushButton:checked{background:#7c3aed;border:none;color:white;}')
+                b.setStyleSheet(theme.scale_css('QPushButton{font-size:11px;padding:4px 2px;}QPushButton:checked{background:#7c3aed;border:none;color:white;}'))
                 b.clicked.connect(lambda _=False, x=v: self._pick(x))
                 row.addWidget(b)
                 self._rbtns.append(b)
@@ -389,7 +458,7 @@ class CheckinSheet(QFrame):
         self.ai_result = res
         _clear_layout(self.ai_box)
         score = QLabel(f"AI 評分　{res['score']} 分・{dict(RATINGS).get(res['score'], '')}")
-        score.setStyleSheet(f'font-size:15px;font-weight:700;color:{theme.ACCENT_TEXT};')
+        score.setStyleSheet(theme.scale_css(f'font-size:15px;font-weight:700;color:{theme.ACCENT_TEXT};'))
         self.ai_box.addWidget(score)
         if res.get('summary'):
             s = QLabel(res['summary'])
@@ -486,6 +555,19 @@ class RefWindow(QWidget):
         self.capsule = Capsule(self)
         self._timer = QTimer(self, interval=1000, timeout=self._tick)
         self._flash = QTimer(self, singleShot=True, timeout=self._unflash)
+        self.setAcceptDrops(True)
+        from PySide6.QtGui import QKeySequence, QShortcut
+        QShortcut(QKeySequence.Paste, self, activated=lambda: getattr(self.mode, 'paste', None) and self.mode.paste())
+
+    def dragEnterEvent(self, e):
+        md = e.mimeData()
+        if hasattr(self.mode, 'drop') and (md.hasImage() or md.hasUrls()):
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        if hasattr(self.mode, 'drop'):
+            self.mode.drop(e.mimeData())
+            e.acceptProposedAction()
 
     # ── 建構與工具 ──
     def set_mode(self, mode):
@@ -882,7 +964,7 @@ def _section(lay, title, items, color=None):
         lb = QLabel(text)
         lb.setWordWrap(True)
         if color:
-            lb.setStyleSheet(f'color:{color};font-size:12px;')
+            lb.setStyleSheet(theme.scale_css(f'color:{color};font-size:12px;'))
         else:
             lb.setProperty('muted', True)
         lay.addWidget(lb)
@@ -1489,3 +1571,159 @@ class SketchMode:
         self._retry.stop()
         self._watchdog.stop()
         self._token += 1
+
+
+# ─── 參照：自己放一張圖 ──────────────────────────────────────────────────
+
+REF_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff', '.psd')
+REF_MAX_SIDE = 4096                       # 太大的圖縮小後保存（夠放大看細節，切換檢查工具也不會卡）
+
+
+class ReferenceMode:
+    """不在課程中也能用的參考圖：開啟檔案、貼上剪貼簿、拖曳進來；一次一張，關掉後記住。
+    可以縮放平移、吸色（點一下複製色碼），檢查工具、穿透、按住比對與速寫和研究相同"""
+    uid = None
+
+    def __init__(self, win: RefWindow, uid=None):
+        self.win = win
+        self.ctl = win.ctl
+        self.folder = os.path.join(self.ctl.settings.app_dir, 'reference')
+        self.path = os.path.join(self.folder, 'current.png')
+        self.name = self.ctl.settings.get('ref.reference_name', '') or ''
+        self.copied = ''                  # 剛吸到、已複製的色碼
+        self._copied_at = 0.0
+        win.view.zoomable = True
+        win.view.on_pick = self._picked
+
+    def actions(self):
+        return [('file', '', '開啟圖片', self.open_file, False),
+                ('paste', '', '貼上剪貼簿的圖片（Ctrl+V），也可以直接把圖片拖進來', self.paste, False),
+                ('eyedrop', '', '吸色：點圖片上的顏色，色碼會複製到剪貼簿', self.toggle_pick, False),
+                ('trash', '', '清除這張參照圖', self.clear, False)]
+
+    def start(self):
+        btn = self.win.action_btns.get('eyedrop')
+        if btn is not None:
+            btn.setCheckable(True)
+        img = None
+        if os.path.isfile(self.path):
+            try:
+                with Image.open(self.path) as im:
+                    img = im.copy()
+            except OSError:
+                img = None
+        self._show(img)
+
+    def _show(self, img):
+        self.win.view.reset_zoom()
+        self.win.set_image(img, '按「開啟」或 Ctrl+V 貼上圖片，也可以把圖片拖進這裡')
+        self.win._tick()
+
+    def use(self, img: Image.Image, name: str):
+        """換成這張圖（存一份，下次打開還在）"""
+        img = img.convert('RGBA') if img.mode in ('RGBA', 'LA', 'P') else img.convert('RGB')
+        if max(img.size) > REF_MAX_SIDE:
+            img.thumbnail((REF_MAX_SIDE, REF_MAX_SIDE), Image.LANCZOS)
+        try:
+            os.makedirs(self.folder, exist_ok=True)
+            img.save(self.path, format='PNG')
+        except OSError as e:
+            self.ctl.say(f'無法保存參照圖：{e}')
+        self.name = name
+        self.ctl.settings.set('ref.reference_name', name)
+        self.ctl.settings.save()
+        self._show(img)
+
+    def _load_file(self, path: str) -> bool:
+        try:
+            with Image.open(path) as im:
+                im.seek(0)
+                img = im.copy()
+        except (OSError, ValueError, EOFError):
+            self.ctl.say(f'無法開啟「{os.path.basename(path)}」，請換一張圖片。')
+            return False
+        self.use(img, os.path.basename(path))
+        return True
+
+    def open_file(self):
+        exts = ' '.join('*' + e for e in REF_EXTS)
+        path, _ = QFileDialog.getOpenFileName(self.win, '選擇參照圖', '', f'圖片 ({exts})')
+        if path:
+            self._load_file(path)
+
+    def _from_mime(self, md) -> bool:
+        """剪貼簿或拖曳的內容：圖片檔（從檔案總管複製）或圖片本身（截圖、從瀏覽器複製）"""
+        for url in (md.urls() if md.hasUrls() else []):
+            local = url.toLocalFile()
+            if local and local.lower().endswith(REF_EXTS) and os.path.isfile(local):
+                return self._load_file(local)
+        if md.hasImage():
+            qimg = md.imageData()
+            if qimg is not None and not qimg.isNull():
+                self.use(_qimage_to_pil(qimg), '貼上的圖片')
+                return True
+        return False
+
+    def paste(self):
+        if not self._from_mime(QGuiApplication.clipboard().mimeData()):
+            self.ctl.say('剪貼簿裡沒有圖片。可以先截圖或複製一張圖片，再按貼上。', important=False)
+
+    def drop(self, md):
+        if not self._from_mime(md):
+            self.ctl.say('只能放入圖片檔。', important=False)
+
+    def toggle_pick(self):
+        v = self.win.view
+        v.picking = not v.picking
+        v.setCursor(Qt.CrossCursor if v.picking else Qt.ArrowCursor)
+        btn = self.win.action_btns.get('eyedrop')
+        if btn is not None:
+            btn.setChecked(v.picking)
+
+    def _picked(self, color):
+        code = color.name().upper()
+        QGuiApplication.clipboard().setText(code)
+        self.copied, self._copied_at = code, time.monotonic()
+        self.win.flash_info()
+        self.win._tick()
+
+    def clear(self):
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+        self.name = ''
+        self.ctl.settings.set('ref.reference_name', '')
+        self.ctl.settings.save()
+        self._show(None)
+
+    def info(self):
+        if self.copied and time.monotonic() - self._copied_at < 6:
+            left = f'已複製色碼 {self.copied}'
+        elif self.win.view.picking:
+            left = '吸色：點圖片上的顏色'
+        else:
+            left = self.name or '開啟、貼上或拖入一張圖片'
+        z = self.win.view.zoom
+        return left, (f'{int(round(z * 100))}%' if z > 1.0 else ''), 0.0, False
+
+    def has_steps(self):
+        return False
+
+    def fill_steps(self, lay):
+        pass
+
+    def after_checkin(self, uid):
+        pass
+
+    def on_close(self):
+        pass
+
+
+def _qimage_to_pil(qimg) -> Image.Image:
+    from PySide6.QtCore import QBuffer, QIODevice
+    import io
+    buf = QBuffer()
+    buf.open(QIODevice.WriteOnly)
+    qimg.save(buf, 'PNG')
+    return Image.open(io.BytesIO(bytes(buf.data()))).copy()

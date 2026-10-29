@@ -301,7 +301,7 @@ class NavButton(QPushButton):
             p = QPainter(self)
             p.setRenderHint(QPainter.Antialiasing)
             f = p.font()
-            f.setPixelSize(10)
+            f.setPixelSize(theme.px(10))
             p.setFont(f)
             w = p.fontMetrics().horizontalAdvance(self.badge) + 12
             r = QRectF(self.width() - w - 10, (self.height() - 18) / 2, w, 18)
@@ -357,12 +357,12 @@ class Stepper(QWidget):
         plus = QPushButton('＋')
         for b, fn in ((minus, spin.stepDown), (plus, spin.stepUp)):
             b.setProperty('kind', 'ghost')
-            b.setStyleSheet('QPushButton{padding:0;font-size:16px;}')     # 預設左右內距會把符號擠掉
-            b.setFixedSize(34, 34)
+            b.setStyleSheet(theme.scale_css('QPushButton{padding:0;font-size:16px;}'))     # 預設左右內距會把符號擠掉
+            b.setFixedSize(theme.size(34), theme.size(34))
             b.setCursor(Qt.PointingHandCursor)
             b.setAutoRepeat(True)
             b.clicked.connect(fn)
         lay.addWidget(minus)
         lay.addWidget(spin, 1)
         lay.addWidget(plus)
-        self.setFixedWidth(width)
+        self.setFixedWidth(theme.size(width))

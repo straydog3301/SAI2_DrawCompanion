@@ -31,7 +31,7 @@ class BarChart(QWidget):
         left, right, top, bottom = 44, 8, 10, 26
         w, h = self.width() - left - right, self.height() - top - bottom
         f = p.font()
-        f.setPixelSize(11)
+        f.setPixelSize(theme.px(11))
         p.setFont(f)
         if not self.bars:
             p.setPen(QColor(theme.MUTED))
@@ -125,7 +125,7 @@ class MonthGrid(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         f = p.font()
-        f.setPixelSize(11)
+        f.setPixelSize(theme.px(11))
         p.setFont(f)
         cols = 7
         head = 22
@@ -137,7 +137,7 @@ class MonthGrid(QWidget):
             p.setPen(QColor(theme.MUTED))
             p.drawText(QRectF(i * (cw + gap), 0, cw, head), Qt.AlignCenter, d)
         self._cells = []
-        f.setPixelSize(13)
+        f.setPixelSize(theme.px(13))
         p.setFont(f)
         for r, week in enumerate(self.cal['weeks']):
             for c, cell in enumerate(week):

@@ -27,7 +27,7 @@ class BubbleBody(QWidget):
         self.lay.setSpacing(8)
         self.label = QLabel()
         self.label.setWordWrap(True)
-        self.label.setMaximumWidth(260)
+        self.label.setMaximumWidth(theme.size(260))
         self.lay.addWidget(self.label)
         self.buttons = QHBoxLayout()
         self.buttons.setSpacing(6)
@@ -49,7 +49,7 @@ class BubbleBody(QWidget):
             k = self.skin['scale']
             l, t, r, b = self.margins()
             self.lay.setContentsMargins(*(int(round(v * k)) + PAD for v in (l, t, r, b)))
-        self.label.setStyleSheet(f'color:{self.ink};font-size:13px;background:transparent;')
+        self.label.setStyleSheet(theme.scale_css(f'color:{self.ink};font-size:13px;background:transparent;'))
         if self.isVisible():                       # 看不見時不先量大小：第一次量文字會載入字型，別拖慢啟動
             self.adjustSize()
         self.update()
@@ -60,7 +60,7 @@ class BubbleBody(QWidget):
     def set_message(self, text: str, actions=(), on_click=None):
         self.label.setText(text)
         longest = max((self.label.fontMetrics().horizontalAdvance(x) for x in text.splitlines()), default=0)
-        self.label.setMinimumWidth(min(longest + 2, 220))     # 長句子不要被擠成很窄的一條
+        self.label.setMinimumWidth(min(longest + 2, theme.size(220)))     # 長句子不要被擠成很窄的一條
         while self.buttons.count():
             w = self.buttons.takeAt(0).widget()
             if w:
@@ -69,9 +69,9 @@ class BubbleBody(QWidget):
         for i, (text_, fn) in enumerate(actions):
             b = QPushButton(text_)
             b.setCursor(Qt.PointingHandCursor)
-            b.setStyleSheet(
+            b.setStyleSheet(theme.scale_css(
                 'QPushButton{border:none;border-radius:8px;padding:5px 12px;font-size:12px;'
-                + (f'background:{theme.ACCENT_BTN};color:white;}}' if i == 0 else f'background:#e4e1d8;color:{INK};}}'))
+                + (f'background:{theme.ACCENT_BTN};color:white;}}' if i == 0 else f'background:#e4e1d8;color:{INK};}}')))
             b.clicked.connect(lambda _=False, f=fn: (on_click() if on_click else None, f()))
             self.buttons.addWidget(b)
         self.buttons.addStretch(1)

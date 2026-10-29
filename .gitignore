@@ -47,6 +47,8 @@ drawcompanion2_settings.json.tmp
 drawcompanion2_pet_pos.json
 pets/
 snapshots/
+notes/
+reference/
 
 # Operating System
 Thumbs.db

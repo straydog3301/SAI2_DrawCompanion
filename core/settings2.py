@@ -64,6 +64,7 @@ DEFAULTS: dict = {
                   'float_hotkey': ''},    # SAI2「新增檢視」的快捷鍵（canvas_float 模式用；SAI2 預設沒有，要自己指定）
     'works': {'groups': {}, 'sort': 'recent', 'thumbnails': True,    # thumbnails：存檔、停筆時自動擷取作品縮圖
               'export_seconds': 60},                                 # 匯出縮時的長度（core/video_tools.py）
+    'notes': {'pinned': True, 'geometry': []},   # 浮動筆記（ui2/notes_window.py；筆記本身是 notes/*.md）
     'ref': {                              # 參考小窗：位置與寬度依模式分別記住
         'sketch': {'w': 240, 'x': None, 'y': None},
         'study': {'w': 260, 'x': None, 'y': None},
@@ -74,7 +75,8 @@ DEFAULTS: dict = {
          'actions': [{'type': 'bubble', 'value': '已經連續畫了 50 分鐘，起來喝口水、動一動吧'},
                      {'type': 'pet', 'value': 'rest'}]},
     ],
-    'theme': {'accent': 'purple', 'mode': 'dark', 'reduce_motion': False},
+    'theme': {'accent': 'purple', 'mode': 'dark', 'reduce_motion': False,
+              'text_scale': 1.0},                # 文字大小（0.9～1.5），字級與放文字的元件一起縮放
     'prompted': {},                       # 一次性提醒是否已出現過
     'first_run_at': '',
 }

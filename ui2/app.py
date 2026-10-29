@@ -34,7 +34,7 @@ from core.single_instance import SingleInstance, channel_name
 from ui2 import theme, winutil
 from ui2.bubble import Bubble
 from ui2.pet_window import PetWindow, to_pixmap
-from ui2.quick_panel import QuickPanel
+from ui2.quick_panel import PANEL_W, QuickPanel
 
 INSTANCE_NAME = 'SAI2DrawCompanion2'
 ENTRY_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'drawcompanion2.py')
@@ -90,7 +90,8 @@ class CompanionApp(QObject):
         super().__init__()
         self.qapp = qapp
         self.settings = settings
-        theme.apply(settings.get('theme.accent', 'purple'), settings.get('theme.mode', 'dark'))
+        theme.apply(settings.get('theme.accent', 'purple'), settings.get('theme.mode', 'dark'),
+                    settings.get('theme.text_scale', 1.0))
         theme.MOTION = not settings.get('theme.reduce_motion', False)
         qapp.setStyleSheet(theme.QSS)
         from ui2 import a11y
@@ -591,17 +592,17 @@ class CompanionApp(QObject):
     # ── 參考小窗 ──
     def open_ref(self, kind: str, uid: str | None):
         """開啟參考小窗（同時只有一個；換任務時關掉舊的）"""
-        from ui2.ref_window import RefWindow, SketchMode, StudyMode
+        from ui2.ref_window import ReferenceMode, RefWindow, SketchMode, StudyMode
         w = self.ref_win
         if w is not None:
-            if w.kind == kind and getattr(w.mode, 'uid', None) == uid and uid is not None:
+            if w.kind == kind and (kind == 'reference' or (getattr(w.mode, 'uid', None) == uid and uid is not None)):
                 if w.capsule.isVisible():
                     w.restore_from_capsule()
                 w.show()
                 return w
             w.close()
         w = RefWindow(self, kind)
-        mode = StudyMode(w, uid) if kind == 'study' else SketchMode(w, uid)
+        mode = {'study': StudyMode, 'reference': ReferenceMode}.get(kind, SketchMode)(w, uid)
         w.set_mode(mode)
         w.closed.connect(self._ref_closed)
         self.ref_win = w
@@ -610,6 +611,21 @@ class CompanionApp(QObject):
         if kind == 'study':
             self.focus_sai2()
         return w
+
+    def toggle_notes(self):
+        """浮動筆記：沒開就打開，開著就關掉（關掉時會存檔）"""
+        from ui2.notes_window import NotesWindow
+        w = getattr(self, 'notes_win', None)
+        if w is not None and w.isVisible():
+            w.close()
+            return
+        if w is None:
+            w = NotesWindow(self)
+            w.closed.connect(lambda: setattr(self, 'notes_win', None))
+            self.notes_win = w
+        w.show()
+        w.raise_()
+        w.activateWindow()
 
     def _ref_closed(self, w):
         if self.ref_win is w:
@@ -702,6 +718,10 @@ class CompanionApp(QObject):
                 self.say('正在開啟 SAI2…', important=False, seconds=3)
             else:
                 self.say('還不知道 SAI2 裝在哪裡。', actions=[('指定 SAI2', lambda: self._ask_exe_then(None))])
+        elif key == 'reference':
+            self.open_ref('reference', None)
+        elif key == 'notes':
+            self.toggle_notes()
         elif key == 'new_canvas':
             if not self.send_sai2_keys([0x11, 0x4E]):        # Ctrl+N：SAI2 的新增畫布（你的預設尺寸清單）
                 self.say('SAI2 還沒開啟。', actions=[('開啟 SAI2', lambda: self.run_slot('open_sai2'))])
@@ -745,13 +765,19 @@ class CompanionApp(QObject):
             self._main = MainWindow(self)
         self._main.show_page(page)
 
-    def set_theme(self, accent: str | None = None, mode: str | None = None):
+    def set_theme(self, accent: str | None = None, mode: str | None = None, scale: float | None = None):
         if accent:
             self.settings.set('theme.accent', accent)
         if mode:
             self.settings.set('theme.mode', mode)
+        if scale:
+            self.settings.set('theme.text_scale', float(scale))
         self.settings.save()
-        theme.apply(self.settings.get('theme.accent', 'purple'), self.settings.get('theme.mode', 'dark'))
+        theme.apply(self.settings.get('theme.accent', 'purple'), self.settings.get('theme.mode', 'dark'),
+                    self.settings.get('theme.text_scale', 1.0))
+        if scale:                                  # 文字大小：快捷面板的寬度、泡泡的字也跟著變
+            self.panel.card.setFixedWidth(theme.size(PANEL_W))
+            self.apply_bubble_skin()
         self.qapp.setStyleSheet(theme.QSS)
         self.apply_pet_settings(reload_frames=True)          # 內建角色跟著換色
         self.apply_app_icon()
@@ -823,6 +849,8 @@ class CompanionApp(QObject):
             self.run_slot(action)
         elif action == 'record_toggle':
             self.run_slot('record')
+        elif action == 'notes':
+            self.toggle_notes()
         elif action == 'ref_toggle':
             if self.ref_win is not None:
                 self.ref_win.toggle_visible()
@@ -866,6 +894,8 @@ class CompanionApp(QObject):
         self._tick_timer.stop()
         if self.ref_win is not None:
             self.ref_win.close()
+        if getattr(self, 'notes_win', None) is not None:
+            self.notes_win.close()           # 編輯中的筆記會先存檔
         self.service.stop()                  # 停止錄影時會把正在錄的檔案送去合成
         self.settings.save()
         self.hub.close()
