@@ -157,6 +157,8 @@ class CompanionApp(QObject):
             self.settings.set('first_run_at', datetime.now().isoformat(timespec='seconds'))
             self.settings.save()
         self.service.start()
+        if bool(self.settings.get('filters_mod.enabled', False)):
+            self.sync_filters_mod_files(notify=False)
         self.apply_pet_settings(reload_frames=True)
         self._tick()
         self.pet.restore_position()
@@ -262,6 +264,8 @@ class CompanionApp(QObject):
             self._main.on_tracking_changed()
         if 'exe_found' in res.events:
             self.opener.exe_path = self.settings.get('sai2_exe', '')
+            if bool(self.settings.get('filters_mod.enabled', False)):
+                self.sync_filters_mod_files(notify=False)
         if st.unsaved_file and st.drawing and st.unsaved_file not in self._reminded_unsaved:
             self._reminded_unsaved.add(st.unsaved_file)
             self.brain.trigger('remind')
@@ -642,6 +646,43 @@ class CompanionApp(QObject):
         t = next((t for t in q.today_tasks() if t['mode'] == 'study' and t['status'] in ('active', 'ready')), None)
         return t['uid'] if t else None
 
+    # ── SAI2 內建濾鏡擴充 (Mod) ──
+    def sync_filters_mod_files(self, notify: bool = True) -> tuple[bool, str]:
+        from core.sai2_filters import resolve_sai2_dir, sync_filters_mod
+        exe = self.settings.get('sai2_exe', '') or ''
+        sdir = resolve_sai2_dir(exe)
+        if sdir and not exe:
+            detected_exe = os.path.join(sdir, 'sai2.exe')
+            if os.path.isfile(detected_exe):
+                self.settings.set('sai2_exe', detected_exe)
+                self.settings.save()
+                self.opener.exe_path = detected_exe
+                exe = detected_exe
+        enabled = bool(self.settings.get('filters_mod.enabled', False))
+        binarize = bool(self.settings.get('filters_mod.binarize', True))
+        posterize = bool(self.settings.get('filters_mod.posterize', True))
+        ok, msg = sync_filters_mod(exe, enabled=enabled, binarize=binarize, posterize=posterize)
+        if notify and msg:
+            self.say(msg, important=not ok)
+        return ok, msg
+
+    def set_filters_mod(
+        self,
+        on: bool | None = None,
+        *,
+        binarize: bool | None = None,
+        posterize: bool | None = None,
+        notify: bool = True,
+    ) -> tuple[bool, str]:
+        if on is not None:
+            self.settings.set('filters_mod.enabled', bool(on))
+        if binarize is not None:
+            self.settings.set('filters_mod.binarize', bool(binarize))
+        if posterize is not None:
+            self.settings.set('filters_mod.posterize', bool(posterize))
+        self.settings.save()
+        return self.sync_filters_mod_files(notify=notify)
+
     # ── 縮時錄影 ──
     def set_recording(self, on: bool):
         if self.service.paused:
@@ -800,6 +841,10 @@ class CompanionApp(QObject):
         self.apply_bubble_skin()
         self.apply_hotkeys()
         self.service.apply_recorder_settings()
+        if hasattr(self, 'filter_watcher'):
+            self.filter_watcher.set_enabled(bool(self.settings.get('filters_mod.enabled', False)))
+        elif bool(self.settings.get('filters_mod.enabled', False)):
+            self.sync_filters_mod_files(notify=False)
         self.opener.exe_path = self.settings.get('sai2_exe', '') or self.opener.exe_path
         self.set_theme()
 

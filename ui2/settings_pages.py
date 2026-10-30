@@ -136,6 +136,10 @@ def general_page(ctl) -> QWidget:
           '開著 SAI2 時會自動填入', 'sai2.exe (*.exe)'), stack=True)
     g.row('停筆多久不算動筆', '超過這段時間沒有下筆，就不計入動筆時間（下次啟動生效）',
           _spin(ctl, 'idle_timeout', 3, 120, ' 秒', float))
+    g.row('啟用 SAI2 內建濾鏡擴充 (Mod)', '在 SAI2「濾鏡」選單內置「效果（二值化、色調分離）」，所有操作直接於 SAI2 內進行（下次啟動 SAI2 生效）',
+          _toggle(ctl, 'filters_mod.enabled',
+                  lambda: ctl.set_filters_mod(bool(ctl.settings.get('filters_mod.enabled')))
+                  if hasattr(ctl, 'set_filters_mod') else None))
     lay.addWidget(g)
 
     g = SettingGroup('資料')

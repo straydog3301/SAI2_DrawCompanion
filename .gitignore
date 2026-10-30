@@ -19,6 +19,10 @@ videos/
 !DrawCompanion2.spec
 *.log
 *.exe
+*.pdb
+*.lib
+*.obj
+*.o
 
 # App configuration and database
 sai2_draw_time.json

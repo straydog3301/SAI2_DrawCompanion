@@ -10,7 +10,7 @@ block_tk()
 CORE = ['paths', 'sai2_win', 'i18n', 'tracker', 'timelapse', 'brush_assets', 'daily_quests', 'growth',
         'snapshots', 'study_lessons', 'study_refs', 'psd_writer', 'single_instance', 'sai2_launcher',
         'hotkeys', 'settings2', 'pet_pack', 'pet_builtin', 'pet_state', 'file_paths', 'companion', 'autostart',
-        'sketch_source', 'study_tools', 'stats', 'works', 'slots', 'rules', 'backup', 'bubble_skin', 'onboarding', 'data_text', 'version', 'diagnostics', 'work_thumbs', 'exclusions', 'canvas_crop', 'ai_review', 'unsaved', 'video_tools', 'notes']
+        'sketch_source', 'study_tools', 'stats', 'works', 'slots', 'rules', 'backup', 'bubble_skin', 'onboarding', 'data_text', 'version', 'diagnostics', 'work_thumbs', 'exclusions', 'canvas_crop', 'ai_review', 'unsaved', 'video_tools', 'notes', 'sai2_filters']
 for m in CORE:
     importlib.import_module('core.' + m)
 check(len(CORE) == len([f for f in os.listdir(os.path.join(REPO, 'core')) if f.endswith('.py') and f != '__init__.py']),
@@ -64,4 +64,39 @@ dr.ellipse((600, 400, 800, 600), fill=(160, 90, 70))
 cut = trim_workspace(shot)
 check(cut.size == (600, 450), f'trim ignores frame + scrollbars: {cut.size}')
 check(trim_workspace(Image.new('RGB', (300, 200), (61, 65, 80))).size == (300, 200), 'empty workspace kept')
+
+# SAI2 濾鏡演算法測試：二值化、色調分離與 Alpha 保留
+from core import sai2_filters as SF  # noqa: E402
+grad = Image.new('RGBA', (4, 1))
+grad.putdata([(10, 10, 10, 200), (127, 127, 127, 150), (128, 128, 128, 255), (250, 250, 250, 0)])
+b_img = SF.apply_binarize(grad, threshold=128, transparent_white=False)
+b_px = list(b_img.getdata())
+check(b_px[0] == (0, 0, 0, 200) and b_px[1] == (0, 0, 0, 150), f'binarize dark: {b_px[:2]}')
+check(b_px[2] == (255, 255, 255, 255) and b_px[3] == (255, 255, 255, 0), f'binarize light: {b_px[2:]}')
+
+b_tr = SF.apply_binarize(grad, threshold=128, transparent_white=True)
+b_tr_px = list(b_tr.getdata())
+check(b_tr_px[0] == (0, 0, 0, 200) and b_tr_px[2] == (255, 255, 255, 0), f'binarize transparent white: {b_tr_px}')
+
+p_img = SF.apply_posterize(grad, levels=2)
+p_px = list(p_img.getdata())
+check(p_px[0] == (0, 0, 0, 200) and p_px[2] == (255, 255, 255, 255) and p_px[3] == (255, 255, 255, 0),
+      f'posterize levels=2: {p_px}')
+p4_lut = SF.posterize_lut(4)
+check(sorted(set(p4_lut)) == [0, 85, 170, 255], f'posterize 4 levels lut: {sorted(set(p4_lut))}')
+
+# SAI2 原生濾鏡擴充模組（dwmapi.dll + sai2_filters_mod.ini）部署與開關測試
+fake_sai2_dir = os.path.join(d, 'sai2_inst')
+os.makedirs(fake_sai2_dir, exist_ok=True)
+fake_sai2_exe = os.path.join(fake_sai2_dir, 'sai2.exe')
+open(fake_sai2_exe, 'wb').close()
+check(os.path.isfile(SF.get_mod_dll_source_path()), 'compiled native dwmapi.dll exists')
+ok, _msg = SF.sync_filters_mod(fake_sai2_exe, enabled=True, binarize=True, posterize=False)
+check(ok, 'sync_filters_mod enable succeeds')
+st_mod = SF.get_mod_status(fake_sai2_exe)
+check(st_mod['dll_installed'] and st_mod['enabled'] and st_mod['binarize'] and not st_mod['posterize'],
+      f'mod status after enable: {st_mod}')
+ok, _msg = SF.sync_filters_mod(fake_sai2_exe, enabled=False, binarize=True, posterize=True)
+st_mod2 = SF.get_mod_status(fake_sai2_exe)
+check(ok and not st_mod2['enabled'] and not st_mod2['dll_installed'], f'mod status after disable: {st_mod2}')
 done()

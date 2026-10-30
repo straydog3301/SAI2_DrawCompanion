@@ -184,6 +184,29 @@ ctl.run_slot('record')
 check(not s.get('timelapse.enabled') and ctl.service.recorder.active_file is None, 'record slot toggles off')
 ctl._on_export(100, '完成：x.mp4')
 check(any('影片完成' in x for x in said) and ctl.export_state[0] is None, 'export done bubble')
+
+# ─── 工具：SAI2 內建濾鏡擴充 (Mod) 與個別濾鏡開關 ──
+from core import sai2_filters as SF  # noqa: E402
+fake_sai2_dir = os.path.join(d, 'fake_sai2')
+os.makedirs(fake_sai2_dir, exist_ok=True)
+fake_sai2_exe = os.path.join(fake_sai2_dir, 'sai2.exe')
+open(fake_sai2_exe, 'wb').close()
+s.set('sai2_exe', fake_sai2_exe)
+
+tp.flt_toggle.setChecked(True)
+st_mod = SF.get_mod_status(fake_sai2_exe)
+check(bool(s.get('filters_mod.enabled')) and st_mod['dll_installed'] and st_mod['enabled'],
+      'filters mod enabled and dwmapi.dll deployed from tools page')
+
+tp.flt_pos_toggle.setChecked(False)
+st_mod = SF.get_mod_status(fake_sai2_exe)
+check(not bool(s.get('filters_mod.posterize')) and st_mod['binarize'] and not st_mod['posterize'],
+      'posterize toggle synced to sai2_filters_mod.ini')
+
+tp.flt_toggle.setChecked(False)
+st_mod = SF.get_mod_status(fake_sai2_exe)
+check(not s.get('filters_mod.enabled') and not st_mod['enabled'] and not st_mod['dll_installed'],
+      'filters mod disabled and dwmapi.dll removed from tools page')
 mw.close()
 
 # ─── 結束時等影片合成 ──

@@ -13,6 +13,11 @@ import os
 import sys
 import glob
 import time
+
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))

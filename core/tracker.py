@@ -865,7 +865,7 @@ class DrawTracker:
         self.save()
 
     def _watch_save(self, filename, fg_hwnd):
-        owner = _sai2_dialog_owner(fg_hwnd) if fg_hwnd else None
+        owner = _sai2_dialog_owner(fg_hwnd)
         if owner:
             self._sai_main = owner
         event = self._save_watch.observe(filename, bool(owner), lambda: _sai2_doc_windows(self._sai_main))

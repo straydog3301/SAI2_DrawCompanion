@@ -41,6 +41,7 @@ if errorlevel 1 (
 echo.
 echo [3/3] 正在複製語言檔與更新輸出檔...
 xcopy /E /I /Y locales dist\locales >nul
+xcopy /E /I /Y native\sai2mod dist\native\sai2mod >nul
 copy /Y dist\DrawCompanion2.exe . >nul
 
 echo.

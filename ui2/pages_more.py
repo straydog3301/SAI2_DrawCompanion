@@ -1095,7 +1095,30 @@ class ToolsPage(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(24)
-        lay.addWidget(PageHeader('工具', '縮時錄影會在背景錄下你畫圖的過程，畫完自動合成影片'))
+        lay.addWidget(PageHeader('工具', 'SAI2 內建濾鏡擴充與縮時錄影等輔助工具'))
+
+        flt_card = Card('SAI2 內建濾鏡擴充 (Mod)',
+                        '將「效果」子選單直接內置於 SAI2 頂部「濾鏡」選單中，所有參數調整、16-bit 即時預覽與圖層套用（含 Ctrl+Z 復原）皆直接於 SAI2 內進行（設定後於下次啟動 SAI2 生效）')
+        self.flt_toggle = ToggleSwitch(bool(self.s.get('filters_mod.enabled', False)))
+        self.flt_toggle.toggled.connect(self._toggle_filters_mod)
+        flt_card.head.addWidget(self.flt_toggle)
+        self.flt_status_box = QVBoxLayout()
+        self.flt_status_box.setSpacing(6)
+        flt_card.lay.addLayout(self.flt_status_box)
+        lay.addWidget(flt_card)
+
+        flt_grp = SettingGroup('內建「濾鏡 → 效果」項目開關（下次啟動 SAI2 生效）')
+        self.flt_bin_toggle = ToggleSwitch(bool(self.s.get('filters_mod.binarize', True)))
+        self.flt_bin_toggle.toggled.connect(lambda v: self._toggle_single_filter('binarize', v))
+        flt_grp.row('二值化 (Threshold)',
+                    '依亮度臨界值（1～255）將圖層轉為黑白，支援「將白色轉為透明（提取線稿）」與原生 Ctrl+Z 復原',
+                    self.flt_bin_toggle)
+        self.flt_pos_toggle = ToggleSwitch(bool(self.s.get('filters_mod.posterize', True)))
+        self.flt_pos_toggle.toggled.connect(lambda v: self._toggle_single_filter('posterize', v))
+        flt_grp.row('色調分離 (Posterize)',
+                    '將圖層 RGB 各色版量化為指定色階數（2～64 階），保留透明度、選取範圍與原生 Ctrl+Z 復原',
+                    self.flt_pos_toggle)
+        lay.addWidget(flt_grp)
 
         rec = Card('縮時錄影', '只在動筆時擷取，停筆就暫停；畫哪個作品就錄哪個，關閉 SAI2（或所有檔案）時每個作品各自合成影片')
         self.toggle = ToggleSwitch(bool(self.s.get('timelapse.enabled')))
@@ -1280,8 +1303,87 @@ class ToolsPage(QWidget):
         self.ctl.set_recording(on)
         self.refresh()
 
+    def _toggle_filters_mod(self, on):
+        from core.sai2_filters import sync_filters_mod
+        if hasattr(self.ctl, 'set_filters_mod'):
+            self.ctl.set_filters_mod(on)
+        else:
+            self.s.set('filters_mod.enabled', bool(on))
+            self.s.save()
+            sync_filters_mod(
+                self.s.get('sai2_exe', '') or '',
+                enabled=bool(on),
+                binarize=bool(self.s.get('filters_mod.binarize', True)),
+                posterize=bool(self.s.get('filters_mod.posterize', True)),
+            )
+        self.refresh()
+
+    def _toggle_single_filter(self, filter_key: str, on: bool):
+        from core.sai2_filters import sync_filters_mod
+        kw = {filter_key: bool(on)}
+        if hasattr(self.ctl, 'set_filters_mod'):
+            self.ctl.set_filters_mod(**kw)
+        else:
+            self.s.set(f'filters_mod.{filter_key}', bool(on))
+            self.s.save()
+            sync_filters_mod(
+                self.s.get('sai2_exe', '') or '',
+                enabled=bool(self.s.get('filters_mod.enabled', False)),
+                binarize=bool(self.s.get('filters_mod.binarize', True)),
+                posterize=bool(self.s.get('filters_mod.posterize', True)),
+            )
+        self.refresh()
+
+    def _refresh_filters_mod(self):
+        from core.sai2_filters import get_mod_status
+        _clear(self.flt_status_box)
+        enabled = bool(self.s.get('filters_mod.enabled', False))
+        bin_on = bool(self.s.get('filters_mod.binarize', True))
+        pos_on = bool(self.s.get('filters_mod.posterize', True))
+
+        if self.flt_toggle.isChecked() != enabled:
+            self.flt_toggle.blockSignals(True)
+            self.flt_toggle.setChecked(enabled)
+            self.flt_toggle.blockSignals(False)
+        if self.flt_bin_toggle.isChecked() != bin_on:
+            self.flt_bin_toggle.blockSignals(True)
+            self.flt_bin_toggle.setChecked(bin_on)
+            self.flt_bin_toggle.blockSignals(False)
+        if self.flt_pos_toggle.isChecked() != pos_on:
+            self.flt_pos_toggle.blockSignals(True)
+            self.flt_pos_toggle.setChecked(pos_on)
+            self.flt_pos_toggle.blockSignals(False)
+
+        self.flt_bin_toggle.setEnabled(enabled)
+        self.flt_pos_toggle.setEnabled(enabled)
+
+        st = get_mod_status(self.s.get('sai2_exe', '') or '')
+        sai2_dir = st.get('sai2_dir', '')
+
+        if not enabled or (not bin_on and not pos_on):
+            self.flt_status_box.addWidget(Chip('關閉', 'neutral'), 0, Qt.AlignLeft)
+            self.flt_status_box.addWidget(label('開啟開關後，會將原生濾鏡擴充模組部署至 SAI2 資料夾（於下次啟動 SAI2 時生效）。', 'caption'))
+            return
+
+        if st.get('dll_installed') and st.get('enabled'):
+            self.flt_status_box.addWidget(Chip('● 已啟用（下次啟動 SAI2 生效）', 'ok'), 0, Qt.AlignLeft)
+            active_names = [ name for k, name in (('binarize', '二值化'), ('posterize', '色調分離'))
+                             if (bin_on if k == 'binarize' else pos_on) ]
+            self.flt_status_box.addWidget(label(
+                f"已部署至：{sai2_dir}\n"
+                f"啟用項目：{'、'.join(active_names)}（直接於 SAI2 頂部選單「濾鏡 → 效果」操作）",
+                'caption'
+            ))
+        elif sai2_dir:
+            self.flt_status_box.addWidget(Chip('待同步至 SAI2 資料夾', 'accent'), 0, Qt.AlignLeft)
+            self.flt_status_box.addWidget(label(f'目標 SAI2 資料夾：{sai2_dir}（重新切換開關即可立即部署，下次啟動 SAI2 生效）', 'caption'))
+        else:
+            self.flt_status_box.addWidget(Chip('尚未偵測到 SAI2 路徑', 'warn'), 0, Qt.AlignLeft)
+            self.flt_status_box.addWidget(label('請先開啟一次 SAI2，或至「設定 › 一般」指定 sai2.exe 位置。', 'caption'))
+
     def refresh(self):
         from core.timelapse import find_ffmpeg
+        self._refresh_filters_mod()
         _clear(self.status_box)
         info = self.svc.recording_info()
         if self.toggle.isChecked() != info['enabled']:
