@@ -11,7 +11,9 @@
  */
 
 #include <windows.h>
+#include <intrin.h>
 #include <stdint.h>
+#include <string.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -21,6 +23,8 @@
 #define MENU_ID_EFFECT_SUBMENU  0x29000
 #define MENU_ID_BINARIZE        0x29001
 #define MENU_ID_POSTERIZE       0x29002
+#define MENU_ID_PIXELATE        0x29003
+#define MENU_ID_SHARPEN         0x29004
 
 #define STR_BIN_TITLE           0x40001
 #define STR_BIN_LBL             0x40002
@@ -29,6 +33,12 @@
 #define STR_POS_TITLE           0x40005
 #define STR_POS_LBL             0x40006
 #define STR_POS_SLIDER          0x40007
+#define STR_PIX_TITLE           0x40008
+#define STR_PIX_LBL             0x40009
+#define STR_PIX_SLIDER          0x4000A
+#define STR_SHP_TITLE           0x4000B
+#define STR_SHP_LBL             0x4000C
+#define STR_SHP_SLIDER          0x4000D
 
 typedef struct {
     const wchar_t *key;
@@ -48,6 +58,12 @@ static Sai2StrEntry g_mod_strings[16] = {
     { L"Mod_Posterize_Title",   L"色調分離",                   NULL, 0, 0, 0 },
     { L"Mod_Posterize_LvLbl",   L"色階數 :",                   NULL, 0, 0, 0 },
     { L"Mod_Posterize_LvCtl",   L"",                           NULL, 0, 0, 0 },
+    { L"Mod_Pixelate_Title",    L"像素化",                     NULL, 0, 0, 0 },
+    { L"Mod_Pixelate_SzLbl",    L"強度 :",                     NULL, 0, 0, 0 },
+    { L"Mod_Pixelate_SzCtl",    L"",                           NULL, 0, 0, 0 },
+    { L"Mod_Sharpen_Title",     L"銳化",                       NULL, 0, 0, 0 },
+    { L"Mod_Sharpen_AmtLbl",    L"強度 :",                     NULL, 0, 0, 0 },
+    { L"Mod_Sharpen_AmtCtl",    L"",                           NULL, 0, 0, 0 },
 };
 
 typedef struct {
@@ -88,6 +104,11 @@ typedef struct {
     uint32_t  ev_slider_begin;
     uint32_t  ev_checkbox_click;
     uint32_t  slider_val_off;
+
+    // 介面字串查找：SAI2 依 (id >> 16) & 3 選字串表，表從「UI context + 0x90」讀，
+    // 只有拿不到 context 時才用全域表 rva_glob_str_tbl。context 在 SAI2 啟動時就複製好全域表，
+    // 所以只改全域表不夠，還要把 slot 0 寫進每個 context（見 ensure_string_table_installed）
+    uintptr_t rva_default_ctx;  // 沒有視窗資訊時用的預設 context 指標（0 = 未知）
 } Sai2Offsets;
 
 static const Sai2Offsets k_profiles[] = {
@@ -162,6 +183,7 @@ static const Sai2Offsets k_profiles[] = {
         .ev_slider_begin    = 0x544,
         .ev_checkbox_click  = 0x523,
         .slider_val_off     = 0xc8,
+        .rva_default_ctx    = 0x483d58,
     },
 };
 
@@ -173,6 +195,9 @@ static WNDPROC g_orig_wndproc = NULL;
 static int g_cfg_enabled   = 1;
 static int g_cfg_binarize  = 1;
 static int g_cfg_posterize = 1;
+static int g_cfg_pixelate  = 1;
+static int g_cfg_sharpen   = 1;
+static int g_cfg_debug     = 0;    // [FiltersMod] debug=1 才寫 sai2mod.log（預設關閉）
 
 // Function pointer types
 typedef void *(*fn_alloc_t)(size_t sz);
@@ -198,6 +223,11 @@ typedef void (*fn_set_slider_t)(void *ctrl, int val, int notify);
 typedef void (*fn_set_checkbox_t)(void *ctrl, int val, int notify);
 typedef void *(*fn_get_userdata_t)(void *ctx);
 typedef void (*fn_preview_act_t)(void);
+
+// 前向宣告（定義在後面的「字串表」與「濾鏡執行」段落）
+static void log_pixel_call(const char *name, int count, const void *dst, const void *src, void *ret);
+static void install_for_dialog(void *dlg, const char *who);
+static void log_prep(const char *name, const char *phase, void *rect);
 
 // ─────────────────────────────────────────────────────────────────────────
 // Filter 1: 二值化 (Binarize / Threshold)
@@ -248,6 +278,7 @@ static void *bin_check_cb(void *ctrl, uint32_t ctrl_id, uint32_t ev, void *a4, v
 }
 
 static void bin_build_ui(BinarizeState *st, void *dlg, void *parent_box, void *a4) {
+    install_for_dialog(dlg, "binarize");
     void *vbox = ((fn_create_vbox_t)(g_base + g_off->rva_create_vbox))(parent_box, 0, 0, 0);
     void *grid = ((fn_create_grid_t)(g_base + g_off->rva_create_grid))(vbox, 2, 3);
     ((fn_set_col_w_t)(g_base + g_off->rva_set_col_w))(grid, 1, 0x200);
@@ -301,6 +332,7 @@ static uint8_t bin_prep_commit(BinarizeState *st, BinarizeParams *p, void *rect)
 }
 
 static void bin_process_pixels(BinarizeState *st, int count, uint16_t *dst, const uint16_t *src) {
+    log_pixel_call("binarize", count, dst, src, _ReturnAddress());
     int32_t th = st->r_threshold;
     int32_t tw = st->r_trans_white;
     if (th < 1) th = 1;
@@ -371,6 +403,7 @@ static void *pos_slider_cb(void *ctrl, uint32_t ctrl_id, uint32_t ev, void *a4, 
 }
 
 static void pos_build_ui(PosterizeState *st, void *dlg, void *parent_box, void *a4) {
+    install_for_dialog(dlg, "posterize");
     void *vbox = ((fn_create_vbox_t)(g_base + g_off->rva_create_vbox))(parent_box, 0, 0, 0);
     void *grid = ((fn_create_grid_t)(g_base + g_off->rva_create_grid))(vbox, 2, 3);
     ((fn_set_col_w_t)(g_base + g_off->rva_set_col_w))(grid, 1, 0x200);
@@ -405,11 +438,13 @@ static void pos_copy_params_2026(PosterizeState *st, PosterizeParams *p) {
 }
 
 static uint8_t pos_prep_preview(PosterizeState *st, uint8_t flag, PosterizeParams *p, void *rect) {
+    log_prep("posterize", "preview", rect);
     st->r_levels = p->levels;
     return 1;
 }
 
 static uint8_t pos_prep_commit(PosterizeState *st, PosterizeParams *p, void *rect) {
+    log_prep("posterize", "commit", rect);
     st->r_levels = p->levels;
     return 1;
 }
@@ -427,6 +462,7 @@ static inline uint16_t posterize_chan(uint32_t c, uint32_t a, uint32_t lv) {
 }
 
 static void pos_process_pixels(PosterizeState *st, int count, uint16_t *dst, const uint16_t *src) {
+    log_pixel_call("posterize", count, dst, src, _ReturnAddress());
     int32_t lv = st->r_levels;
     if (lv < 2) lv = 2;
     if (lv > 64) lv = 64;
@@ -449,29 +485,420 @@ static void pos_process_pixels(PosterizeState *st, int count, uint16_t *dst, con
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Filter 3: 像素化 (Pixelate / Mosaic)
+//
+// 逐點濾鏡引擎一次給一塊 32x32、對齊 32 像素邊界的磚塊（count=1024）。只要區塊大小取
+// 32 的因數（2/4/8/16/32），每個區塊就完整落在單一磚塊內、且邊界對齊，不會有接縫。
+// ─────────────────────────────────────────────────────────────────────────
+
+#define PIX_TILE_W 32
+
+typedef struct {
+    int32_t  r_block;
+    uint8_t  pad0[0x40 - 4];
+    void    *ctrl_slider;
+    void    *ctrl_unused1;
+    void    *ctrl_unused2;
+    int32_t  ui_block;
+    uint8_t  pad1[0x80 - 0x5c];
+} PixelateState;
+
+typedef struct {
+    int32_t block;
+    int32_t pad0;
+    int64_t pad1;
+} PixelateParams;
+
+static PixelateState *g_cur_pix_state = NULL;
+
+// 滑桿是 1~5 的強度等級，對應 5 種無接縫的區塊大小（都是 32 的因數）
+static int pix_level_to_block(int level) {
+    static const int blocks[] = {2, 4, 8, 16, 32};
+    if (level < 1) level = 1;
+    if (level > 5) level = 5;
+    return blocks[level - 1];
+}
+
+static void *pix_slider_cb(void *ctrl, uint32_t ctrl_id, uint32_t ev, void *a4, void *a5, void *a6, void *a7) {
+    PixelateState *st = (PixelateState *)((fn_get_userdata_t)(g_base + g_off->rva_get_userdata))(a7);
+    if (!st) st = g_cur_pix_state;
+    uint32_t ev0 = g_off->ev_slider_begin;
+    if (st && ev >= ev0 && ev <= ev0 + 2 && ctrl_id == STR_PIX_SLIDER) {
+        st->ui_block = *(int32_t *)((char *)a5 + g_off->slider_val_off);
+        if (ev == ev0)          ((fn_preview_act_t)(g_base + g_off->rva_prev_drag_begin))();
+        else if (ev == ev0 + 1) ((fn_preview_act_t)(g_base + g_off->rva_prev_drag_move))();
+        else                    ((fn_preview_act_t)(g_base + g_off->rva_prev_drag_end))();
+    }
+    return 0;
+}
+
+static void pix_build_ui(PixelateState *st, void *dlg, void *parent_box, void *a4) {
+    install_for_dialog(dlg, "pixelate");
+    void *vbox = ((fn_create_vbox_t)(g_base + g_off->rva_create_vbox))(parent_box, 0, 0, 0);
+    void *grid = ((fn_create_grid_t)(g_base + g_off->rva_create_grid))(vbox, 2, 3);
+    ((fn_set_col_w_t)(g_base + g_off->rva_set_col_w))(grid, 1, 0x200);
+    ((fn_set_col_w_t)(g_base + g_off->rva_set_col_w))(grid, 2, 0);
+
+    void *row1 = ((fn_add_row_t)(g_base + g_off->rva_add_row))(vbox, grid, 0, 0);
+    ((fn_add_label_t)(g_base + g_off->rva_add_label))(row1, 1, 0, STR_PIX_LBL);
+    ((fn_add_slider_t)(g_base + g_off->rva_add_slider))(
+        row1, 2, 0, STR_PIX_SLIDER, (void *)pix_slider_cb, 0, 0, 0x169, 0, NULL, 1, 0, 5);
+
+    st->ctrl_slider = ((fn_find_ctrl_t)(g_base + g_off->rva_find_ctrl))(dlg, STR_PIX_SLIDER);
+    if (st->ui_block < 1 || st->ui_block > 5) st->ui_block = 3;
+    ((fn_set_slider_t)(g_base + g_off->rva_set_slider))(st->ctrl_slider, st->ui_block, 0);
+}
+
+static void *pix_create_params_2023(PixelateState *st) {
+    PixelateParams *p = (PixelateParams *)((fn_alloc_t)(g_base + g_off->rva_alloc))(sizeof(PixelateParams));
+    if (p) {
+        p->block = (st->ui_block >= 1 && st->ui_block <= 5) ? st->ui_block : 3;  // 強度等級 1~5
+        p->pad0  = 0;
+        p->pad1  = 0;
+    }
+    return p;
+}
+
+static void pix_copy_params_2026(PixelateState *st, PixelateParams *p) {
+    if (p) {
+        p->block = (st->ui_block >= 1 && st->ui_block <= 5) ? st->ui_block : 3;  // 強度等級 1~5
+        p->pad0  = 0;
+        p->pad1  = 0;
+    }
+}
+
+static uint8_t pix_prep_preview(PixelateState *st, uint8_t flag, PixelateParams *p, void *rect) {
+    log_prep("pixelate", "preview", rect);
+    st->r_block = p->block;
+    return 1;
+}
+
+static uint8_t pix_prep_commit(PixelateState *st, PixelateParams *p, void *rect) {
+    log_prep("pixelate", "commit", rect);
+    st->r_block = p->block;
+    return 1;
+}
+
+static void pix_process_pixels(PixelateState *st, int count, uint16_t *dst, const uint16_t *src) {
+    log_pixel_call("pixelate", count, dst, src, _ReturnAddress());
+    int b = pix_level_to_block(st->r_block);
+    const int W = PIX_TILE_W;
+    if (count != W * W) {
+        // 不是預期的 32x32 磚塊（例如邊緣磚塊）：原樣複製，寧可不處理也不要破圖
+        memcpy(dst, src, (size_t)count * 4 * sizeof(uint16_t));
+        return;
+    }
+    for (int by = 0; by < W; by += b) {
+        for (int bx = 0; bx < W; bx += b) {
+            uint64_t sb = 0, sg = 0, sr = 0, sa = 0;
+            for (int y = 0; y < b; y++) {
+                const uint16_t *row = src + ((by + y) * W + bx) * 4;
+                for (int x = 0; x < b; x++) {
+                    sb += row[x * 4 + 0];
+                    sg += row[x * 4 + 1];
+                    sr += row[x * 4 + 2];
+                    sa += row[x * 4 + 3];
+                }
+            }
+            uint32_t n = (uint32_t)(b * b);
+            uint16_t ab = (uint16_t)(sb / n), ag = (uint16_t)(sg / n),
+                     ar = (uint16_t)(sr / n), aa = (uint16_t)(sa / n);
+            for (int y = 0; y < b; y++) {
+                uint16_t *row = dst + ((by + y) * W + bx) * 4;
+                for (int x = 0; x < b; x++) {
+                    row[x * 4 + 0] = ab;
+                    row[x * 4 + 1] = ag;
+                    row[x * 4 + 2] = ar;
+                    row[x * 4 + 3] = aa;
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Filter 4: 銳化 (Sharpen / Unsharp Mask)
+//
+// 鄰域濾鏡在逐點引擎上做不到無接縫（磚塊固定 32x32、無鄰居、無餘裕），這裡用「磚塊內
+// 3x3 遮罩」近似：把每個 32x32 磚塊當成獨立小圖，邊緣以夾邊取樣。輕度通常看不出來，
+// 強度高時磚塊邊界（每 32 像素）可能出現淡淡接縫。
+// ─────────────────────────────────────────────────────────────────────────
+
+#define SHP_W 32
+
+typedef struct {
+    int32_t  r_amount;
+    uint8_t  pad0[0x40 - 4];
+    void    *ctrl_slider;
+    void    *ctrl_unused1;
+    void    *ctrl_unused2;
+    int32_t  ui_amount;
+    uint8_t  pad1[0x80 - 0x5c];
+} SharpenState;
+
+typedef struct {
+    int32_t amount;
+    int32_t pad0;
+    int64_t pad1;
+} SharpenParams;
+
+static SharpenState *g_cur_shp_state = NULL;
+
+static void *shp_slider_cb(void *ctrl, uint32_t ctrl_id, uint32_t ev, void *a4, void *a5, void *a6, void *a7) {
+    SharpenState *st = (SharpenState *)((fn_get_userdata_t)(g_base + g_off->rva_get_userdata))(a7);
+    if (!st) st = g_cur_shp_state;
+    uint32_t ev0 = g_off->ev_slider_begin;
+    if (st && ev >= ev0 && ev <= ev0 + 2 && ctrl_id == STR_SHP_SLIDER) {
+        st->ui_amount = *(int32_t *)((char *)a5 + g_off->slider_val_off);
+        if (ev == ev0)          ((fn_preview_act_t)(g_base + g_off->rva_prev_drag_begin))();
+        else if (ev == ev0 + 1) ((fn_preview_act_t)(g_base + g_off->rva_prev_drag_move))();
+        else                    ((fn_preview_act_t)(g_base + g_off->rva_prev_drag_end))();
+    }
+    return 0;
+}
+
+static void shp_build_ui(SharpenState *st, void *dlg, void *parent_box, void *a4) {
+    install_for_dialog(dlg, "sharpen");
+    void *vbox = ((fn_create_vbox_t)(g_base + g_off->rva_create_vbox))(parent_box, 0, 0, 0);
+    void *grid = ((fn_create_grid_t)(g_base + g_off->rva_create_grid))(vbox, 2, 3);
+    ((fn_set_col_w_t)(g_base + g_off->rva_set_col_w))(grid, 1, 0x200);
+    ((fn_set_col_w_t)(g_base + g_off->rva_set_col_w))(grid, 2, 0);
+
+    void *row1 = ((fn_add_row_t)(g_base + g_off->rva_add_row))(vbox, grid, 0, 0);
+    ((fn_add_label_t)(g_base + g_off->rva_add_label))(row1, 1, 0, STR_SHP_LBL);
+    ((fn_add_slider_t)(g_base + g_off->rva_add_slider))(
+        row1, 2, 0, STR_SHP_SLIDER, (void *)shp_slider_cb, 0, 0, 0x169, 0, NULL, 1, 0, 10);
+
+    st->ctrl_slider = ((fn_find_ctrl_t)(g_base + g_off->rva_find_ctrl))(dlg, STR_SHP_SLIDER);
+    if (st->ui_amount < 1 || st->ui_amount > 10) st->ui_amount = 3;
+    ((fn_set_slider_t)(g_base + g_off->rva_set_slider))(st->ctrl_slider, st->ui_amount, 0);
+}
+
+static void *shp_create_params_2023(SharpenState *st) {
+    SharpenParams *p = (SharpenParams *)((fn_alloc_t)(g_base + g_off->rva_alloc))(sizeof(SharpenParams));
+    if (p) {
+        p->amount = (st->ui_amount >= 1 && st->ui_amount <= 10) ? st->ui_amount : 3;
+        p->pad0   = 0;
+        p->pad1   = 0;
+    }
+    return p;
+}
+
+static void shp_copy_params_2026(SharpenState *st, SharpenParams *p) {
+    if (p) {
+        p->amount = (st->ui_amount >= 1 && st->ui_amount <= 10) ? st->ui_amount : 3;
+        p->pad0   = 0;
+        p->pad1   = 0;
+    }
+}
+
+static uint8_t shp_prep_preview(SharpenState *st, uint8_t flag, SharpenParams *p, void *rect) {
+    st->r_amount = p->amount;
+    return 1;
+}
+
+static uint8_t shp_prep_commit(SharpenState *st, SharpenParams *p, void *rect) {
+    st->r_amount = p->amount;
+    return 1;
+}
+
+static void shp_process_pixels(SharpenState *st, int count, uint16_t *dst, const uint16_t *src) {
+    log_pixel_call("sharpen", count, dst, src, _ReturnAddress());
+    int amt = st->r_amount;
+    if (amt < 1) amt = 1;
+    if (amt > 10) amt = 10;
+    const int W = SHP_W;
+    if (count != W * W) {
+        memcpy(dst, src, (size_t)count * 4 * sizeof(uint16_t));
+        return;
+    }
+    static const int wgt[3] = {1, 2, 1};   // 3x3 高斯權重 [1 2 1]⊗[1 2 1] / 16
+    for (int y = 0; y < W; y++) {
+        for (int x = 0; x < W; x++) {
+            const uint16_t *c = src + (y * W + x) * 4;
+            uint16_t *o = dst + (y * W + x) * 4;
+            int32_t a = c[3];
+            if (a == 0) {
+                *(uint64_t *)o = 0;
+                continue;
+            }
+            for (int ch = 0; ch < 3; ch++) {
+                int32_t acc = 0;
+                for (int dy = -1; dy <= 1; dy++) {
+                    int yy = y + dy;
+                    if (yy < 0) yy = 0; else if (yy >= W) yy = W - 1;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int xx = x + dx;
+                        if (xx < 0) xx = 0; else if (xx >= W) xx = W - 1;
+                        acc += wgt[dy + 1] * wgt[dx + 1] * src[(yy * W + xx) * 4 + ch];
+                    }
+                }
+                int32_t blur = acc >> 4;                 // ÷16
+                int32_t center = c[ch];
+                int32_t out = center + (amt * (center - blur)) / 4;  // amt=4 → 1.0×；可達 2.5×
+                if (out < 0) out = 0;
+                if (out > a) out = a;                    // 預乘：色版不得超過 alpha
+                o[ch] = (uint16_t)out;
+            }
+            o[3] = (uint16_t)a;
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Filter Registration & Execution
 // ─────────────────────────────────────────────────────────────────────────
 
 static void *g_bin_filter_obj = NULL;
 static void *g_pos_filter_obj = NULL;
+static void *g_pix_filter_obj = NULL;
+static void *g_shp_filter_obj = NULL;
+
+// ── 記錄檔：SAI2 資料夾的 sai2mod.log（只記少量診斷，方便回報問題）──
+static void mod_log(const char *fmt, ...) {
+    if (!g_cfg_debug) return;
+    WCHAR path[MAX_PATH];
+    GetModuleFileNameW(NULL, path, MAX_PATH);
+    WCHAR *slash = path + lstrlenW(path);
+    while (slash > path && slash[-1] != L'\\' && slash[-1] != L'/') slash--;
+    lstrcpyW(slash, L"sai2mod.log");
+    HANDLE h = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    char buf[512];
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    int n = snprintf(buf, sizeof(buf), "%02d:%02d:%02d ", t.wHour, t.wMinute, t.wSecond);
+    va_list ap;
+    va_start(ap, fmt);
+    n += vsnprintf(buf + n, sizeof(buf) - n - 2, fmt, ap);
+    va_end(ap);
+    if (n > (int)sizeof(buf) - 2) n = (int)sizeof(buf) - 2;
+    buf[n++] = '\r';
+    buf[n++] = '\n';
+    DWORD w;
+    WriteFile(h, buf, (DWORD)n, &w, NULL);
+    CloseHandle(h);
+}
+
+// 指標指向的記憶體是否已配置且可讀寫（避免把字串表寫進不是 context 的地方）
+static int mem_rw(const void *p, size_t len) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!p || !VirtualQuery(p, &mbi, sizeof(mbi))) return 0;
+    if (mbi.State != MEM_COMMIT) return 0;
+    if (!(mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY))) return 0;
+    return (const uint8_t *)p + len <= (const uint8_t *)mbi.BaseAddress + mbi.RegionSize;
+}
+
+static int mem_readable(const void *p, size_t len) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!p || !VirtualQuery(p, &mbi, sizeof(mbi))) return 0;
+    if (mbi.State != MEM_COMMIT) return 0;
+    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return 0;
+    return (const uint8_t *)p + len <= (const uint8_t *)mbi.BaseAddress + mbi.RegionSize;
+}
+
+// 診斷：記下 prep 回呼拿到的 rect（判斷是否逐磚塊呼叫、能否取得座標 → 決定鄰域濾鏡可行性）
+static void log_prep(const char *name, const char *phase, void *rect) {
+    if (!g_cfg_debug) return;
+    static volatile LONG c = 0;
+    if (InterlockedIncrement(&c) > 48) return;
+    if (rect && mem_readable(rect, 24)) {
+        int32_t *r = (int32_t *)rect;
+        mod_log("%s %s: [%d %d %d %d %d %d] thread=%lu",
+                name, phase, r[0], r[1], r[2], r[3], r[4], r[5], GetCurrentThreadId());
+    } else {
+        mod_log("%s %s: rect=%p thread=%lu", name, phase, rect, GetCurrentThreadId());
+    }
+}
+
+// 只在「看起來是 UI context」時寫入：SAI2 自己的字串表在 slot 2，context 會有同一個指標
+static int install_into_ctx(uint8_t *ctx, void **glob_str) {
+    if (!mem_rw(ctx + 0x90, 4 * sizeof(void *))) return 0;
+    void **slots = (void **)(ctx + 0x90);
+    if (slots[0] == g_mod_strings) return 1;
+    if (!glob_str[2] || slots[2] != glob_str[2]) return 0;
+    slots[0] = g_mod_strings;
+    return 1;
+}
+
+static int install_into_window(HWND h, void **glob_str) {
+    uint8_t *wi = (uint8_t *)GetPropW(h, L"SYSTEMAX-WININFO");
+    if (!mem_rw(wi, 0x60)) return 0;
+    int n = 0;
+    // UI context 指標藏在 wininfo 裡（2026=+0x30、2023=+0x38）；對話框可能用別的位移，
+    // 所以掃一段範圍，每個都用「slot 2 == SAI2 全域字串表」驗證，寫錯位置會被擋下
+    for (size_t off = 0x28; off <= 0x50; off += 8) {
+        uint8_t *ctx = *(uint8_t **)(wi + off);
+        if (ctx && install_into_ctx(ctx, glob_str)) n++;
+    }
+    return n;
+}
+
+static BOOL CALLBACK install_child_cb(HWND h, LPARAM lp) {
+    *(int *)lp += install_into_window(h, (void **)(g_base + g_off->rva_glob_str_tbl));
+    return TRUE;
+}
+
+static BOOL CALLBACK install_enum_cb(HWND h, LPARAM lp) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(h, &pid);
+    if (pid == GetCurrentProcessId()) {
+        int *count = (int *)lp;
+        *count += install_into_window(h, (void **)(g_base + g_off->rva_glob_str_tbl));
+        EnumChildWindows(h, install_child_cb, lp);   // 對話框若是子視窗也要涵蓋
+    }
+    return TRUE;
+}
+
+// obj 可能直接就是 UI context（例如對話框物件），也試著寫進去
+static int install_ctx_object(void *obj) {
+    if (!obj || !g_off) return 0;
+    void **glob_str = (void **)(g_base + g_off->rva_glob_str_tbl);
+    return install_into_ctx((uint8_t *)obj, glob_str) ? 1 : 0;
+}
 
 static void ensure_string_table_installed(void) {
-    if (!g_main_hwnd || !g_off) return;
-    uint8_t *wi = (uint8_t *)GetPropW(g_main_hwnd, L"SYSTEMAX-WININFO");
-    if (!wi) return;
-    uint8_t *ui_ctx = *(uint8_t **)(wi + 0x38);
+    if (!g_off) return;
     void **glob_str = (void **)(g_base + g_off->rva_glob_str_tbl);
-    glob_str[0] = g_mod_strings;
-    if (ui_ctx) {
-        void **ctx_str = (void **)(ui_ctx + 0x90);
-        ctx_str[0] = g_mod_strings;
+    glob_str[0] = g_mod_strings;            // slot 0 SAI2 沒有使用（它只註冊 slot 2）
+
+    int n = 0;
+    if (g_off->rva_default_ctx) {
+        uint8_t *ctx = *(uint8_t **)(g_base + g_off->rva_default_ctx);
+        if (ctx && install_into_ctx(ctx, glob_str)) n++;
     }
+    EnumWindows(install_enum_cb, (LPARAM)&n);
+
+    static int s_last = -1;
+    if (n != s_last) {
+        mod_log("string table installed into %d UI context(s) (profile %d)", n, g_off->ver_type);
+        s_last = n;
+    }
+}
+
+// 對話框建立時（SAI2 呼叫 build_ui）再裝一次：此時對話框視窗／context 才存在
+static void install_for_dialog(void *dlg, const char *who) {
+    ensure_string_table_installed();
+    int d = install_ctx_object(dlg);
+    mod_log("%s build_ui: dlg=%p installed_as_ctx=%d", who, dlg, d);
+}
+
+// 診斷：像素回呼前幾次被呼叫時的參數（判斷一次處理的範圍，供之後的濾鏡使用）
+static volatile LONG g_px_log_count = 0;
+static void log_pixel_call(const char *name, int count, const void *dst, const void *src, void *ret) {
+    if (!g_cfg_debug) return;
+    if (InterlockedIncrement(&g_px_log_count) > 12) return;
+    mod_log("%s: count=%d dst-src=%lld caller=+0x%llx thread=%lu", name, count,
+            (long long)((const char *)dst - (const char *)src),
+            (unsigned long long)((uintptr_t)ret - g_base), GetCurrentThreadId());
 }
 
 static void *create_filter_instance(
     size_t state_size,
     int32_t init_val,
     size_t init_val_off,
+    void **cur_state_slot,       // 存一份目前狀態指標（濾鏡間狀態結構大小可能相同，不能用大小判斷）
     void *cb_build_ui,
     void *cb_params_2023,
     void *cb_params_2026,
@@ -485,12 +912,7 @@ static void *create_filter_instance(
     if (!st) return NULL;
     memset(st, 0, state_size);
     *(int32_t *)(st + init_val_off) = init_val;
-
-    if (state_size == sizeof(BinarizeState)) {
-        g_cur_bin_state = (BinarizeState *)st;
-    } else if (state_size == sizeof(PosterizeState)) {
-        g_cur_pos_state = (PosterizeState *)st;
-    }
+    if (cur_state_slot) *cur_state_slot = st;
 
     uint8_t desc[0xB0];
     memset(desc, 0, sizeof(desc));
@@ -552,6 +974,7 @@ static void open_binarize_filter(void) {
             sizeof(BinarizeState),
             128,
             offsetof(BinarizeState, ui_threshold),
+            (void **)&g_cur_bin_state,
             (void *)bin_build_ui,
             (void *)bin_create_params_2023,
             (void *)bin_copy_params_2026,
@@ -571,6 +994,7 @@ static void open_posterize_filter(void) {
             sizeof(PosterizeState),
             4,
             offsetof(PosterizeState, ui_levels),
+            (void **)&g_cur_pos_state,
             (void *)pos_build_ui,
             (void *)pos_create_params_2023,
             (void *)pos_copy_params_2026,
@@ -582,6 +1006,46 @@ static void open_posterize_filter(void) {
         );
     }
     launch_filter_obj(g_pos_filter_obj);
+}
+
+static void open_pixelate_filter(void) {
+    if (!g_pix_filter_obj) {
+        g_pix_filter_obj = create_filter_instance(
+            sizeof(PixelateState),
+            3,
+            offsetof(PixelateState, ui_block),
+            (void **)&g_cur_pix_state,
+            (void *)pix_build_ui,
+            (void *)pix_create_params_2023,
+            (void *)pix_copy_params_2026,
+            (void *)pix_prep_preview,
+            (void *)pix_prep_commit,
+            (void *)pix_process_pixels,
+            STR_PIX_TITLE,
+            "adjustment.pixelate"
+        );
+    }
+    launch_filter_obj(g_pix_filter_obj);
+}
+
+static void open_sharpen_filter(void) {
+    if (!g_shp_filter_obj) {
+        g_shp_filter_obj = create_filter_instance(
+            sizeof(SharpenState),
+            3,
+            offsetof(SharpenState, ui_amount),
+            (void **)&g_cur_shp_state,
+            (void *)shp_build_ui,
+            (void *)shp_create_params_2023,
+            (void *)shp_copy_params_2026,
+            (void *)shp_prep_preview,
+            (void *)shp_prep_commit,
+            (void *)shp_process_pixels,
+            STR_SHP_TITLE,
+            "adjustment.sharpen"
+        );
+    }
+    launch_filter_obj(g_shp_filter_obj);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -629,14 +1093,16 @@ static HMENU get_sai2_filter_menu(HWND hwnd) {
 }
 
 static void ensure_effects_menu_injected(HWND hwnd) {
-    if (!g_cfg_enabled || (!g_cfg_binarize && !g_cfg_posterize)) return;
+    if (!g_cfg_enabled || (!g_cfg_binarize && !g_cfg_posterize && !g_cfg_pixelate && !g_cfg_sharpen)) return;
     ensure_string_table_installed();
     HMENU h_filter = get_sai2_filter_menu(hwnd);
     if (!h_filter) return;
 
     int already_injected =
         (GetMenuState(h_filter, MENU_ID_BINARIZE, MF_BYCOMMAND) != (UINT)-1) ||
-        (GetMenuState(h_filter, MENU_ID_POSTERIZE, MF_BYCOMMAND) != (UINT)-1);
+        (GetMenuState(h_filter, MENU_ID_POSTERIZE, MF_BYCOMMAND) != (UINT)-1) ||
+        (GetMenuState(h_filter, MENU_ID_PIXELATE, MF_BYCOMMAND) != (UINT)-1) ||
+        (GetMenuState(h_filter, MENU_ID_SHARPEN, MF_BYCOMMAND) != (UINT)-1);
 
     if (!already_injected) {
         HMENU h_eff = CreatePopupMenu();
@@ -664,6 +1130,28 @@ static void ensure_effects_menu_injected(HWND hwnd) {
             item.fState     = MFS_ENABLED;
             item.wID        = MENU_ID_POSTERIZE;
             item.dwTypeData = L"色調分離(&P) ...";
+            InsertMenuItemW(h_eff, idx++, TRUE, &item);
+        }
+        if (g_cfg_pixelate) {
+            MENUITEMINFOW item;
+            memset(&item, 0, sizeof(item));
+            item.cbSize     = sizeof(item);
+            item.fMask      = MIIM_ID | MIIM_STRING | MIIM_FTYPE | MIIM_STATE;
+            item.fType      = MFT_STRING;
+            item.fState     = MFS_ENABLED;
+            item.wID        = MENU_ID_PIXELATE;
+            item.dwTypeData = L"像素化(&X) ...";
+            InsertMenuItemW(h_eff, idx++, TRUE, &item);
+        }
+        if (g_cfg_sharpen) {
+            MENUITEMINFOW item;
+            memset(&item, 0, sizeof(item));
+            item.cbSize     = sizeof(item);
+            item.fMask      = MIIM_ID | MIIM_STRING | MIIM_FTYPE | MIIM_STATE;
+            item.fType      = MFT_STRING;
+            item.fState     = MFS_ENABLED;
+            item.wID        = MENU_ID_SHARPEN;
+            item.dwTypeData = L"銳化(&S) ...";
             InsertMenuItemW(h_eff, idx++, TRUE, &item);
         }
 
@@ -695,9 +1183,13 @@ static void ensure_effects_menu_injected(HWND hwnd) {
     EnableMenuItem(h_filter, MENU_ID_EFFECT_SUBMENU, flag);
     EnableMenuItem(h_filter, MENU_ID_BINARIZE, flag);
     EnableMenuItem(h_filter, MENU_ID_POSTERIZE, flag);
+    EnableMenuItem(h_filter, MENU_ID_PIXELATE, flag);
+    EnableMenuItem(h_filter, MENU_ID_SHARPEN, flag);
     if (g_h_eff_submenu) {
         EnableMenuItem(g_h_eff_submenu, MENU_ID_BINARIZE, flag);
         EnableMenuItem(g_h_eff_submenu, MENU_ID_POSTERIZE, flag);
+        EnableMenuItem(g_h_eff_submenu, MENU_ID_PIXELATE, flag);
+        EnableMenuItem(g_h_eff_submenu, MENU_ID_SHARPEN, flag);
     }
 }
 
@@ -721,6 +1213,14 @@ static LRESULT CALLBACK main_subclass_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
             open_posterize_filter();
             return 0;
         }
+        if (id == MENU_ID_PIXELATE || LOWORD(w) == LOWORD(MENU_ID_PIXELATE)) {
+            open_pixelate_filter();
+            return 0;
+        }
+        if (id == MENU_ID_SHARPEN || LOWORD(w) == LOWORD(MENU_ID_SHARPEN)) {
+            open_sharpen_filter();
+            return 0;
+        }
     }
     return CallWindowProcW(g_orig_wndproc, h, m, w, l);
 }
@@ -735,6 +1235,9 @@ static void load_mod_config(void) {
     g_cfg_enabled   = GetPrivateProfileIntW(L"FiltersMod", L"enabled",   1, ini_path);
     g_cfg_binarize  = GetPrivateProfileIntW(L"FiltersMod", L"binarize",  1, ini_path);
     g_cfg_posterize = GetPrivateProfileIntW(L"FiltersMod", L"posterize", 1, ini_path);
+    g_cfg_pixelate  = GetPrivateProfileIntW(L"FiltersMod", L"pixelate",  1, ini_path);
+    g_cfg_sharpen   = GetPrivateProfileIntW(L"FiltersMod", L"sharpen",   1, ini_path);
+    g_cfg_debug     = GetPrivateProfileIntW(L"FiltersMod", L"debug",     0, ini_path);
 }
 
 static BOOL CALLBACK find_main_hwnd_cb(HWND h, LPARAM lp) {
@@ -753,7 +1256,7 @@ static BOOL CALLBACK find_main_hwnd_cb(HWND h, LPARAM lp) {
 
 static DWORD WINAPI init_worker_thread(LPVOID param) {
     load_mod_config();
-    if (!g_cfg_enabled || (!g_cfg_binarize && !g_cfg_posterize)) {
+    if (!g_cfg_enabled || (!g_cfg_binarize && !g_cfg_posterize && !g_cfg_pixelate && !g_cfg_sharpen)) {
         return 0;
     }
 
@@ -773,8 +1276,11 @@ static DWORD WINAPI init_worker_thread(LPVOID param) {
         }
     }
     if (!g_off) {
-        // Fallback default to 2023.07.11 profile if timestamp was patched
-        g_off = &k_profiles[0];
+        // 認不得這個 SAI2 版本（timestamp 不符）：所有內部位址都是依版本硬編碼的，
+        // 套用錯的位址會直接讓 SAI2 當掉。寧可不注入（選單不出現），也不要冒險。
+        // 要支援新版 SAI2：用 native/sai2mod/README.md 的流程重新產生 offset 並加一組 profile。
+        mod_log("unknown SAI2 build timestamp 0x%08x — not injecting (need a new profile)", ts);
+        return 0;
     }
 
     for (int i = 0; i < 300 && !g_main_hwnd; i++) {

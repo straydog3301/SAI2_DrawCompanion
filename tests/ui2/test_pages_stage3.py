@@ -198,10 +198,14 @@ st_mod = SF.get_mod_status(fake_sai2_exe)
 check(bool(s.get('filters_mod.enabled')) and st_mod['dll_installed'] and st_mod['enabled'],
       'filters mod enabled and dwmapi.dll deployed from tools page')
 
-tp.flt_pos_toggle.setChecked(False)
+tp.flt_toggles['posterize'].setChecked(False)
 st_mod = SF.get_mod_status(fake_sai2_exe)
 check(not bool(s.get('filters_mod.posterize')) and st_mod['binarize'] and not st_mod['posterize'],
       'posterize toggle synced to sai2_filters_mod.ini')
+tp.flt_toggles['pixelate'].setChecked(False)
+st_mod = SF.get_mod_status(fake_sai2_exe)
+check(not bool(s.get('filters_mod.pixelate')) and not st_mod['pixelate'] and st_mod['sharpen'],
+      'pixelate toggle synced; sharpen stays on (data-driven filters)')
 
 tp.flt_toggle.setChecked(False)
 st_mod = SF.get_mod_status(fake_sai2_exe)

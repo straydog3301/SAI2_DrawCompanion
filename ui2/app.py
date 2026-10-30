@@ -658,10 +658,10 @@ class CompanionApp(QObject):
                 self.settings.save()
                 self.opener.exe_path = detected_exe
                 exe = detected_exe
+        from core.sai2_filters import FILTERS
         enabled = bool(self.settings.get('filters_mod.enabled', False))
-        binarize = bool(self.settings.get('filters_mod.binarize', True))
-        posterize = bool(self.settings.get('filters_mod.posterize', True))
-        ok, msg = sync_filters_mod(exe, enabled=enabled, binarize=binarize, posterize=posterize)
+        filters = {k: bool(self.settings.get(f'filters_mod.{k}', True)) for k in FILTERS}
+        ok, msg = sync_filters_mod(exe, enabled=enabled, filters=filters)
         if notify and msg:
             self.say(msg, important=not ok)
         return ok, msg
@@ -670,16 +670,16 @@ class CompanionApp(QObject):
         self,
         on: bool | None = None,
         *,
-        binarize: bool | None = None,
-        posterize: bool | None = None,
         notify: bool = True,
+        **filter_states: bool,
     ) -> tuple[bool, str]:
+        """開關整體（on）或個別濾鏡（binarize=/posterize=/pixelate=/sharpen=…）"""
+        from core.sai2_filters import FILTERS
         if on is not None:
             self.settings.set('filters_mod.enabled', bool(on))
-        if binarize is not None:
-            self.settings.set('filters_mod.binarize', bool(binarize))
-        if posterize is not None:
-            self.settings.set('filters_mod.posterize', bool(posterize))
+        for key, val in filter_states.items():
+            if key in FILTERS and val is not None:
+                self.settings.set(f'filters_mod.{key}', bool(val))
         self.settings.save()
         return self.sync_filters_mod_files(notify=notify)
 

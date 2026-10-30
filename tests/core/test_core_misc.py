@@ -96,6 +96,13 @@ check(ok, 'sync_filters_mod enable succeeds')
 st_mod = SF.get_mod_status(fake_sai2_exe)
 check(st_mod['dll_installed'] and st_mod['enabled'] and st_mod['binarize'] and not st_mod['posterize'],
       f'mod status after enable: {st_mod}')
+# 新濾鏡（像素化、銳化）：未指定時預設開啟，資料驅動寫入 ini
+check(st_mod['pixelate'] and st_mod['sharpen'], 'pixelate/sharpen default on in ini')
+ok, _msg = SF.sync_filters_mod(fake_sai2_exe, enabled=True, filters={'sharpen': False})
+st_mod_s = SF.get_mod_status(fake_sai2_exe)
+check(ok and st_mod_s['pixelate'] and not st_mod_s['sharpen'], 'per-filter dict toggles sharpen off')
+ini_txt = open(os.path.join(fake_sai2_dir, 'sai2_filters_mod.ini'), encoding='ascii').read()
+check('sharpen=0' in ini_txt and 'pixelate=1' in ini_txt and 'debug=0' in ini_txt, f'ini content: {ini_txt!r}')
 ok, _msg = SF.sync_filters_mod(fake_sai2_exe, enabled=False, binarize=True, posterize=True)
 st_mod2 = SF.get_mod_status(fake_sai2_exe)
 check(ok and not st_mod2['enabled'] and not st_mod2['dll_installed'], f'mod status after disable: {st_mod2}')
