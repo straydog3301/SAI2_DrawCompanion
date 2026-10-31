@@ -658,10 +658,10 @@ class CompanionApp(QObject):
                 self.settings.save()
                 self.opener.exe_path = detected_exe
                 exe = detected_exe
+        from core.sai2_filters import MOD_FEATURES
         enabled = bool(self.settings.get('filters_mod.enabled', False))
-        binarize = bool(self.settings.get('filters_mod.binarize', True))
-        posterize = bool(self.settings.get('filters_mod.posterize', True))
-        ok, msg = sync_filters_mod(exe, enabled=enabled, binarize=binarize, posterize=posterize)
+        filters = {k: bool(self.settings.get(f'filters_mod.{k}', True)) for k in MOD_FEATURES}
+        ok, msg = sync_filters_mod(exe, enabled=enabled, filters=filters)
         if notify and msg:
             self.say(msg, important=not ok)
         return ok, msg
@@ -670,16 +670,16 @@ class CompanionApp(QObject):
         self,
         on: bool | None = None,
         *,
-        binarize: bool | None = None,
-        posterize: bool | None = None,
         notify: bool = True,
+        **filter_states: bool,
     ) -> tuple[bool, str]:
+        """開關整體（on）或個別項目（binarize=/posterize=/pixelate=/sharpen=/fx_stroke=…）"""
+        from core.sai2_filters import MOD_FEATURES
         if on is not None:
             self.settings.set('filters_mod.enabled', bool(on))
-        if binarize is not None:
-            self.settings.set('filters_mod.binarize', bool(binarize))
-        if posterize is not None:
-            self.settings.set('filters_mod.posterize', bool(posterize))
+        for key, val in filter_states.items():
+            if key in MOD_FEATURES and val is not None:
+                self.settings.set(f'filters_mod.{key}', bool(val))
         self.settings.save()
         return self.sync_filters_mod_files(notify=notify)
 
@@ -875,7 +875,7 @@ class CompanionApp(QObject):
                 self._hk_ids[i] = action
             else:
                 failed[action] = '已被其他程式佔用'
-        self.service.apply_recorder_settings()      # SAI2「新增檢視」的快捷鍵不能和 2.0 的相同
+        self.service.apply_recorder_settings()      # SAI2「新增浮動檢視」的快捷鍵不能和 2.0 的相同
         return failed
 
     def _on_hotkey(self, hid: int):

@@ -328,7 +328,7 @@
   "timelapse.status.float_ready": "📹 已建立隱藏浮動檢視，鎖定錄製中",
   "timelapse.status.float_onscreen": "📹 已建立浮動檢視並鎖定錄製（無法移出螢幕，視窗仍在畫面上）",
   "timelapse.status.float_pending": "(浮動視窗準備中)",
-  "timelapse.status.float_failed": "⚠️ 無法建立浮動檢視（請確認 SAI2 的 Ctrl+Alt+N 為「新增檢視視窗」），已改用一般畫布模式錄製",
+  "timelapse.status.float_failed": "⚠️ 無法建立浮動檢視（請確認 SAI2 的 Ctrl+Alt+N 為「新增浮動檢視」），已改用一般畫布模式錄製",
   "ui.growth.weekdays": "一,二,三,四,五,六,日",
   "ui.growth.longest": "最長 {n} 天",
   "ui.growth.recent_practice": "近 30 天練習 {t}",

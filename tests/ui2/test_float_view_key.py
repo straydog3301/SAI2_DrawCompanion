@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""「工具」頁的隱藏浮動檢視：選了這個錄製範圍才顯示「SAI2「新增檢視」的快捷鍵」；沒設定、和 2.0 自己的快捷鍵相同時提醒；
+"""「工具」頁的隱藏浮動檢視：選了這個錄製範圍才顯示「SAI2「新增浮動檢視」的快捷鍵」；沒設定、和 2.0 自己的快捷鍵相同時提醒；
 錄影器的問題訊息會由寵物說出來。以暫存資料夾執行，不開啟 SAI2"""
 import os
 import sys
@@ -73,7 +73,7 @@ check(ctl.service.recorder.float_keys is None, "changing 2.0's hotkeys rechecks 
 
 # 錄影器的問題由寵物說；正常狀態不打擾
 ctl.service._on_rec_status('📹 已建立隱藏浮動檢視，鎖定錄製中')
-ctl.service._on_rec_status('⚠️ 無法建立浮動檢視：請確認 SAI2「新增檢視」的快捷鍵和設定的相同。這次改用只錄畫紙')
+ctl.service._on_rec_status('⚠️ 無法建立浮動檢視：請確認 SAI2「新增浮動檢視」的快捷鍵和設定的相同。這次改用只錄畫紙')
 n = len(said)
 ctl._tick()
 new = said[n:]

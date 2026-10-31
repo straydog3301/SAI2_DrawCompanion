@@ -47,7 +47,6 @@ a = Analysis(
     datas=[
         ('locales', 'locales'),
         ('native/sai2mod/mscms.dll', 'native/sai2mod'),
-        ('native/sai2mod/dwmapi.dll', 'native/sai2mod'),
     ],
     hiddenimports=hidden,
     hookspath=[],

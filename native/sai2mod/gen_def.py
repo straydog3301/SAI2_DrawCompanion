@@ -1,6 +1,6 @@
 """產生代理 DLL 用的 .def 檔：把系統 DLL 的所有匯出（含無名稱序數）轉發回 System32 原版。
 
-用法：python gen_def.py dwmapi  →  產生 dwmapi.def
+用法：python gen_def.py mscms  →  產生 mscms.def
 """
 import os
 import sys
@@ -27,5 +27,5 @@ def gen_def(name: str, out_dir: str) -> str:
 
 
 if __name__ == '__main__':
-    print(gen_def(sys.argv[1] if len(sys.argv) > 1 else 'dwmapi',
+    print(gen_def(sys.argv[1] if len(sys.argv) > 1 else 'mscms',
                   os.path.dirname(os.path.abspath(__file__))))
