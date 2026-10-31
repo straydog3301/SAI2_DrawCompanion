@@ -61,7 +61,7 @@ DEFAULTS: dict = {
     'ai_review': {'enabled': False, 'provider': 'gemini', 'api_key': '', 'model': '', 'base_url': ''},   # canvas_dir 空白 = 文件\SAI2 練習；canvas_side：長邊 px
     'timelapse': {'enabled': False, 'multiplier': 5, 'target': 'canvas', 'quality': 'standard', 'fps': 30,
                   'output_dir': '',       # output_dir 空白 = APP_DIR/videos
-                  'float_hotkey': ''},    # SAI2「新增檢視」的快捷鍵（canvas_float 模式用；SAI2 預設沒有，要自己指定）
+                  'float_hotkey': ''},    # SAI2「新增浮動檢視」的快捷鍵（canvas_float 模式用；SAI2 預設沒有，要自己指定）
     'filters_mod': {'enabled': False, 'binarize': True, 'posterize': True, 'pixelate': True, 'sharpen': True},  # SAI2 原生濾鏡擴充模組（下次啟動 SAI2 生效）
     'works': {'groups': {}, 'sort': 'recent', 'thumbnails': True,    # thumbnails：存檔、停筆時自動擷取作品縮圖
               'export_seconds': 60},                                 # 匯出縮時的長度（core/video_tools.py）

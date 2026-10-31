@@ -1137,9 +1137,9 @@ class ToolsPage(QWidget):
         g.row('倍速', '影片播放速度；倍數越高，擷取間隔越長、影片越短', self._combo('timelapse.multiplier', MULTIPLIERS, int))
         target = self._combo('timelapse.target', TARGETS)
         g.row('錄製範圍', '「畫紙」不含工作區與捲軸；放大畫面時錄看得到的部分', target)
-        self.float_row = g.row('SAI2「新增檢視」的快捷鍵',
-                               '隱藏浮動檢視模式會替目前的畫布開一個新檢視，移到螢幕外錄影，你縮放、旋轉、捲動畫面都不影響影片。'
-                               'SAI2 預設沒有這個快捷鍵：請先在 SAI2 的快捷鍵設定替「新增檢視」指定一組，再在這裡按下相同的組合',
+        self.float_row = g.row('SAI2「新增浮動檢視」的快捷鍵',
+                               '隱藏浮動檢視模式會替目前的畫布開一個新的浮動檢視，移到螢幕外錄影，你縮放、旋轉、捲動畫面都不影響影片。'
+                               'SAI2 預設沒有這個快捷鍵：請先在 SAI2 的快捷鍵設定替「新增浮動檢視」指定一組，再在這裡按下相同的組合',
                                self._float_key_editor(), stack=True)
         target.currentIndexChanged.connect(lambda _i: self._sync_float_row())
         self._sync_float_row()

@@ -229,6 +229,7 @@ class NotesWindow(QWidget):
         self.tabs.setMovable(True)
         self.tabs.setExpanding(False)
         self.tabs.setElideMode(Qt.ElideRight)
+        self.tabs.setDrawBase(False)         # 系統畫的底線在淺色外觀是黑線
         self.tabs.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tabs.customContextMenuRequested.connect(self._tab_menu)
         self.tabs.currentChanged.connect(self._tab_changed)
@@ -340,6 +341,7 @@ class NotesWindow(QWidget):
     # ── 閱讀模式 ──
     def render(self):
         holder = QWidget()
+        holder.setObjectName('page')          # 套主題底色（不然會用 Windows 系統的深淺色）
         lay = QVBoxLayout(holder)
         lay.setContentsMargins(4, 4, 8, 12)
         lay.setSpacing(8)

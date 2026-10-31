@@ -192,6 +192,15 @@ QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSp
     width: 22px; border: none; background: transparent; }}
 QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ background: {TRACK}; border-radius: 6px; }}
 QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QKeySequenceEdit:focus {{ border-color: {ACCENT}; }}
+/* 多行輸入與頁籤：沒指定時 Qt 會套 Windows 系統深淺色，跟主題不一致（例如淺色外觀出現深底深字） */
+QPlainTextEdit, QTextEdit {{ background: {INPUT_BG}; border: 1px solid {INPUT_BORDER}; border-radius: 10px;
+    selection-background-color: {SELECT_BG}; selection-color: {TEXT}; }}
+QPlainTextEdit:focus, QTextEdit:focus {{ border-color: {ACCENT}; }}
+QTabBar {{ background: transparent; }}
+QTabBar::tab {{ background: {SURFACE2}; color: {MUTED}; border: 1px solid {BORDER}; border-bottom: none;
+    border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 5px 12px; margin-right: 2px; }}
+QTabBar::tab:selected {{ background: {CARD}; color: {TEXT}; font-weight: 700; }}
+QTabBar::tab:hover:!selected {{ background: {HOVER}; color: {TEXT}; }}
 QComboBox QAbstractItemView {{ background: {SURFACE2}; border: 1px solid {BORDER}; selection-background-color: {SELECT_BG}; padding: 4px; }}
 QCheckBox {{ spacing: 8px; }}
 QSlider::groove:horizontal {{ height: 4px; background: {TRACK}; border-radius: 2px; }}
