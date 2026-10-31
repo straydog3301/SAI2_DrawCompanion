@@ -196,7 +196,14 @@ s.set('sai2_exe', fake_sai2_exe)
 tp.flt_toggle.setChecked(True)
 st_mod = SF.get_mod_status(fake_sai2_exe)
 check(bool(s.get('filters_mod.enabled')) and st_mod['dll_installed'] and st_mod['enabled'],
-      'filters mod enabled and dwmapi.dll deployed from tools page')
+      'filters mod enabled and mscms.dll deployed from tools page')
+check(not os.path.exists(os.path.join(fake_sai2_dir, 'dwmapi.dll')), 'no dwmapi.dll deployed')
+check('fx_stroke' in tp.flt_toggles, 'stroke layer effect toggle on tools page')
+tp.flt_toggles['fx_stroke'].setChecked(False)
+st_mod = SF.get_mod_status(fake_sai2_exe)
+check(not bool(s.get('filters_mod.fx_stroke')) and not st_mod['fx_stroke'] and st_mod['binarize'],
+      'fx_stroke toggle synced to sai2_filters_mod.ini')
+tp.flt_toggles['fx_stroke'].setChecked(True)
 
 tp.flt_toggles['posterize'].setChecked(False)
 st_mod = SF.get_mod_status(fake_sai2_exe)
@@ -210,7 +217,7 @@ check(not bool(s.get('filters_mod.pixelate')) and not st_mod['pixelate'] and st_
 tp.flt_toggle.setChecked(False)
 st_mod = SF.get_mod_status(fake_sai2_exe)
 check(not s.get('filters_mod.enabled') and not st_mod['enabled'] and not st_mod['dll_installed'],
-      'filters mod disabled and dwmapi.dll removed from tools page')
+      'filters mod disabled and mscms.dll removed from tools page')
 mw.close()
 
 # ─── 結束時等影片合成 ──

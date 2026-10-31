@@ -1098,7 +1098,8 @@ class ToolsPage(QWidget):
         lay.addWidget(PageHeader('工具', 'SAI2 內建濾鏡擴充與縮時錄影等輔助工具'))
 
         flt_card = Card('SAI2 內建濾鏡擴充 (Mod)',
-                        '將「效果」子選單直接內置於 SAI2 頂部「濾鏡」選單中，所有參數調整、16-bit 即時預覽與圖層套用（含 Ctrl+Z 復原）皆直接於 SAI2 內進行（設定後於下次啟動 SAI2 生效）')
+                        '將「效果」子選單直接內置於 SAI2 頂部「濾鏡」選單中，所有參數調整、16-bit 即時預覽與圖層套用（含 Ctrl+Z 復原）皆直接於 SAI2 內進行；'
+                        '另在圖層面板「特殊效果」加入「筆畫」（設定後於下次啟動 SAI2 生效）')
         self.flt_toggle = ToggleSwitch(bool(self.s.get('filters_mod.enabled', False)))
         self.flt_toggle.toggled.connect(self._toggle_filters_mod)
         flt_card.head.addWidget(self.flt_toggle)
@@ -1107,10 +1108,10 @@ class ToolsPage(QWidget):
         flt_card.lay.addLayout(self.flt_status_box)
         lay.addWidget(flt_card)
 
-        flt_grp = SettingGroup('內建「濾鏡 → 效果」項目開關（下次啟動 SAI2 生效）')
-        from core.sai2_filters import FILTERS
+        flt_grp = SettingGroup('內建濾鏡 / 圖層效果項目開關（下次啟動 SAI2 生效）')
+        from core.sai2_filters import MOD_FEATURES
         self.flt_toggles = {}
-        for key, meta in FILTERS.items():
+        for key, meta in MOD_FEATURES.items():
             tog = ToggleSwitch(bool(self.s.get(f'filters_mod.{key}', True)))
             tog.toggled.connect(lambda v, k=key: self._toggle_single_filter(k, v))
             self.flt_toggles[key] = tog
@@ -1301,8 +1302,8 @@ class ToolsPage(QWidget):
         self.refresh()
 
     def _filters_kw(self) -> dict:
-        from core.sai2_filters import FILTERS
-        return {k: bool(self.s.get(f'filters_mod.{k}', True)) for k in FILTERS}
+        from core.sai2_filters import MOD_FEATURES
+        return {k: bool(self.s.get(f'filters_mod.{k}', True)) for k in MOD_FEATURES}
 
     def _toggle_filters_mod(self, on):
         from core.sai2_filters import sync_filters_mod
@@ -1326,10 +1327,10 @@ class ToolsPage(QWidget):
         self.refresh()
 
     def _refresh_filters_mod(self):
-        from core.sai2_filters import get_mod_status, FILTERS
+        from core.sai2_filters import get_mod_status, FILTERS, LAYER_EFFECTS, MOD_FEATURES, MOD_DLL_FILENAME
         _clear(self.flt_status_box)
         enabled = bool(self.s.get('filters_mod.enabled', False))
-        on = {k: bool(self.s.get(f'filters_mod.{k}', True)) for k in FILTERS}
+        on = {k: bool(self.s.get(f'filters_mod.{k}', True)) for k in MOD_FEATURES}
         any_on = any(on.values())
 
         if self.flt_toggle.isChecked() != enabled:
@@ -1351,14 +1352,20 @@ class ToolsPage(QWidget):
             self.flt_status_box.addWidget(label('開啟開關後，會將原生濾鏡擴充模組部署至 SAI2 資料夾（於下次啟動 SAI2 時生效）。', 'caption'))
             return
 
-        if st.get('dll_installed') and st.get('enabled'):
-            self.flt_status_box.addWidget(Chip('● 已啟用（下次啟動 SAI2 生效）', 'ok'), 0, Qt.AlignLeft)
-            active_names = [meta['name'] for k, meta in FILTERS.items() if on[k]]
+        if st.get('dll_conflict'):
+            self.flt_status_box.addWidget(Chip('SAI2 資料夾已有其他模組', 'warn'), 0, Qt.AlignLeft)
             self.flt_status_box.addWidget(label(
-                f"已部署至：{sai2_dir}\n"
-                f"啟用項目：{'、'.join(active_names)}（直接於 SAI2 頂部選單「濾鏡 → 效果」操作）",
-                'caption'
-            ))
+                f'{sai2_dir} 裡的 {MOD_DLL_FILENAME} 不是本模組，為避免覆蓋其他模組而未部署。', 'caption'))
+        elif st.get('dll_installed') and st.get('enabled'):
+            self.flt_status_box.addWidget(Chip('● 已啟用（下次啟動 SAI2 生效）', 'ok'), 0, Qt.AlignLeft)
+            lines = [f'已部署至：{sai2_dir}']
+            flt_names = [meta['name'] for k, meta in FILTERS.items() if on[k]]
+            fx_names = [meta['name'] for k, meta in LAYER_EFFECTS.items() if on[k]]
+            if flt_names:
+                lines.append(f"濾鏡：{'、'.join(flt_names)}（SAI2 頂部選單「濾鏡 → 效果」）")
+            if fx_names:
+                lines.append(f"圖層效果：{'、'.join(fx_names)}（圖層面板「特殊效果」下拉選單，僅 SAI2 2026 版）")
+            self.flt_status_box.addWidget(label('\n'.join(lines), 'caption'))
         elif sai2_dir:
             self.flt_status_box.addWidget(Chip('待同步至 SAI2 資料夾', 'accent'), 0, Qt.AlignLeft)
             self.flt_status_box.addWidget(label(f'目標 SAI2 資料夾：{sai2_dir}（重新切換開關即可立即部署，下次啟動 SAI2 生效）', 'caption'))

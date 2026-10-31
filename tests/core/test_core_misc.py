@@ -3,6 +3,7 @@
 import os
 import sys
 import importlib
+import shutil
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from _helpers import check, done, block_tk, tmpdir, REPO  # noqa: E402
 
@@ -85,17 +86,36 @@ check(p_px[0] == (0, 0, 0, 200) and p_px[2] == (255, 255, 255, 255) and p_px[3] 
 p4_lut = SF.posterize_lut(4)
 check(sorted(set(p4_lut)) == [0, 85, 170, 255], f'posterize 4 levels lut: {sorted(set(p4_lut))}')
 
-# SAI2 原生濾鏡擴充模組（dwmapi.dll + sai2_filters_mod.ini）部署與開關測試
+# SAI2 原生濾鏡擴充模組（mscms.dll + sai2_filters_mod.ini）部署與開關測試
 fake_sai2_dir = os.path.join(d, 'sai2_inst')
 os.makedirs(fake_sai2_dir, exist_ok=True)
 fake_sai2_exe = os.path.join(fake_sai2_dir, 'sai2.exe')
 open(fake_sai2_exe, 'wb').close()
-check(os.path.isfile(SF.get_mod_dll_source_path()), 'compiled native dwmapi.dll exists')
+check(os.path.isfile(SF.get_mod_dll_source_path()), 'compiled native mscms.dll exists')
+check(SF.is_own_mod_dll(SF.get_mod_dll_source_path()), 'bundled mscms.dll carries the ini-name marker')
+# 舊版放的 dwmapi.dll（我們的）要清掉；別人的 dwmapi.dll 不能動
+legacy_dll = os.path.join(fake_sai2_dir, 'dwmapi.dll')
+shutil.copy2(SF.get_mod_dll_source_path(), legacy_dll)
 ok, _msg = SF.sync_filters_mod(fake_sai2_exe, enabled=True, binarize=True, posterize=False)
 check(ok, 'sync_filters_mod enable succeeds')
 st_mod = SF.get_mod_status(fake_sai2_exe)
 check(st_mod['dll_installed'] and st_mod['enabled'] and st_mod['binarize'] and not st_mod['posterize'],
       f'mod status after enable: {st_mod}')
+check(os.path.isfile(os.path.join(fake_sai2_dir, 'mscms.dll')) and not os.path.exists(legacy_dll),
+      'deploys mscms.dll only and removes our legacy dwmapi.dll')
+check(st_mod['fx_stroke'], 'fx_stroke layer effect defaults on')
+foreign = b'MZ some other mod'
+open(legacy_dll, 'wb').write(foreign)
+SF.sync_filters_mod(fake_sai2_exe, enabled=True)
+check(open(legacy_dll, 'rb').read() == foreign, 'foreign dwmapi.dll left untouched')
+os.remove(legacy_dll)
+# 模組寫回的最近筆畫顏色要保留；fx_stroke 可單獨關閉
+with open(os.path.join(fake_sai2_dir, 'sai2_filters_mod.ini'), 'a', encoding='ascii') as f:
+    f.write('fx_stroke_color=12ab34\n')
+ok, _msg = SF.sync_filters_mod(fake_sai2_exe, enabled=True, fx_stroke=False)
+st_fx = SF.get_mod_status(fake_sai2_exe)
+check(ok and not st_fx['fx_stroke'] and st_fx['binarize'], 'fx_stroke toggled off independently')
+check(SF.read_mod_ini(fake_sai2_dir)['fx_stroke_color'] == '12ab34', 'fx_stroke_color preserved across ini rewrite')
 # 新濾鏡（像素化、銳化）：未指定時預設開啟，資料驅動寫入 ini
 check(st_mod['pixelate'] and st_mod['sharpen'], 'pixelate/sharpen default on in ini')
 ok, _msg = SF.sync_filters_mod(fake_sai2_exe, enabled=True, filters={'sharpen': False})
@@ -106,4 +126,13 @@ check('sharpen=0' in ini_txt and 'pixelate=1' in ini_txt and 'debug=0' in ini_tx
 ok, _msg = SF.sync_filters_mod(fake_sai2_exe, enabled=False, binarize=True, posterize=True)
 st_mod2 = SF.get_mod_status(fake_sai2_exe)
 check(ok and not st_mod2['enabled'] and not st_mod2['dll_installed'], f'mod status after disable: {st_mod2}')
+# mscms.dll 被別的模組占用：不覆蓋、不刪除，狀態回報衝突
+other_mscms = os.path.join(fake_sai2_dir, 'mscms.dll')
+open(other_mscms, 'wb').write(foreign)
+ok, _msg = SF.sync_filters_mod(fake_sai2_exe, enabled=True)
+st_c = SF.get_mod_status(fake_sai2_exe)
+check(not ok and open(other_mscms, 'rb').read() == foreign and st_c['dll_conflict'] and not st_c['dll_installed'],
+      f'foreign mscms.dll not overwritten: {_msg}')
+SF.sync_filters_mod(fake_sai2_exe, enabled=False)
+check(open(other_mscms, 'rb').read() == foreign, 'foreign mscms.dll not deleted on disable')
 done()
