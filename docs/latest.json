@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "payload": {
+    "version": "2.2.0",
+    "published": "2026-11-08T11:40:20+00:00",
+    "notes": "2.2.0 支援 Photoshop 與 Clip Studio Paint\n・在「設定 › 一般 › 繪圖軟體」切換：動筆時間、每日打卡、作品紀錄與畫布截圖都跟著選的軟體\n・Photoshop 截圖需要畫面沒被擋住；CSP 開好幾張時以最後開啟的為準，截圖是最後一次存檔的樣子\n・縮時錄影與模組只支援 SAI2，換成其他軟體時這兩頁會壓灰\n・修正：個別寵物的規則按「新增規則」沒反應；新規則改加在最上方",
+    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.2.0/DrawCompanion2.zip",
+    "sha256": "c18a79de512a87996f4422efbdf92c3090fbdb56e80a3fa0313e9af33507b5b4",
+    "size": 39505237
+  },
+  "signature": "aa28060cb7c083ba186447b6b97d92bbb08433a69b8e9166df6acbfc8b1b0af9ec852654730174d341d414235bd4547dcd62e182198dcc9b906c6bc31e7ccd0c"
+}
