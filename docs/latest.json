@@ -1,12 +1,12 @@
 {
   "format": 1,
   "payload": {
-    "version": "2.3.1",
-    "published": "2026-11-13T11:20:19+00:00",
-    "notes": "2.3.1 修正錄影開關顯示錯誤，錄影頁可以直接下載 ffmpeg\n・修正：在寵物下方等地方開關錄影後，「錄影」頁的開關沒跟著動，按下去反而做了相反的事\n・「錄影 › 錄影設定」新增「合成影片」：顯示用 ffmpeg 還是 Windows 內建，可直接下載 ffmpeg，裝好不用重開程式\n・「看更新內容」改成打開介紹網頁的近期更新",
-    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.3.1/DrawCompanion2.zip",
-    "sha256": "099da94f705bee9ebb5e70e96ecb79c1ffc3cba2fdba1e91bb58e8dd997c9db8",
-    "size": 40259025
+    "version": "2.3.2",
+    "published": "2026-11-13T12:35:12+00:00",
+    "notes": "2.3.2 新的程式圖示\n・白鼬「默默」抱著筆：exe、視窗、工作列與系統匣都換成新圖示\n・工作列上的捷徑可能要重新釘選，或等 Windows 更新圖示快取後才會換",
+    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.3.2/DrawCompanion2.zip",
+    "sha256": "93d3d80a5b87704a3b08be183236daaa0bfa3c3e2d7a3a1b38b973b4af20f51a",
+    "size": 40293091
   },
-  "signature": "0a31bf6d0613118358b9bfd12a49d63618f2e420ebeb9c9290d383b60401582cef5d924200075b0eb7c8493839de676062a4955f63b0052ff3cbd2f23a9e4b0a"
+  "signature": "3030f29c1818e0f93653f0387752a585aaf14dcbe713d8309f0db1a108cecb402331049e5f8443c6539e4f5ba204c0dbf1a4de365cfc005618dd07d694232b06"
 }
