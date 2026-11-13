@@ -1,12 +1,12 @@
 {
   "format": 1,
   "payload": {
-    "version": "2.2.0",
-    "published": "2026-11-08T11:40:20+00:00",
-    "notes": "2.2.0 支援 Photoshop 與 Clip Studio Paint\n・在「設定 › 一般 › 繪圖軟體」切換：動筆時間、每日打卡、作品紀錄與畫布截圖都跟著選的軟體\n・Photoshop 截圖需要畫面沒被擋住；CSP 開好幾張時以最後開啟的為準，截圖是最後一次存檔的樣子\n・縮時錄影與模組只支援 SAI2，換成其他軟體時這兩頁會壓灰\n・修正：個別寵物的規則按「新增規則」沒反應；新規則改加在最上方",
-    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.2.0/DrawCompanion2.zip",
-    "sha256": "c18a79de512a87996f4422efbdf92c3090fbdb56e80a3fa0313e9af33507b5b4",
-    "size": 39505237
+    "version": "2.3.0",
+    "published": "2026-11-13T07:34:10+00:00",
+    "notes": "2.3.0 SAI2 液化筆刷與新濾鏡、錄影免裝 ffmpeg\n・液化筆刷（SAI2 2026）：「新增工具」選「液化」，可推移、旋轉、縮攏、膨脹，濃度跟筆壓，一筆一次 Ctrl+Z\n・新濾鏡：色彩曲線、動態／放射狀模糊、色相差、色彩平衡、漸層對應；新圖層效果：外光暈、浮雕\n・每個濾鏡都能在「工具」頁單獨開關、設快捷鍵\n・縮時錄影不用再安裝 ffmpeg：沒有時改用 Windows 內建功能合成；有裝 ffmpeg 時照樣優先使用（較快、檔案較小）",
+    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.3.0/DrawCompanion2.zip",
+    "sha256": "1f94c9032408adf8d60c406ff5219cee7a055dfc239a2059818228c8ad0439aa",
+    "size": 40255719
   },
-  "signature": "aa28060cb7c083ba186447b6b97d92bbb08433a69b8e9166df6acbfc8b1b0af9ec852654730174d341d414235bd4547dcd62e182198dcc9b906c6bc31e7ccd0c"
+  "signature": "ab6de43aa98312552d14c638548609319537069908b1297d71965639db35d9991905e75b7ae772c17c632d946cd52f8305489bed09350a75da06668e4d876209"
 }
