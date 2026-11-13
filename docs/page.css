@@ -49,6 +49,7 @@ details.card summary { cursor: pointer; list-style-position: inside; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 22px; border-radius: 12px;
        font: inherit; font-weight: 700; font-size: 16px; border: 1px solid transparent; cursor: pointer; text-decoration: none; }
 .btn.primary { background: var(--accent-btn); color: #fff; width: 100%; }
+.btn.ghost { background: transparent; color: var(--accent-text); border-color: var(--line); width: 100%; }
 .toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 28px; padding: 0; list-style: none; }
 .toc a { display: inline-block; padding: 6px 14px; border-radius: 999px; background: var(--accent-soft);
          text-decoration: none; font-weight: 700; font-size: 14px; }
