@@ -327,7 +327,38 @@
     <p class="update-how">更新方式：程式會自動檢查新版，在「設定 › 一般 › 更新」按「更新並重新啟動」即可。還在用測試版（beta）的話，請手動下載 <code>DrawCompanion2.zip</code> 一次，解壓縮到原本的資料夾覆蓋舊檔；紀錄與設定都會保留。</p>
 
     <details class="rel" open>
-      <summary><span class="ver">v2.2.0</span><span class="tag">目前版本</span><span class="date">2026-11-08</span></summary>
+      <summary><span class="ver">v2.3.1</span><span class="tag">目前版本</span><span class="date">2026-11-13</span></summary>
+      <p class="lead2">修正錄影開關顯示錯誤，「錄影」頁可以直接下載 ffmpeg。</p>
+      <h4>修正</h4>
+      <ul>
+        <li>從寵物下方的錄影按鈕等地方開關錄影後，「錄影」頁的開關沒有跟著動：看起來開著其實是關的，按下去反而做了相反的事（例如以為關掉了，其實是打開，影片沒有合成）</li>
+      </ul>
+      <h4>改進</h4>
+      <ul>
+        <li>「錄影 › 錄影設定」新增「合成影片」：顯示目前用 ffmpeg 還是 Windows 內建功能，可以直接下載 ffmpeg；裝好後按「重新偵測」（或等幾秒）就會使用，不用重開程式</li>
+        <li>更新完成後寵物的「看更新內容」改成打開這個網頁的近期更新</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.3.0</span><span class="date">2026-11-13</span></summary>
+      <p class="lead2">SAI2 液化筆刷、六個新濾鏡與兩種圖層效果；縮時錄影不用再安裝 ffmpeg。</p>
+      <h4>新功能（SAI2 2026 版）</h4>
+      <ul>
+        <li><b>液化筆刷</b>：「新增工具」選「液化」，可推移、順時針／逆時針旋轉、縮攏、膨脹；濃度決定強度，可以跟筆壓。能同時處理選取的多個圖層，畫的時候即時預覽，一筆一次 Ctrl+Z</li>
+        <li><b>新濾鏡</b>：色彩曲線、動態模糊、放射狀模糊、色相差、色彩平衡、漸層對應（附新的拾色器與自訂漸層組）</li>
+        <li><b>新圖層效果</b>：外光暈、浮雕，畫圖時即時更新</li>
+        <li>每個濾鏡都能在「工具」頁單獨開關、設快捷鍵；筆畫、外光暈、浮雕的顏色改成點色塊開拾色器調整</li>
+      </ul>
+      <h4>改進</h4>
+      <ul>
+        <li><b>縮時錄影不用再安裝 ffmpeg</b>：沒有 ffmpeg 時改用 Windows 內建的 Media Foundation 合成影片、合併片段、匯出指定長度；有裝 ffmpeg 時照樣優先使用（較快、檔案較小）</li>
+        <li>Windows N 版請先安裝「媒體功能套件」（Media Feature Pack）</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.2.0</span><span class="date">2026-11-08</span></summary>
       <p class="lead2">也能搭配 Photoshop 和 Clip Studio Paint 使用。</p>
       <h4>新功能</h4>
       <ul>

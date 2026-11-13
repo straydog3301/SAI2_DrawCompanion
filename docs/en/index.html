@@ -330,7 +330,38 @@
     <p class="update-how">The app checks for updates on its own. Go to "Settings › General › Updates" and click "Update and restart". Records and settings are kept.</p>
 
     <details class="rel" open>
-      <summary><span class="ver">v2.2.0</span><span class="tag">Current</span><span class="date">2026-11-08</span></summary>
+      <summary><span class="ver">v2.3.1</span><span class="tag">Current</span><span class="date">2026-11-13</span></summary>
+      <p class="lead2">Fixes the recording switch showing the wrong state, and the Recording page can now download ffmpeg.</p>
+      <h4>Fixed</h4>
+      <ul>
+        <li>After turning recording on or off elsewhere (such as the record button under the pet), the switch on the Recording page didn't move. It could look on while recording was off, so clicking it did the opposite (for example, "turning it off" actually turned it on and no video was made)</li>
+      </ul>
+      <h4>Improved</h4>
+      <ul>
+        <li>New "Video encoding" row under "Recording › Recording settings": shows whether ffmpeg or the built-in Windows feature is used, with a link to download ffmpeg. After installing it, click "Detect again" (or wait a few seconds) and it's used right away, no restart needed</li>
+        <li>"What's new" after an update now opens the recent updates on this page</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.3.0</span><span class="date">2026-11-13</span></summary>
+      <p class="lead2">SAI2 Liquify brush, six new filters and two layer effects; timelapse no longer needs ffmpeg.</p>
+      <h4>New (SAI2 2026 build)</h4>
+      <ul>
+        <li><b>Liquify brush</b>: pick "Liquify" in SAI2's "New tool". Push, twirl clockwise / counterclockwise, pinch and bloat; density sets the strength and can follow pen pressure. Works on several selected layers at once with a live preview, and each stroke is one Ctrl+Z</li>
+        <li><b>New filters</b>: Curves, Motion Blur, Radial Blur, Chromatic Aberration, Color Balance and Gradient Map (with a new color picker and custom gradient sets)</li>
+        <li><b>New layer effects</b>: Outer Glow and Bevel, updated live as you draw</li>
+        <li>Each filter can be turned on or off and given a shortcut on the Mods page; stroke, glow and bevel colors now open the color picker</li>
+      </ul>
+      <h4>Improved</h4>
+      <ul>
+        <li><b>Timelapse no longer needs ffmpeg</b>: without it, videos are made, merged and trimmed with Windows' built-in Media Foundation. If ffmpeg is installed it's still used first (faster, smaller files)</li>
+        <li>On Windows N editions, install the Media Feature Pack first</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.2.0</span><span class="date">2026-11-08</span></summary>
       <p class="lead2">Now works with Photoshop and Clip Studio Paint too.</p>
       <h4>New</h4>
       <ul>
