@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DrawCompanion 2.0 — a desktop companion for PaintTool SAI2</title>
+<meta name="description" content="A desktop companion for PaintTool SAI2: tracks your drawing time automatically, plans daily practice, and keeps gesture-drawing and study references in a small window that stays out of your canvas.">
+<meta property="og:title" content="DrawCompanion 2.0">
+<meta property="og:description" content="A desktop companion for SAI2: automatic time tracking, daily practice, and reference windows that stay out of your way.">
+<meta property="og:image" content="https://straydog3301.github.io/SAI2_DrawCompanion/img/hero.webp">
+<link rel="alternate" hreflang="zh-Hant" href="https://straydog3301.github.io/SAI2_DrawCompanion/">
+<link rel="alternate" hreflang="en" href="https://straydog3301.github.io/SAI2_DrawCompanion/en/">
+<link rel="alternate" hreflang="ja" href="https://straydog3301.github.io/SAI2_DrawCompanion/ja/">
+<link rel="alternate" hreflang="x-default" href="https://straydog3301.github.io/SAI2_DrawCompanion/en/">
+<link rel="icon" href="../img/icon.png" type="image/png">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="../img/icon.png" alt="" width="32" height="32">DrawCompanion</a>
+    <div class="links">
+      <a href="#features">Features</a>
+      <a href="#start">Get started</a>
+      <a href="#updates">Updates</a>
+      <a href="#faq">FAQ</a>
+      <a href="buy.html">Buy</a>
+    </div>
+    <div class="lang"><a href="../" hreflang="zh-Hant">中文</a><a href="./" hreflang="en" aria-current="page">EN</a><a href="../ja/" hreflang="ja">日本語</a></div>
+    <a class="btn primary small" href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/latest/download/DrawCompanion2.zip">Download</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <span class="badge">Version 2.0</span>
+    <h1>A desktop companion<br><span class="hl">that draws alongside you</span></h1>
+    <p class="lead">DrawCompanion sits quietly next to PaintTool SAI2. It records how long you spend on each piece, plans your daily practice, and keeps gesture-drawing and study references in a small window that never covers your canvas.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/latest/download/DrawCompanion2.zip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 21h16"/></svg>
+        Download 2.0 (zip)
+      </a>
+      <a class="btn ghost" href="#start">How to start</a>
+    </div>
+    <p class="note">Windows 10 / 11 · No installer, just unzip · One-click updates from inside the app</p>
+    <div class="hero-shot">
+      <img src="../img/hero.webp" width="1800" height="1100" alt="Momo the desktop pet next to the canvas, with a speech bubble and the quick panel: today's progress, daily tasks, recent artwork thumbnails and shortcut buttons">
+    </div>
+
+    <div class="pillars">
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></div>
+        <h3>Tracks time on its own</h3>
+        <p>Detects which file you're drawing in SAI2 and counts only the time you're actually making strokes. No start button, nothing to forget to stop.</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg></div>
+        <h3>Know what to practice today</h3>
+        <p>Gesture drawing, master studies and drills planned around the skills you want to improve. Check in when you're done and watch your streak and skills grow.</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="13" y="12" width="6" height="6" rx="1"/></svg></div>
+        <h3>Stays out of your way</h3>
+        <p>Most of the time it's just a small pet. References open in a click-through window, so you can look and draw even on a single monitor.</p>
+      </div>
+    </div>
+
+    <div class="sec-title" style="margin-top:72px">
+      <h2>New in 2.0</h2>
+      <p>Rewritten from 1.x. None of this existed before.</p>
+    </div>
+    <div class="pillars">
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M8 7h8M8 11h6"/></svg></div>
+        <h3>Make your own courses</h3>
+        <p>Write steps, add reference images, set pass criteria and scoring, calibrate the AI review against your own work, and export a <code>.dccourse</code> for friends.</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20a6 6 0 0 1 12 0M14 20a4 4 0 0 1 7-2.6"/></svg></div>
+        <h3>Community Course Library</h3>
+        <p>Publish your courses, or browse and add other people's with one click. Authors can update or unpublish anytime, or send a share code directly.</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
+        <h3>Automatic updates</h3>
+        <p>Your pet tells you when a new version is out. Click "Update and restart" and you're done. Records and settings are kept, and a broken update rolls back automatically.</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+<section id="features">
+  <div class="wrap">
+    <div class="sec-title">
+      <h2>Features</h2>
+      <p>Real 2.0 screens with sample data, shown with the Chinese interface. The app itself also comes in English and Japanese.</p>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">DESKTOP PET × QUICK PANEL</div>
+        <h3>Click Momo and everything you use is right there</h3>
+        <p>After launch, only Momo appears on your desktop. Drag it anywhere. Click it to open the quick panel:</p>
+        <ul>
+          <li><b>Today's progress</b>: minutes drawn today and your streak</li>
+          <li><b>Daily tasks</b>: start, continue, check in</li>
+          <li><b>Recent</b>: artwork thumbnails that open straight in SAI2</li>
+          <li><b>Shortcut buttons</b>: gesture drawing, studies, snapshots, timelapse… and you choose which</li>
+        </ul>
+        <p>Momo reacts to what's happening in SAI2 and reminds you to take a break when you've been drawing too long. The session time and recording toggle sit right under the pet.</p>
+      </div>
+      <div class="shot narrow"><img src="../img/panel.webp" width="570" height="854" loading="lazy" alt="Quick panel: today's progress ring, three daily tasks, recent artwork thumbnails and shortcut buttons"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="text">
+        <div class="kicker">REFERENCE WINDOW</div>
+        <h3>Gesture drawing and studies in a small window</h3>
+        <ul>
+          <li><b>Gesture drawing</b>: images rotate from your own folders or online libraries, and the <b>timer only runs while you draw</b>. It pauses while you look at the reference</li>
+          <li><b>Canvas created for you</b>: each round opens a fresh A4 canvas in SAI2</li>
+          <li><b>Studies</b>: 7 learning paths, each lesson with steps, key points and a completion check. You can also add <b>your own or community courses</b></li>
+          <li><b>Click-through mode</b>: a semi-transparent window your mouse passes through, laid over the canvas to draw along</li>
+          <li><b>Hold to compare</b>: hold a hotkey to overlay the reference on your canvas</li>
+          <li><b>AI review (optional)</b>: scores and short feedback on check-in using your own AI key, to decide whether you move to the next lesson (Google AI Studio recommended; it has a free daily quota)</li>
+          <li><b>Grayscale, value steps, composition guides</b> and other checking tools</li>
+        </ul>
+      </div>
+      <div class="shot narrow"><img src="../img/sketch.webp" width="540" height="656" loading="lazy" alt="Gesture-drawing reference window: the reference image, a checking toolbar on top, and previous / pause / next / canvas buttons with a countdown below"></div>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">FLOATING NOTES × REFERENCE VIEWER</div>
+        <h3>Keep your settings and references at hand</h3>
+        <ul>
+          <li><b>Floating notes</b>: multiple tabs for color swatches, brush settings, character sheets. Anything wrapped in <code>```</code> <b>copies with one click</b></li>
+          <li>Read and edit modes; save with "Done" or Ctrl+S. Headings <b>collapse</b>, and a table of contents jumps between them</li>
+          <li><b>Paste screenshots with Ctrl+V</b> while editing, click an image to enlarge or copy it back, and pin the window on top</li>
+          <li><b>Reference viewer</b>: open any reference image outside a course (open, paste or drag in), zoom and pan, use the <b>eyedropper</b>, grayscale, composition guides, click-through and hold to compare</li>
+        </ul>
+      </div>
+      <div class="shot narrow"><img src="../img/notes.webp" width="570" height="960" loading="lazy" alt="Floating notes: tabs, collapsible headings, one-click copy blocks for swatches and brush settings, and a pasted reference image"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="text">
+        <div class="kicker">TODAY</div>
+        <h3>See what to practice at a glance</h3>
+        <p>The Today page sums up today's drawing time, daily tasks, this week's chart and skill activity, and points out skills you haven't practiced in a while.</p>
+        <ul>
+          <li>Tasks are planned from your daily practice time and the skills you want to improve. Swap one or add your own</li>
+          <li>Take days off each week without breaking your streak</li>
+          <li>A 30-second setup on first launch, and a suggestion after 3 days based on how much you actually drew</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="../img/today.webp" width="1920" height="1200" loading="lazy" alt="Today page: drawing time today, streak, today's tasks, this week's drawing chart, SAI2 connection status and skill activity"></div>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">GROWTH</div>
+        <h3>Every day of effort, visible</h3>
+        <ul>
+          <li><b>Practice calendar</b>: darker colors mean more check-ins. Click a day to see what you did</li>
+          <li><b>Drawing time stats</b>: week, month, six months, year</li>
+          <li><b>Skill cards</b>: hours and level for each skill</li>
+          <li>A canvas snapshot is saved on every check-in so you can look back at your progress</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="../img/growth.webp" width="1920" height="1200" loading="lazy" alt="Growth page: streak, longest streak, check-ins this month, practice calendar heatmap and daily details"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="text">
+        <div class="kicker">WORKS</div>
+        <h3>How long each piece took, with thumbnails</h3>
+        <ul>
+          <li><b>Thumbnails captured automatically</b> when you save or pause, right in the list</li>
+          <li>Drawing time, open time, efficiency, and number of sessions</li>
+          <li>Skill tags: which skills this piece's time counts toward</li>
+          <li>Merge two records after "Save as". Timelapse videos live here too</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="../img/works.webp" width="1920" height="1200" loading="lazy" alt="Works page: artwork list with thumbnails, a large preview and drawing stats on the right"></div>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">MAKE IT YOURS</div>
+        <h3>Your characters, your rules</h3>
+        <ul>
+          <li><b>Custom characters</b>: use your own art, with a different animation for each state (PNG / GIF / APNG / WebP)</li>
+          <li><b>Up to 5 pets in rotation</b>, custom actions (wave, stretch…), and <b>automatic sprite-sheet slicing</b></li>
+          <li><b>Speech bubble skins</b>: use any image as the bubble and mark the text area; corners never stretch. Each pet can have its own</li>
+          <li><b>"If… then…" rules</b>: e.g. "50 minutes of drawing → Momo reminds you to rest and does an action", or "drag Momo → play an action the whole way and say something when dropped". Rules can be per pet</li>
+          <li><b>Theme colors and light/dark mode</b>, quick panel sections and buttons, hotkeys</li>
+          <li><b>Text size</b> from 75% to 150%</li>
+          <li><b>Export and share</b> settings and characters, publish characters to the <b>Community Pet Library</b>, or add other people's with one click</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="../img/rules.webp" width="1920" height="1200" loading="lazy" alt="Rules page: &quot;If… then…&quot; rules such as long-session break reminders, opening practice files and late-night reminders"></div>
+    </div>
+    <img class="themes" src="../img/themes.webp" width="2946" height="854" loading="lazy" alt="The quick panel in five theme colors: purple, blue, teal (light), pink and orange (light)">
+  </div>
+</section>
+
+<section id="pro">
+  <div class="wrap">
+    <div class="sec-title">
+      <h2>Pro Modules</h2>
+      <p>Extra filters and layer features inside SAI2, unlocked with a one-time license</p>
+    </div>
+    <div class="req">
+      <div class="box">
+        <h3>What you get</h3>
+        <ul>
+          <li>Filters: Curves, Levels, Color Balance, Gradient Map, Motion / Radial Blur, Chromatic Aberration, Noise, Line Extraction, Vignette, Glow, High Pass and more</li>
+          <li>Layer effects, adjustment layers and layer color labels</li>
+          <li>Frame-by-frame animation, action recording and automation, Liquify brush</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>How it works</h3>
+        <ul>
+          <li>Buy once on Gumroad and get a license key by email</li>
+          <li>Paste it on the app's "Mods" page; it's tied to your SAI license and can be re-activated after a reinstall</li>
+          <li>Threshold, Posterize and Pixelate stay free. Requires a licensed PaintTool SAI Ver.2 (2026 build)</li>
+        </ul>
+        <p style="margin:14px 0 0"><a class="btn primary small" href="buy.html">Buy a license</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <div class="sec-title">
+      <h2>Get started</h2>
+      <p>No installer. Three steps after unzipping</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <h3>Download and unzip</h3>
+        <p><a href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/latest/download/DrawCompanion2.zip">Download</a> <code>DrawCompanion2.zip</code> (about 36 MB), right-click it → "Extract All" into a folder such as <code>D:\DrawCompanion</code>.</p>
+      </div>
+      <div class="step">
+        <h3>Keep the files together</h3>
+        <p>The folder contains <code>DrawCompanion2.exe</code> and an <code>_internal</code> folder; keep them side by side. Your records, settings, thumbnails and videos are stored here too, so move the whole folder if you relocate it.</p>
+      </div>
+      <div class="step">
+        <h3>Double-click DrawCompanion2.exe</h3>
+        <p>When Momo appears on your desktop, you're set. Open SAI2 and start drawing. Everything else has sensible defaults and will prompt you when needed.</p>
+      </div>
+    </div>
+    <div class="req">
+      <div class="box">
+        <h3>Requirements</h3>
+        <ul>
+          <li>Windows 10 or 11 (64-bit)</li>
+          <li>PaintTool SAI Ver.2</li>
+          <li><a href="https://ffmpeg.org/">ffmpeg</a> (on PATH), only for turning timelapse recordings into videos</li>
+          <li>Online image libraries (Unsplash / Pexels) need a free API key; local folders work without one</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>On first launch</h3>
+        <ul>
+          <li>Windows may show "Windows protected your PC": click "More info → Run anyway" (<a href="#smartscreen">details</a>)</li>
+          <li>Unzip first; don't run it from inside the zip, and don't move the exe out on its own</li>
+          <li>Only one copy runs at a time; opening it again won't start a second one</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="smart" id="smartscreen">
+      <h3>"Windows protected your PC" on first launch?</h3>
+      <p>That's normal. Two clicks and you're through, and it won't appear again.</p>
+      <div class="smart-grid">
+        <div class="why">
+          <h4>Why it appears</h4>
+          <p>This window is Microsoft Defender SmartScreen, built into Windows. It holds back programs that are new, have few downloads and aren't code-signed. DrawCompanion is made by one person and doesn't carry a code-signing certificate (which costs hundreds of dollars a year), so Windows doesn't "know" it yet. It is not a virus warning; the window doesn't report any threat.</p>
+          <h4>Why you can trust it</h4>
+          <ul>
+            <li>Downloads are hosted on <a href="https://github.com/straydog3301/SAI2_DrawCompanion/releases">GitHub Releases</a>, and the built-in updater verifies the developer's signature before installing anything</li>
+            <li>It reads SAI2's window title to see which file you're drawing; it never changes SAI2's settings or your existing files</li>
+            <li>No administrator rights needed; records stay in the program's own folder</li>
+            <li>Please only download from the button on this page</li>
+            <li>Still unsure? Upload the zip to <a href="https://www.virustotal.com/">VirusTotal</a> to scan it with dozens of antivirus engines</li>
+          </ul>
+        </div>
+        <div class="howto">
+          <figure>
+            <div class="win" role="img" aria-label="Windows protected your PC: Microsoft Defender SmartScreen prevented an unrecognized app from starting. A More info link and a Don't run button are shown">
+              <div class="t">Windows protected your PC</div>
+              <div>Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</div>
+              <div class="kv"><u>More info</u></div>
+              <div class="btns"><span class="no">Don't run</span></div>
+            </div>
+            <figcaption><b>1.</b> Click the "<b>More info</b>" link (not "Don't run")</figcaption>
+          </figure>
+          <figure>
+            <div class="win" role="img" aria-label="After clicking More info: App DrawCompanion2.exe, Publisher Unknown publisher, and a new Run anyway button">
+              <div class="t">Windows protected your PC</div>
+              <div>Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</div>
+              <div class="kv"><span>App:</span>DrawCompanion2.exe<br><span>Publisher:</span>Unknown publisher</div>
+              <div class="btns"><span class="run">Run anyway</span><span class="no">Don't run</span></div>
+            </div>
+            <figcaption><b>2.</b> Check that the app is <code>DrawCompanion2.exe</code>, then click "<b>Run anyway</b>"</figcaption>
+          </figure>
+        </div>
+      </div>
+      <p class="alt">Alternative: <b>before</b> unzipping, right-click the zip → "Properties" → tick "Unblock" at the bottom → OK. The extracted program won't show the warning. On work or school PCs without a "Run anyway" button, ask your administrator.</p>
+    </div>
+  </div>
+</section>
+
+<section id="updates">
+  <div class="wrap updates">
+    <div class="sec-title">
+      <h2>Recent updates</h2>
+      <p>What changed in each version. <a href="../#updates">Full history (Chinese)</a></p>
+    </div>
+    <p class="update-how">The app checks for updates on its own. Go to "Settings › General › Updates" and click "Update and restart". Records and settings are kept.</p>
+
+    <details class="rel" open>
+      <summary><span class="ver">v2.2.0</span><span class="tag">Current</span><span class="date">2026-11-08</span></summary>
+      <p class="lead2">Now works with Photoshop and Clip Studio Paint too.</p>
+      <h4>New</h4>
+      <ul>
+        <li><b>Photoshop and Clip Studio Paint support</b>: switch in "Settings › General › Drawing app". Drawing time, check-ins, artwork records, recent files, canvas snapshots and course screenshots follow the app you choose. The same file drawn in another app stays one record</li>
+        <li>Photoshop: the current file comes from the window title, and canvas capture needs the Photoshop window to be visible. Clip Studio Paint: reads the list of open files (the most recently opened wins), and captures show the last saved state</li>
+        <li>Timelapse and Mods are SAI2-only and are grayed out for other apps</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>"Add rule" did nothing for per-pet rules; new rules now appear at the top of the list</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.1.0</span><span class="date">2026-11-08</span></summary>
+      <p class="lead2">Community Pet Library: share the characters you draw, and add other people's with one click.</p>
+      <h4>New</h4>
+      <ul>
+        <li><b>Community Pet Library</b>: browse shared characters on the Companions page. Cards play the idle animation and show the author, actions and rule count. "Add" previews first; rules that open URLs or files, record or take snapshots start disabled</li>
+        <li><b>Publish your characters</b>: publish, upload a new version or unpublish from a custom character's "Info" tab, using the same author key as the course library. When you update, people who added it get "Update to new version", keeping their lineup position</li>
+        <li>Report inappropriate or stolen characters; reported characters are hidden automatically after enough reports</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.0.0</span><span class="date">2026-11-08</span></summary>
+      <p class="lead2">2.0: make your own courses, share them in the Community Course Library, and no more manual downloads for updates.</p>
+      <h4>New</h4>
+      <ul>
+        <li><b>Automatic updates</b>: checks at most once a day and your pet tells you when there's a new version. "Settings › General › Updates" → "Update and restart". If the new version fails to start, it rolls back automatically</li>
+        <li><b>Your own courses</b>: write steps, add references, set pass criteria and scoring, test and calibrate the AI review with your own work, and export <code>.dccourse</code> files</li>
+        <li><b>Community Course Library</b>: publish courses, browse and add others'; authors can update or unpublish anytime</li>
+        <li><b>Drag rules</b>: new "while dragging the pet" and "when the pet is dropped" triggers</li>
+        <li><b>Folder version</b>: unzip and run, faster startup; updates replace the whole folder and keep the previous version for rollback</li>
+      </ul>
+    </details>
+  </div>
+</section>
+
+<section id="feedback">
+  <div class="wrap">
+    <div class="feedback">
+      <div>
+        <h2>Feedback</h2>
+        <p>Useful, confusing, broken, or something you wish it did: I read every message. English and Japanese are both welcome.</p>
+        <ol>
+          <li>Fill in the feedback form: what happened, which feature, and how to reproduce it</li>
+          <li>If the app crashed, pasting <code>drawcompanion2_error.log</code> from its folder helps a lot</li>
+          <li>No Google sign-in needed; contact details are optional</li>
+        </ol>
+        <div class="cta" style="justify-content:flex-start">
+          <a class="btn primary" href="https://docs.google.com/forms/d/e/1FAIpQLSdmVgbIjduOo64vnu7S4OUdu1t54_-3mCNL4WLYcpwTzY8taw/viewform" target="_blank" rel="noopener">Open the feedback form</a>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-top:0">Things worth telling me</h3>
+        <div class="wish">
+          <span>Is drawing time accurate?</span>
+          <span>Gesture-drawing difficulty and timing</span>
+          <span>Daily task workload</span>
+          <span>Are thumbnails right?</span>
+          <span>Opening files in SAI2</span>
+          <span>Does the pet get in the way?</span>
+          <span>High-DPI displays</span>
+          <span>What's unclear</span>
+          <span>Features you'd like</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap faq">
+    <div class="sec-title"><h2>FAQ</h2></div>
+    <details>
+      <summary>Is the app available in English?</summary>
+      <p>Yes. The app and the menus and dialogs it adds to SAI2 are available in English, Japanese and Traditional Chinese. It follows your Windows language by default; you can change it under Settings › General › Language (takes effect after a restart).</p>
+    </details>
+    <details>
+      <summary>Does it work with Photoshop or Clip Studio Paint?</summary>
+      <p>Yes, since 2.2. Switch in "Settings › General › Drawing app" and drawing time, check-ins, artwork records and canvas captures follow that app. Photoshop captures need the window to be unobstructed; with several Clip Studio Paint canvases open, the most recently opened one counts, and captures show the last saved state. Timelapse and Mods are SAI2-only for now.</p>
+    </details>
+    <details>
+      <summary>Why a zip instead of a single exe?</summary>
+      <p>The folder version doesn't unpack itself to a temp folder on every launch, so it starts faster and is less likely to be flagged by antivirus software. The updater also replaces this folder directly. Run <code>DrawCompanion2.exe</code> and keep the <code>_internal</code> folder next to it.</p>
+    </details>
+    <details>
+      <summary>What if an update breaks something?</summary>
+      <p>If a new version fails to start three times in a row, the app rolls back automatically. You can also click "Go back to previous version" in "Settings › General › Updates". The previous version is kept in the <code>_previous</code> folder.</p>
+    </details>
+    <details>
+      <summary>Do I need Python or anything else?</summary>
+      <p>No. The unzipped folder contains everything; just run <code>DrawCompanion2.exe</code>. Only timelapse video export needs ffmpeg installed separately.</p>
+    </details>
+    <details>
+      <summary>Is my artwork uploaded anywhere?</summary>
+      <p>No. Records, thumbnails and settings stay on your computer, in the program's folder. The app only connects to fetch reference images (The Met, Art Institute of Chicago, Unsplash, Pexels), check for updates, browse the community libraries, activate a license, and for AI review if you turn it on. Only courses and characters you choose to publish are uploaded; no usage data is collected.</p>
+    </details>
+    <details>
+      <summary>Why isn't the gesture-drawing timer moving?</summary>
+      <p>By default the timer only runs while you draw on a saved canvas in SAI2, and pauses while you look at the reference. A canvas is created and opened for you when you start. To keep it running all the time, turn this off in the reference window's settings.</p>
+    </details>
+    <details>
+      <summary>The pet is in my way. What can I do?</summary>
+      <p>Drag Momo anywhere; it also turns semi-transparent while you draw. "Hide for 30 min" in the quick panel tucks it away, and the tray icon brings it back.</p>
+    </details>
+    <details>
+      <summary>Can I use my own character?</summary>
+      <p>Yes. Go to "Settings → Companions", click "+" in the lineup, and pick images for each state. 512×512 APNG or WebP with a transparent background works best, and sprite sheets are supported. Export character packs to share, publish them to the Community Pet Library, or add characters others have drawn.</p>
+    </details>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <img src="../img/icon.png" alt="" width="40" height="40">
+    <p>DrawCompanion · a companion tool for PaintTool SAI2 · <a href="https://github.com/straydog3301/SAI2_DrawCompanion">GitHub</a> · <a href="buy.html">Buy a license</a> · <a href="legal.html">Terms &amp; policies</a></p>
+    <p>PaintTool SAI is a product of SYSTEMAX. DrawCompanion is an unofficial tool made by an independent developer.</p>
+  </div>
+</footer>
+</body>
+</html>

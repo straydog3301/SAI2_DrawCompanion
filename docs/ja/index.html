@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DrawCompanion 2.0 — PaintTool SAI2 のデスクトップ相棒</title>
+<meta name="description" content="PaintTool SAI2 のそばで寄り添うデスクトップ相棒。作画時間を自動で記録し、毎日の練習を組み立て、クロッキーや模写の参考画像はキャンバスを邪魔しない小さなウィンドウで表示します。">
+<meta property="og:title" content="DrawCompanion 2.0">
+<meta property="og:description" content="SAI2 のデスクトップ相棒：作画時間の自動記録、毎日の練習、邪魔にならない参考ウィンドウ。">
+<meta property="og:image" content="https://straydog3301.github.io/SAI2_DrawCompanion/img/hero.webp">
+<link rel="alternate" hreflang="zh-Hant" href="https://straydog3301.github.io/SAI2_DrawCompanion/">
+<link rel="alternate" hreflang="en" href="https://straydog3301.github.io/SAI2_DrawCompanion/en/">
+<link rel="alternate" hreflang="ja" href="https://straydog3301.github.io/SAI2_DrawCompanion/ja/">
+<link rel="alternate" hreflang="x-default" href="https://straydog3301.github.io/SAI2_DrawCompanion/en/">
+<link rel="icon" href="../img/icon.png" type="image/png">
+<link rel="apple-touch-icon" href="../img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="../img/icon.png" alt="" width="32" height="32">DrawCompanion</a>
+    <div class="links">
+      <a href="#features">機能</a>
+      <a href="#start">はじめかた</a>
+      <a href="#updates">更新履歴</a>
+      <a href="#faq">よくある質問</a>
+      <a href="buy.html">購入</a>
+    </div>
+    <div class="lang"><a href="../" hreflang="zh-Hant">中文</a><a href="../en/" hreflang="en">EN</a><a href="./" hreflang="ja" aria-current="page">日本語</a></div>
+    <a class="btn primary small" href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/latest/download/DrawCompanion2.zip">ダウンロード</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <span class="badge">バージョン 2.0</span>
+    <h1>いっしょに描いてくれる<br><span class="hl">SAI2 のデスクトップ相棒</span></h1>
+    <p class="lead">DrawCompanion は PaintTool SAI2 のそばで静かに寄り添います。作品ごとの作画時間を自動で記録し、毎日の練習を組み立て、クロッキーや模写の参考画像はキャンバスを邪魔しない小さなウィンドウで表示します。</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/latest/download/DrawCompanion2.zip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 21h16"/></svg>
+        2.0 をダウンロード（zip）
+      </a>
+      <a class="btn ghost" href="#start">はじめかた</a>
+    </div>
+    <p class="note">Windows 10／11 · インストール不要、解凍するだけ · 以降はアプリ内でワンクリック更新</p>
+    <div class="hero-shot">
+      <img src="../img/hero.webp" width="1800" height="1100" alt="キャンバスの横にいるデスクトップペット「モモ」と吹き出し、クイックパネル（今日の進捗、デイリータスク、最近開いた作品のサムネイル、ショートカットボタン）">
+    </div>
+
+    <div class="pillars">
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></div>
+        <h3>起動しておくだけで記録</h3>
+        <p>SAI2 で描いているファイルを検出し、実際に筆を動かしている時間だけを数えます。開始ボタンも、止め忘れもありません。</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg></div>
+        <h3>今日やる練習がわかる</h3>
+        <p>伸ばしたいスキルに合わせてクロッキー、模写、反復練習を組み立てます。終わったらチェックイン。連続日数とスキルの成長がひと目でわかります。</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><rect x="13" y="12" width="6" height="6" rx="1"/></svg></div>
+        <h3>画面を占領しない</h3>
+        <p>ふだんは小さなペットが一匹いるだけ。参考画像はマウスが通り抜ける小窓なので、モニター 1 枚でも見ながら描けます。</p>
+      </div>
+    </div>
+
+    <div class="sec-title" style="margin-top:72px">
+      <h2>2.0 の新機能</h2>
+      <p>1.x から全面的に作り直し、新しく加わった機能です</p>
+    </div>
+    <div class="pillars">
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M8 7h8M8 11h6"/></svg></div>
+        <h3>講座を自分で作る</h3>
+        <p>手順を書き、参考画像を置き、合格基準と採点項目を決め、自分の作品で AI 講評を調整。<code>.dccourse</code> として書き出して友達に渡せます。</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20a6 6 0 0 1 12 0M14 20a4 4 0 0 1 7-2.6"/></svg></div>
+        <h3>コミュニティ講座ライブラリ</h3>
+        <p>講座を公開したり、ほかの人の講座をワンクリックで追加したり。作者はいつでも更新・公開停止でき、共有コードで直接渡すこともできます。</p>
+      </div>
+      <div class="pillar">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
+        <h3>自動更新</h3>
+        <p>新しいバージョンが出るとペットが教えてくれます。「更新して再起動」を押すだけ。記録と設定はそのまま、更新に問題があれば自動で前のバージョンに戻ります。</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+<section id="features">
+  <div class="wrap">
+    <div class="sec-title">
+      <h2>機能一覧</h2>
+      <p>2.0 の実際の画面（サンプルデータ、中国語表示）です。アプリは日本語・英語でも使えます。</p>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">デスクトップペット × クイックパネル</div>
+        <h3>モモをクリックすれば、よく使う機能がそろっています</h3>
+        <p>起動するとデスクトップにはモモだけが表示され、好きな場所にドラッグできます。クリックするとクイックパネルが開きます：</p>
+        <ul>
+          <li><b>今日の進捗</b>：今日描いた分数と連続日数</li>
+          <li><b>デイリータスク</b>：開始、続き、チェックイン</li>
+          <li><b>最近開いた作品</b>：サムネイルをクリックすると SAI2 で直接開きます</li>
+          <li><b>ショートカットボタン</b>：クロッキー、模写、スナップショット、タイムラプス録画など。自由に入れ替えられます</li>
+        </ul>
+        <p>モモは SAI2 の状態に合わせて動きを変え、描きすぎると休憩をすすめてくれます。ペットの下には今回の作画時間と録画スイッチが表示されます。</p>
+      </div>
+      <div class="shot narrow"><img src="../img/panel.webp" width="570" height="854" loading="lazy" alt="クイックパネル：今日の進捗リング、3 つのデイリータスク、最近開いた作品のサムネイル、ショートカットボタン"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="text">
+        <div class="kicker">参考ウィンドウ</div>
+        <h3>クロッキーも模写も小さなウィンドウで</h3>
+        <ul>
+          <li><b>クロッキー</b>：ローカルのフォルダやオンライン画像ライブラリから自動で切り替え。<b>描いている間だけカウントダウン</b>し、参考画像を見ているときは一時停止します</li>
+          <li><b>キャンバスを自動作成</b>：1 セットごとに A4 キャンバスを SAI2 で開きます</li>
+          <li><b>模写スタディ</b>：7 つの学習パス。各レッスンに段階的な手順、ポイント、完了チェックがあり、<b>自作やコミュニティの講座</b>も追加できます</li>
+          <li><b>クリックスルーモード</b>：半透明でマウスが通り抜ける小窓をキャンバスに重ねて、なぞるように描けます</li>
+          <li><b>押して比較</b>：ショートカットキーを押している間、自分のキャンバスに参考画像を重ねて比べます</li>
+          <li><b>AI 講評（オフにできます）</b>：講座のチェックイン時に自分の AI キーで採点と短い講評をつけ、次のレッスンに進むか判断します（無料枠のある Google AI Studio がおすすめ）</li>
+          <li><b>グレースケール、明度段階、構図ガイド</b>などのチェックツール</li>
+        </ul>
+      </div>
+      <div class="shot narrow"><img src="../img/sketch.webp" width="540" height="656" loading="lazy" alt="クロッキーの参考ウィンドウ：参考画像、上部のチェックツールバー、下部の前へ／一時停止／次へ／キャンバスボタンとカウントダウン"></div>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">フローティングメモ × 参照ビューア</div>
+        <h3>よく使う設定や参考画像を手元に</h3>
+        <ul>
+          <li><b>フローティングメモ</b>：複数のタブにカラーパレット、ブラシ設定、キャラクター設定をメモ。<code>```</code> で囲んだ部分は<b>ワンクリックでコピー</b></li>
+          <li>閲覧／編集モード。「完了」か Ctrl+S で保存。見出しは<b>折りたたみ</b>可能で、目次からジャンプできます</li>
+          <li>編集中は <b>Ctrl+V でスクリーンショットを貼り付け</b>。画像をクリックで拡大・クリップボードにコピー。最前面表示も切り替えられます</li>
+          <li><b>参照ビューア</b>：講座以外でも参考画像を 1 枚表示（開く、貼り付け、ドラッグ）。拡大縮小・移動、<b>スポイト</b>、グレースケール、構図ガイド、クリックスルー、押して比較</li>
+        </ul>
+      </div>
+      <div class="shot narrow"><img src="../img/notes.webp" width="570" height="960" loading="lazy" alt="フローティングメモ：タブ、折りたためる見出し、カラーパレットとブラシ設定のワンクリックコピー欄、貼り付けた参考画像"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="text">
+        <div class="kicker">今日</div>
+        <h3>今日なにを練習するか、ひと目でわかる</h3>
+        <p>メインウィンドウの「今日」ページに、今日の作画時間、デイリータスク、今週の作画グラフ、スキルの動きをまとめ、しばらく練習していないスキルも知らせます。</p>
+        <ul>
+          <li>タスクは毎日の練習時間と伸ばしたいスキルから組み立てられ、入れ替えや手動追加もできます</li>
+          <li>毎週お休みの日を設定でき、連続日数は途切れません</li>
+          <li>初回は 30 秒で練習量を調整。3 日後に実際に描いた時間をもとにもう一度提案します</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="../img/today.webp" width="1920" height="1200" loading="lazy" alt="今日ページ：今日の作画時間、連続日数、今日のタスク、今週の作画、SAI2 の接続状態とスキルの動き"></div>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">成長</div>
+        <h3>毎日の積み重ねが目に見える</h3>
+        <ul>
+          <li><b>練習カレンダー</b>：チェックインが多い日ほど色が濃く、日付をクリックするとその日の内容が見られます</li>
+          <li><b>作画時間の統計</b>：週、月、半年、1 年</li>
+          <li><b>スキルカード</b>：スキルごとの累計時間とレベル</li>
+          <li>チェックインのたびにキャンバスのスナップショットを自動保存。あとから上達を振り返れます</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="../img/growth.webp" width="1920" height="1200" loading="lazy" alt="成長ページ：連続日数、最長記録、今月のチェックイン、練習カレンダーのヒートマップと日別の詳細"></div>
+    </div>
+
+    <div class="feature flip">
+      <div class="text">
+        <div class="kicker">作品</div>
+        <h3>作品ごとの作画時間とサムネイル</h3>
+        <ul>
+          <li>保存時や手を止めたときに<b>サムネイルを自動取得</b>し、一覧でそのまま見られます</li>
+          <li>作画時間、起動時間、作画効率、描いた回数</li>
+          <li>スキルタグ：この作品の時間をどのスキルに加算するか</li>
+          <li>「名前を付けて保存」のあとに 2 つの記録を 1 つにまとめられます。タイムラプス動画もここにあります</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="../img/works.webp" width="1920" height="1200" loading="lazy" alt="作品ページ：サムネイル付きの作品一覧と、右側の大きなプレビューと作画の統計"></div>
+    </div>
+
+    <div class="feature">
+      <div class="text">
+        <div class="kicker">カスタマイズ</div>
+        <h3>自分好みの姿に</h3>
+        <ul>
+          <li><b>オリジナルキャラクター</b>：自分で描いたキャラクターを使い、状態ごとに別のアニメーションを設定（PNG／GIF／APNG／WebP）</li>
+          <li><b>最大 5 匹のペットが交代で登場</b>、カスタム動作（手を振る、伸びをする…）、<b>スプライトシートの自動分割</b></li>
+          <li><b>吹き出しの見た目</b>：好きな画像を吹き出しにして文字の範囲を指定。四隅は伸びません。ペットごとに設定も可能</li>
+          <li><b>「もし…なら…」ルール</b>：例えば「50 分描き続けた → モモが休憩をすすめて動作する」「モモをドラッグ → 移動中ずっと指定の動作、離したらひとこと」。ペットごとの専用ルールも作れます</li>
+          <li><b>テーマカラーとライト／ダーク</b>、クイックパネルの項目とボタン、ショートカットキー</li>
+          <li><b>文字サイズ</b> 75%〜150%</li>
+          <li>設定やキャラクターを<b>書き出して共有</b>。キャラクターを<b>コミュニティペットライブラリ</b>に公開したり、ほかの人のキャラクターをワンクリックで追加したりできます</li>
+        </ul>
+      </div>
+      <div class="shot"><img src="../img/rules.webp" width="1920" height="1200" loading="lazy" alt="ルールページ：連続作画の休憩通知、練習ファイルを開く、深夜の通知などの「もし…なら…」ルール"></div>
+    </div>
+    <img class="themes" src="../img/themes.webp" width="2946" height="854" loading="lazy" alt="5 つのテーマカラーのクイックパネル：紫、青、ティール（ライト）、ピンク、オレンジ（ライト）">
+  </div>
+</section>
+
+<section id="pro">
+  <div class="wrap">
+    <div class="sec-title">
+      <h2>拡張モジュール</h2>
+      <p>SAI2 の中で使えるフィルタやレイヤー機能。ライセンスは買い切りです</p>
+    </div>
+    <div class="req">
+      <div class="box">
+        <h3>使える機能</h3>
+        <ul>
+          <li>フィルタ：トーンカーブ、レベル補正、カラーバランス、グラデーションマップ、移動／放射状ぼかし、色収差、ノイズ、線画抽出、ビネット、グロー、ハイパスなど</li>
+          <li>レイヤー効果、調整レイヤー、レイヤーカラーラベル</li>
+          <li>コマ撮りアニメーション、操作の記録と自動実行、ゆがみブラシ</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>しくみ</h3>
+        <ul>
+          <li>Gumroad で一度購入すると、ライセンスキーがメールで届きます</li>
+          <li>アプリの「Mod」ページに貼り付けてアクティベート。SAI のライセンスにひも付き、再インストール後も同じキーで使えます</li>
+          <li>2 値化、ポスタリゼーション、モザイクは無料のまま。正規ライセンスの PaintTool SAI Ver.2（2026 年版）が必要です</li>
+        </ul>
+        <p style="margin:14px 0 0"><a class="btn primary small" href="buy.html">ライセンスを購入</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <div class="sec-title">
+      <h2>はじめかた</h2>
+      <p>インストール不要。解凍したらあと 3 ステップ</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <h3>ダウンロードして解凍</h3>
+        <p><a href="https://github.com/straydog3301/SAI2_DrawCompanion/releases/latest/download/DrawCompanion2.zip">こちらから</a> <code>DrawCompanion2.zip</code>（約 36 MB）をダウンロードし、右クリック →「すべて展開」で <code>D:\DrawCompanion</code> などのフォルダに解凍します。</p>
+      </div>
+      <div class="step">
+        <h3>ファイルはまとめて</h3>
+        <p>フォルダには <code>DrawCompanion2.exe</code> と <code>_internal</code> フォルダがあり、2 つは同じ場所に置いてください。記録、設定、サムネイル、動画もここに保存されるので、移動するときはフォルダごと移動します。</p>
+      </div>
+      <div class="step">
+        <h3>DrawCompanion2.exe をダブルクリック</h3>
+        <p>デスクトップにモモが出てきたら完了です。SAI2 を開いて描き始めましょう。ほかの設定は初期値があり、必要なときに案内します。</p>
+      </div>
+    </div>
+    <div class="req">
+      <div class="box">
+        <h3>動作環境</h3>
+        <ul>
+          <li>Windows 10 または 11（64 ビット）</li>
+          <li>PaintTool SAI Ver.2</li>
+          <li>タイムラプス録画を動画にするときだけ <a href="https://ffmpeg.org/">ffmpeg</a>（PATH に追加）</li>
+          <li>オンライン画像ライブラリ（Unsplash／Pexels）は無料の API キーが必要。なくてもローカルフォルダの参考画像は使えます</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>初回起動時</h3>
+        <ul>
+          <li>「Windows によって PC が保護されました」と表示されることがあります。「詳細情報 → 実行」を押してください（<a href="#smartscreen">説明</a>）</li>
+          <li>zip の中から直接実行せず、先に解凍してください。exe だけを取り出すのも NG です</li>
+          <li>同時に起動できるのは 1 つだけで、二重起動はしません</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="smart" id="smartscreen">
+      <h3>初回起動で「Windows によって PC が保護されました」と出たら？</h3>
+      <p>よくあることです。2 回クリックすれば続けられ、次回からは表示されません。</p>
+      <div class="smart-grid">
+        <div class="why">
+          <h4>表示される理由</h4>
+          <p>これは Windows に組み込まれた Microsoft Defender SmartScreen です。ダウンロード数が少なく、デジタル署名のないプログラムを止めます。DrawCompanion は個人開発のツールで、年間数百ドルかかるコード署名証明書を持っておらず、ダウンロード数もまだ少ないため、Windows がまだ「知らない」状態です。ウイルスが見つかったわけではなく、画面にも脅威は表示されていません。</p>
+          <h4>安心して使える理由</h4>
+          <ul>
+            <li>ダウンロードは <a href="https://github.com/straydog3301/SAI2_DrawCompanion/releases">GitHub Releases</a> で配布。アプリの自動更新は開発者の署名を確認し、ファイルが差し替えられていればインストールしません</li>
+            <li>SAI2 のウィンドウタイトルから描いているファイルを判断するだけで、SAI2 の設定や既存の作品ファイルは変更しません</li>
+            <li>管理者権限は不要で、記録はプログラムのフォルダにだけ保存されます</li>
+            <li>このページのダウンロードボタンからのみ入手してください</li>
+            <li>それでも心配なら、zip を <a href="https://www.virustotal.com/">VirusTotal</a> にアップロードして数十種類のウイルス対策ソフトで検査できます</li>
+          </ul>
+        </div>
+        <div class="howto">
+          <figure>
+            <div class="win" role="img" aria-label="Windows によって PC が保護されました：Microsoft Defender SmartScreen は認識されないアプリの起動を停止しました。詳細情報リンクと実行しないボタン">
+              <div class="t">Windows によって PC が保護されました</div>
+              <div>Microsoft Defender SmartScreen は認識されないアプリの起動を停止しました。このアプリを実行すると、PC に問題が起こる可能性があります。</div>
+              <div class="kv"><u>詳細情報</u></div>
+              <div class="btns"><span class="no">実行しない</span></div>
+            </div>
+            <figcaption><b>1.</b> 「<b>詳細情報</b>」のリンクをクリック（「実行しない」は押さない）</figcaption>
+          </figure>
+          <figure>
+            <div class="win" role="img" aria-label="詳細情報を押したあと：アプリ DrawCompanion2.exe、発行元 不明な発行元、実行ボタンが表示される">
+              <div class="t">Windows によって PC が保護されました</div>
+              <div>Microsoft Defender SmartScreen は認識されないアプリの起動を停止しました。このアプリを実行すると、PC に問題が起こる可能性があります。</div>
+              <div class="kv"><span>アプリ:</span>DrawCompanion2.exe<br><span>発行元:</span>不明な発行元</div>
+              <div class="btns"><span class="run">実行</span><span class="no">実行しない</span></div>
+            </div>
+            <figcaption><b>2.</b> アプリが <code>DrawCompanion2.exe</code> であることを確認して「<b>実行</b>」</figcaption>
+          </figure>
+        </div>
+      </div>
+      <p class="alt">別の方法：解凍する<b>前に</b> zip を右クリック →「プロパティ」→ 下の「許可する」にチェック → OK。解凍したプログラムでは表示されなくなります。会社や学校の PC で「実行」ボタンがない場合は、管理者に相談してください。</p>
+    </div>
+  </div>
+</section>
+
+<section id="updates">
+  <div class="wrap updates">
+    <div class="sec-title">
+      <h2>最近の更新</h2>
+      <p>各バージョンの変更点です。<a href="../#updates">すべての履歴（中国語）</a></p>
+    </div>
+    <p class="update-how">アプリが自動で新バージョンを確認します。「設定 › 一般 › 更新」で「更新して再起動」を押してください。記録と設定はそのまま引き継がれます。</p>
+
+    <details class="rel" open>
+      <summary><span class="ver">v2.2.0</span><span class="tag">現在のバージョン</span><span class="date">2026-11-08</span></summary>
+      <p class="lead2">Photoshop と CLIP STUDIO PAINT でも使えるようになりました。</p>
+      <h4>新機能</h4>
+      <ul>
+        <li><b>Photoshop と CLIP STUDIO PAINT に対応</b>：「設定 › 一般 › お絵描きソフト」で切り替え。作画時間、デイリーチェックイン、作品の記録、最近開いた作品、キャンバスのスナップショット、講座のチェックイン画像が選んだソフトに合わせて動きます。同じファイルを別のソフトで描いても同じ記録です</li>
+        <li>Photoshop はウィンドウタイトルから現在のファイルを判断し、キャンバスの取得には Photoshop の画面が隠れていないことが必要です。CLIP STUDIO PAINT は開いているファイルの一覧を読み取り（複数ある場合は最後に開いたもの）、取得画像は最後に保存した状態です</li>
+        <li>タイムラプス録画と Mod は SAI2 のみ対応で、ほかのソフトではグレー表示になります</li>
+      </ul>
+      <h4>修正</h4>
+      <ul>
+        <li>ペットごとのルールで「ルールを追加」が反応しなかった問題。新しいルールは一覧の一番上に追加されます</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.1.0</span><span class="date">2026-11-08</span></summary>
+      <p class="lead2">コミュニティペットライブラリ：自分で描いたキャラクターを共有し、ほかの人のキャラクターもワンクリックで追加できます。</p>
+      <h4>新機能</h4>
+      <ul>
+        <li><b>コミュニティペットライブラリ</b>：コンパニオンページで共有されたキャラクターを閲覧。カードで待機アニメーションを再生し、作者、動作、ルール数を表示します。「追加」はまずプレビューし、URL やファイルを開く・録画・スナップショットのルールは初期状態で無効です</li>
+        <li><b>自分のキャラクターを公開</b>：オリジナルキャラクターの「情報」タブから公開、新バージョンのアップロード、公開停止ができます（講座ライブラリと同じ作者キー）。更新すると、追加した人には「新バージョンに更新」が表示され、ラインナップの位置は保たれます</li>
+        <li>不適切・盗用のキャラクターは通報でき、通報がたまると自動で非表示になります</li>
+      </ul>
+    </details>
+
+    <details class="rel">
+      <summary><span class="ver">v2.0.0</span><span class="date">2026-11-08</span></summary>
+      <p class="lead2">2.0 正式版：講座を自作してコミュニティ講座ライブラリで共有でき、更新も手動ダウンロード不要になりました。</p>
+      <h4>新機能</h4>
+      <ul>
+        <li><b>自動更新</b>：1 日 1 回まで新バージョンを確認し、ペットが知らせます。「設定 › 一般 › 更新」→「更新して再起動」。起動に失敗したら自動で前のバージョンに戻ります</li>
+        <li><b>講座の自作</b>：手順、参考画像、合格基準と採点項目を設定し、自分の作品で試し採点・AI 講評の調整。<code>.dccourse</code> で書き出して共有</li>
+        <li><b>コミュニティ講座ライブラリ</b>：講座の公開、ほかの人の講座の閲覧と追加。作者はいつでも更新・公開停止できます</li>
+        <li><b>ドラッグのルール</b>：「ペットをドラッグ中」「ドラッグしたペットを離したとき」のトリガーを追加</li>
+        <li><b>フォルダ版</b>：zip を解凍して実行、起動が速くなりました。更新はフォルダごと入れ替え、前のバージョンを残して戻せるようにしています</li>
+      </ul>
+    </details>
+  </div>
+</section>
+
+<section id="feedback">
+  <div class="wrap">
+    <div class="feedback">
+      <div>
+        <h2>ご意見・ご感想</h2>
+        <p>使いやすい、使いにくい、わかりにくい、動かない、ほしい機能……なんでも教えてください。すべて目を通します。日本語でどうぞ。</p>
+        <ol>
+          <li>フィードバックフォームに、何が起きたか、どの機能か、再現手順を書いてください</li>
+          <li>エラーが出たときは、フォルダ内の <code>drawcompanion2_error.log</code> を貼り付けていただけると助かります</li>
+          <li>Google へのログインは不要で、連絡先は空欄でもかまいません</li>
+        </ol>
+        <div class="cta" style="justify-content:flex-start">
+          <a class="btn primary" href="https://docs.google.com/forms/d/e/1FAIpQLSdmVgbIjduOo64vnu7S4OUdu1t54_-3mCNL4WLYcpwTzY8taw/viewform" target="_blank" rel="noopener">フィードバックフォームを開く</a>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-top:0">こんなことを聞かせてください</h3>
+        <div class="wish">
+          <span>作画時間は正確？</span>
+          <span>クロッキーの難しさと時間</span>
+          <span>デイリータスクの量</span>
+          <span>サムネイルは正しい？</span>
+          <span>SAI2 でのファイルの開き方</span>
+          <span>ペットが邪魔になっていない？</span>
+          <span>高解像度モニターでの表示</span>
+          <span>わかりにくいところ</span>
+          <span>ほしい機能</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap faq">
+    <div class="sec-title"><h2>よくある質問</h2></div>
+    <details>
+      <summary>アプリは日本語で使えますか？</summary>
+      <p>はい。アプリと、SAI2 に追加されるメニューやダイアログは日本語・英語・繁体字中国語に対応しています。初期設定では Windows の表示言語に合わせ、「設定 › 一般 › 言語」で変更できます（再起動後に反映）。</p>
+    </details>
+    <details>
+      <summary>Photoshop や CLIP STUDIO PAINT でも使えますか？</summary>
+      <p>使えます（2.2 から）。「設定 › 一般 › お絵描きソフト」で切り替えると、作画時間、デイリーチェックイン、作品の記録、キャンバスの取得がそのソフトに合わせて動きます。Photoshop の取得には画面がほかのウィンドウで隠れていないこと、CLIP STUDIO PAINT は複数のキャンバスを開いているときは最後に開いたものが対象で、取得画像は最後に保存した状態です。タイムラプス録画と Mod は今のところ SAI2 のみ対応です。</p>
+    </details>
+    <details>
+      <summary>なぜ exe 1 つではなく zip なのですか？</summary>
+      <p>フォルダ版は起動のたびにプログラム全体を一時フォルダに展開しないので、起動が速く、ウイルス対策ソフトに誤検知されにくくなります。自動更新もこのフォルダを直接入れ替えます。<code>DrawCompanion2.exe</code> を実行し、<code>_internal</code> フォルダは削除・移動しないでください。</p>
+    </details>
+    <details>
+      <summary>更新後に問題が起きたら？</summary>
+      <p>新しいバージョンが 3 回続けて正常に起動しなかった場合、自動で前のバージョンに戻ります。「設定 › 一般 › 更新」の「前のバージョンに戻す」でも戻せます。前のバージョンはフォルダ内の <code>_previous</code> に保存されています。</p>
+    </details>
+    <details>
+      <summary>Python などのインストールは必要ですか？</summary>
+      <p>不要です。解凍したフォルダに必要なものがすべて入っているので、<code>DrawCompanion2.exe</code> を実行するだけです。タイムラプス録画を動画にするときだけ ffmpeg が別途必要です。</p>
+    </details>
+    <details>
+      <summary>作品や記録がアップロードされることはありますか？</summary>
+      <p>ありません。記録、サムネイル、設定はすべてあなたの PC（プログラムのフォルダ）に保存されます。通信するのは、参考画像の取得（メトロポリタン美術館、シカゴ美術館、Unsplash、Pexels）、更新の確認、コミュニティライブラリの閲覧、ライセンスのアクティベート、そして AI 講評をオンにしたときだけです。アップロードされるのは自分で公開した講座とキャラクターだけで、利用状況は収集しません。</p>
+    </details>
+    <details>
+      <summary>クロッキーのカウントダウンが動きません</summary>
+      <p>初期設定では「描いているときだけカウントダウン」です。SAI2 の保存済みキャンバスに描くと進み、参考画像を見ている間は止まります。開始時にキャンバスは自動で作成されます。常にカウントダウンしたい場合は、参考ウィンドウの設定でオフにしてください。</p>
+    </details>
+    <details>
+      <summary>ペットが作業の邪魔になるときは？</summary>
+      <p>モモは好きな場所にドラッグでき、描いている間は自動で半透明になります。クイックパネルの「30 分隠す」で一時的にしまえて、タスクトレイのアイコンからいつでも呼び戻せます。</p>
+    </details>
+    <details>
+      <summary>自分で描いたキャラクターにできますか？</summary>
+      <p>できます。「設定 → コンパニオン」でラインナップの「＋」を押し、状態ごとに画像を指定してください。512×512 の透過 APNG か WebP がおすすめで、スプライトシートも使えます。作ったキャラクターパックは書き出して共有したり、コミュニティペットライブラリに公開したりできます。</p>
+    </details>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <img src="../img/icon.png" alt="" width="40" height="40">
+    <p>DrawCompanion · PaintTool SAI2 の補助ツール · <a href="https://github.com/straydog3301/SAI2_DrawCompanion">GitHub</a> · <a href="buy.html">ライセンスを購入</a> · <a href="legal.html">利用規約・ポリシー</a></p>
+    <p>PaintTool SAI は株式会社システマックスの製品です。DrawCompanion は個人が開発した非公式の補助ツールです。</p>
+  </div>
+</footer>
+</body>
+</html>

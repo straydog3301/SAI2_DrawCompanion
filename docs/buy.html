@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>購買授權 · DrawCompanion</title>
+<meta name="description" content="購買 DrawCompanion 進階模組授權：付款後取得序號，在 App 的「模組」頁輸入即可啟用。">
+<link rel="alternate" hreflang="zh-Hant" href="https://straydog3301.github.io/SAI2_DrawCompanion/buy.html">
+<link rel="alternate" hreflang="en" href="https://straydog3301.github.io/SAI2_DrawCompanion/en/buy.html">
+<link rel="alternate" hreflang="ja" href="https://straydog3301.github.io/SAI2_DrawCompanion/ja/buy.html">
+<link rel="alternate" hreflang="x-default" href="https://straydog3301.github.io/SAI2_DrawCompanion/en/buy.html">
+<link rel="icon" href="img/icon.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e0e12; --bg2: #15141b; --card: #1a1922; --line: #2a2933;
+    --text: #f2f1f6; --muted: #a8a6b8; --accent: #8b5cf6; --accent-btn: #7c3aed; --accent-soft: #2a2140;
+    --accent-text: #c4b5fd; --ok: #86efac; --warn: #fbbf6a; --bad: #fca5a5;
+    --radius: 18px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f6f5fa; --bg2: #eeecf5; --card: #ffffff; --line: #e3e0ec;
+      --text: #1b1a22; --muted: #5c5a6b; --accent-soft: #ede7fd; --accent-text: #6d28d9;
+      --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+    }
+  }
+  :root[data-theme="dark"] { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Noto Sans TC", "Microsoft JhengHei UI", "PingFang TC", system-ui, sans-serif;
+    line-height: 1.7; -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-text); }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 0 24px; }
+  @media (max-width: 600px) { .wrap { padding: 0 16px; } }
+  nav { border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); text-decoration: none; }
+  .brand img { width: 32px; height: 32px; }
+  .lang { display: flex; gap: 2px; font-size: 14px; }
+  .lang a { color: var(--muted); padding: 4px 8px; border-radius: 8px; text-decoration: none; }
+  .lang a:hover { color: var(--text); }
+  .lang a[aria-current="page"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 700; }
+  main { padding: 40px 0 64px; }
+  h1 { font-size: 30px; line-height: 1.3; margin: 0 0 8px; }
+  .lead { color: var(--muted); margin: 0 0 28px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; }
+  .card h2 { font-size: 18px; margin: 0 0 12px; }
+  .price-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .price { font-size: 34px; font-weight: 900; }
+  .price small { font-size: 15px; font-weight: 500; color: var(--muted); }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 700;
+           background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+  ul { margin: 8px 0 0; padding-left: 20px; }
+  li { margin: 2px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  label.field { display: block; font-weight: 700; margin: 4px 0 6px; }
+  input[type=email], input[type=text] { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+                      background: var(--bg2); color: var(--text); font: inherit; }
+  input[type=email]:focus, input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  details.card summary { cursor: pointer; list-style-position: inside; }
+  .msg.ok { color: var(--ok); }
+  .agree { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0; font-size: 14px; color: var(--muted); }
+  .agree input { margin-top: 5px; width: 18px; height: 18px; flex: none; accent-color: var(--accent-btn); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 22px; border-radius: 12px;
+         font: inherit; font-weight: 700; font-size: 16px; border: 1px solid transparent; cursor: pointer; text-decoration: none; }
+  .btn.primary { background: var(--accent-btn); color: #fff; width: 100%; }
+  .btn.primary:disabled { opacity: .55; cursor: default; }
+  .btn.ghost { background: transparent; color: var(--accent-text); border-color: var(--line); }
+  .msg { margin-top: 12px; font-size: 14px; min-height: 1em; }
+  .msg.bad { color: var(--bad); }
+  .serial { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 24px; font-weight: 700; letter-spacing: .04em;
+            background: var(--accent-soft); color: var(--accent-text); padding: 14px 16px; border-radius: 12px;
+            word-break: break-all; margin: 8px 0 12px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .status-ok { color: var(--ok); font-weight: 700; }
+  .status-wait { color: var(--warn); font-weight: 700; }
+  .status-bad { color: var(--bad); font-weight: 700; }
+  ol { margin: 8px 0 0; padding-left: 22px; }
+  footer { border-top: 1px solid var(--line); padding: 24px 0 40px; color: var(--muted); font-size: 14px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<nav><div class="wrap"><a class="brand" href="./"><img src="img/icon.png" alt="">DrawCompanion</a><div class="lang"><a href="buy.html" hreflang="zh-Hant" aria-current="page">中文</a><a href="en/buy.html" hreflang="en">EN</a><a href="ja/buy.html" hreflang="ja">日本語</a></div></div></nav>
+<main><div class="wrap">
+  <h1>購買 DrawCompanion 授權</h1>
+  <p class="lead">付款後會收到授權碼，在 App 的「模組」頁貼上就能啟用進階模組。</p>
+
+  <section id="order-view" class="card" hidden>
+    <h2>訂單結果</h2>
+    <p id="order-status"></p>
+    <div id="order-paid" hidden>
+      <div class="serial" id="serial"></div>
+      <div class="row">
+        <button class="btn ghost" id="copy" type="button">複製序號</button>
+      </div>
+      <p class="muted" style="margin-top:12px">序號也會寄到你的信箱（幾分鐘內，沒收到請看垃圾郵件）。啟用方式：</p>
+      <ol class="muted">
+        <li>開啟一次 SAI2（需要已安裝 SAI 授權證書）。</li>
+        <li>在 DrawCompanion 的「模組」頁貼上序號，按「啟用」。</li>
+        <li>重新啟動 SAI2，所有進階模組就可以使用。</li>
+      </ol>
+      <p class="muted">換電腦或重灌時，用同一組序號重新啟用即可。一組序號綁定一份 SAI 授權。</p>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn ghost" id="new-order" type="button">購買另一份授權</button>
+    </div>
+  </section>
+
+  <section id="buy-view">
+    <div class="card">
+      <div class="price-row">
+        <h2 id="item" style="margin:0">DrawCompanion 進階模組授權</h2>
+        <span class="badge" id="env-badge" hidden>測試環境（不會實際扣款）</span>
+      </div>
+      <div class="price" id="price">—</div>
+      <ul>
+        <li>濾鏡：色彩曲線、色階、色彩平衡、漸層對應、動態 / 放射狀模糊、色相差、雜訊、線稿抽出、暈影、光暈、剪挖圖案、高反差保留等</li>
+        <li>圖層效果、調整圖層、圖層標示顏色</li>
+        <li>逐格動畫、步驟紀錄與自動動作、液化筆刷</li>
+        <li>一次購買、永久使用；換電腦可以重新啟用</li>
+      </ul>
+      <p class="muted" style="margin-top:12px">需要正版 PaintTool SAI Ver.2（2026 版）。二值化、色調分離、像素化免費使用，不需要購買。</p>
+    </div>
+
+    <div class="card" id="gumroad-card">
+      <a class="btn primary" id="gumroad-btn" href="https://drawmate.gumroad.com/l/drawcompanion" rel="noopener">到 Gumroad 購買</a>
+      <p class="muted" style="margin:12px 0 0">價格與付款方式以 Gumroad 頁面為準（信用卡、PayPal 等）。付款由 Gumroad 處理，我們看不到你的付款資料。</p>
+      <p class="muted" style="margin:12px 0 4px">付款後：</p>
+      <ol class="muted">
+        <li>Gumroad 會把<strong>授權碼（License key）</strong>寄到你的信箱，也會顯示在購買完成頁和你的 Gumroad 帳戶「Library」裡。</li>
+        <li>開啟一次 SAI2（需要已安裝 SAI 授權證書）。</li>
+        <li>在 DrawCompanion 的「模組」頁貼上授權碼，按「啟用」，再重新啟動 SAI2。</li>
+      </ol>
+      <p class="muted" style="margin:8px 0 0">一組授權碼綁定一份 SAI 授權；換電腦或重灌時用同一組重新啟用即可。購買即表示同意<a href="legal.html#terms">服務條款</a>、<a href="legal.html#privacy">隱私權政策</a>與<a href="legal.html#refund">退款政策</a>。</p>
+    </div>
+
+    <form class="card" id="buy-form" novalidate hidden>
+      <label class="field" for="email">Email</label>
+      <input type="email" id="email" autocomplete="email" required placeholder="you@example.com" maxlength="254">
+      <p class="muted" style="margin:6px 0 0">序號會寄到這個信箱，請確認沒有打錯。</p>
+      <label class="agree">
+        <input type="checkbox" id="agree">
+        <span>我已閱讀並同意<a href="legal.html#terms" target="_blank">服務條款</a>、<a href="legal.html#privacy" target="_blank">隱私權政策</a>與<a href="legal.html#refund" target="_blank">退款政策</a>，並了解這是線上提供的數位內容，付款完成後立即提供序號；依《通訊交易解除權合理例外情事適用準則》，同意提供後不適用七天解除權。</span>
+      </label>
+      <button class="btn primary" id="pay" type="submit">前往綠界付款</button>
+      <div class="msg" id="msg" role="status"></div>
+    </form>
+  </section>
+
+  <details class="card" id="gumroad-lost">
+    <summary><h2 style="display:inline">找不到授權碼？</h2></summary>
+    <p class="muted" style="margin-top:12px">搜尋信箱裡 Gumroad 寄來的購買收據（也請看垃圾郵件），授權碼就在信裡。或用購買時的 Email 登入 <a href="https://gumroad.com/library" rel="noopener">Gumroad Library</a>，打開這個商品就能看到。都找不到的話，寄信到 <a href="mailto:drawcompanion@gmail.com">drawcompanion@gmail.com</a>，附上購買時的 Email。</p>
+  </details>
+
+  <details class="card" id="lookup-card" hidden>
+    <summary><h2 style="display:inline">找回序號</h2></summary>
+    <form id="lookup-form" novalidate style="margin-top:12px">
+      <p class="muted" style="margin-top:0">輸入購買時的 Email 和訂單編號（在綠界付款通知信或序號信裡，DC 開頭），序號信會重新寄到購買時的信箱。</p>
+      <label class="field" for="lk-email">購買時的 Email</label>
+      <input type="email" id="lk-email" autocomplete="email" maxlength="254">
+      <label class="field" for="lk-trade" style="margin-top:12px">訂單編號</label>
+      <input type="text" id="lk-trade" maxlength="20" autocomplete="off" spellcheck="false" placeholder="DC26…">
+      <button class="btn ghost" id="lk-btn" type="submit" style="margin-top:16px">重寄序號信</button>
+      <div class="msg" id="lk-msg" role="status"></div>
+    </form>
+  </details>
+</div></main>
+
+<footer><div class="wrap">
+  <a href="legal.html#terms">服務條款</a> · <a href="legal.html#refund">退款政策</a> · <a href="legal.html#privacy">隱私權政策</a> · <a href="legal.html#contact">聯絡我們</a><br>
+  PaintTool SAI 是 SYSTEMAX 的產品；本工具為個人開發的非官方輔助程式。
+</div></footer>
+
+<script>
+(function () {
+  "use strict";
+  var API = "https://lmegfdmegznkiqerhght.supabase.co/functions/v1/shop";
+  var KEY = "dc_order_token";
+  var $ = function (id) { return document.getElementById(id); };
+
+  // 收款方式："gumroad"（目前）或 "ecpay"（綠界 API 開通後可以切回來；下面的程式都保留著）
+  var MODE = "gumroad";
+  if (MODE === "gumroad") {
+    $("price").hidden = true;
+    return;
+  }
+  $("gumroad-card").hidden = true;
+  $("gumroad-lost").hidden = true;
+  $("buy-form").hidden = false;
+  $("lookup-card").hidden = false;
+
+  function store(get, value) {
+    try {
+      if (get) return localStorage.getItem(KEY);
+      if (value) localStorage.setItem(KEY, value); else localStorage.removeItem(KEY);
+    } catch (e) { return null; }
+  }
+
+  function call(path, body) {
+    return fetch(API + path, body === undefined ? {} : {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
+    }).then(function (r) { return r.json().catch(function () { return { ok: false, message: "伺服器回應格式不正確。" }; }); });
+  }
+
+  function showMsg(text) { var m = $("msg"); m.textContent = text || ""; m.className = "msg" + (text ? " bad" : ""); }
+
+  call("/info").then(function (d) {
+    if (!d || !d.ok) return;
+    $("price").innerHTML = "NT$ " + Number(d.price).toLocaleString("zh-TW") + " <small>一次購買</small>";
+    $("item").textContent = d.item;
+    $("env-badge").hidden = d.env !== "stage";
+  }).catch(function () {});
+
+  $("buy-form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var email = $("email").value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { showMsg("請輸入正確的 Email。"); return; }
+    if (!$("agree").checked) { showMsg("請先勾選同意購買說明。"); return; }
+    showMsg("");
+    $("pay").disabled = true;
+    $("pay").textContent = "建立訂單中…";
+    call("/checkout", { email: email, agree: true, back_url: location.origin + location.pathname }).then(function (d) {
+      if (!d || !d.ok) throw new Error((d && d.message) || "建立訂單失敗，請稍後再試。");
+      store(false, d.token);
+      var f = document.createElement("form");
+      f.method = "POST";
+      f.action = d.action;
+      Object.keys(d.fields).forEach(function (k) {
+        var i = document.createElement("input");
+        i.type = "hidden"; i.name = k; i.value = d.fields[k];
+        f.appendChild(i);
+      });
+      document.body.appendChild(f);
+      f.submit();
+    }).catch(function (e) {
+      showMsg(e.message || "連不上伺服器，請稍後再試。");
+      $("pay").disabled = false;
+      $("pay").textContent = "前往綠界付款";
+    });
+  });
+
+  var polls = 0;
+  function checkOrder(token) {
+    $("order-view").hidden = false;
+    $("buy-view").hidden = true;
+    call("/order", { token: token }).then(function (d) {
+      var st = $("order-status");
+      if (!d || !d.ok) { st.className = "status-bad"; st.textContent = (d && d.message) || "查不到訂單。"; return; }
+      if (d.status === "paid") {
+        st.className = "status-ok";
+        st.textContent = "付款完成，以下是你的序號（訂單 " + d.trade_no + "）";
+        $("serial").textContent = d.serial;
+        $("order-paid").hidden = false;
+      } else if (d.status === "failed") {
+        st.className = "status-bad";
+        st.textContent = "付款沒有完成：" + (d.message || "") + "（訂單 " + d.trade_no + "）";
+      } else {
+        st.className = "status-wait";
+        st.textContent = polls < 60 ? "等待綠界付款結果…（訂單 " + d.trade_no + "）"
+          : "還沒收到付款結果。如果已經付款，序號會寄到你的信箱；ATM / 超商付款要等完成繳費。";
+        if (polls++ < 60) setTimeout(function () { checkOrder(token); }, 3000);
+      }
+    }).catch(function () {
+      $("order-status").className = "status-bad";
+      $("order-status").textContent = "連不上伺服器，請稍後重新整理這個頁面。";
+    });
+  }
+
+  $("copy").addEventListener("click", function () {
+    var t = $("serial").textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () {
+      $("copy").textContent = "已複製";
+    }).catch(function () { $("copy").textContent = "請手動選取複製"; });
+  });
+
+  $("new-order").addEventListener("click", function () {
+    store(false, null);
+    location.reload();
+  });
+
+  $("lookup-form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var m = $("lk-msg"), email = $("lk-email").value.trim(), trade = $("lk-trade").value.trim().toUpperCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || !/^[A-Z0-9]{1,20}$/.test(trade)) {
+      m.className = "msg bad"; m.textContent = "請輸入購買時的 Email 和訂單編號。"; return;
+    }
+    $("lk-btn").disabled = true;
+    call("/lookup", { email: email, trade_no: trade }).then(function (d) {
+      m.className = "msg " + (d && d.ok ? "ok" : "bad");
+      m.textContent = (d && d.message) || "伺服器暫時無法處理，請稍後再試。";
+    }).catch(function () {
+      m.className = "msg bad"; m.textContent = "連不上伺服器，請稍後再試。";
+    }).then(function () { $("lk-btn").disabled = false; });
+  });
+
+  var token = store(true);
+  if (token) checkOrder(token);
+})();
+</script>
+</body>
+</html>
