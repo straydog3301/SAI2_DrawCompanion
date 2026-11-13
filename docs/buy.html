@@ -89,7 +89,7 @@
 <nav><div class="wrap"><a class="brand" href="./"><img src="img/icon.png" alt="">DrawCompanion</a><div class="lang"><a href="buy.html" hreflang="zh-Hant" aria-current="page">中文</a><a href="en/buy.html" hreflang="en">EN</a><a href="ja/buy.html" hreflang="ja">日本語</a></div></div></nav>
 <main><div class="wrap">
   <h1>購買 DrawCompanion 授權</h1>
-  <p class="lead">付款後會收到授權碼，在 App 的「模組」頁貼上就能啟用進階模組。</p>
+  <p class="lead">付款後會收到序號，在 App 的「模組」頁貼上就能啟用進階模組。</p>
 
   <section id="order-view" class="card" hidden>
     <h2>訂單結果</h2>
@@ -150,6 +150,7 @@
       </label>
       <button class="btn primary" id="pay" type="submit">前往綠界付款</button>
       <div class="msg" id="msg" role="status"></div>
+      <p class="muted" style="margin:12px 0 0">在台灣以外、或想用 PayPal / 外幣付款？請到<a href="en/buy.html">英文購買頁</a>透過 Gumroad 購買。</p>
     </form>
   </section>
 
@@ -184,8 +185,8 @@
   var KEY = "dc_order_token";
   var $ = function (id) { return document.getElementById(id); };
 
-  // 收款方式："gumroad"（目前）或 "ecpay"（綠界 API 開通後可以切回來；下面的程式都保留著）
-  var MODE = "gumroad";
+  // 收款方式："ecpay"（中文頁，綠界）或 "gumroad"（英日文頁固定用 Gumroad；綠界出問題時這裡可以暫時切回去）
+  var MODE = "ecpay";
   if (MODE === "gumroad") {
     $("price").hidden = true;
     return;
