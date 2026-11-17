@@ -1,12 +1,12 @@
 {
   "format": 1,
   "payload": {
-    "version": "2.4.0",
-    "published": "2026-11-16T15:26:29+00:00",
-    "notes": "v2.4.0\n・SAI2 介面主題（免費，主題模組作者：久遠.悠）：在「工具」頁用幾個主色換掉 SAI2 的介面配色，有即時預覽、可匯入匯出；SAI2 要先切成淺色模式，重新啟動 SAI2 生效\n・Gamut Lock 色環：「視窗」選單的色環面板，可套三角、六角、橢圓等遮罩，記住前一次用的顏色\n・儲存 / 載入選取範圍；選取 / 拾色時可以忽略指定圖層\n・修正 SAI2 筆畫效果在半透明筆刷上的溢色與粗細\n（SAI2 相關功能僅支援 SAI2 2026 版）",
-    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.4.0/DrawCompanion2.zip",
-    "sha256": "a4900e1cb5df7e0cbf4fcd62c27ce84e75bddcce2ad131c59cb4cfb8fd3ff49b",
-    "size": 40673795
+    "version": "2.4.1",
+    "published": "2026-11-17T13:00:23+00:00",
+    "notes": "v2.4.1\n・動畫逐格模式（每格可設停留時間、拖曳排序）與 MP4 匯出；匯出倍率與循環次數各格式都適用，預覽可縮放\n・漸層組、自動動作可以匯入 / 匯出\n・更多外觀選項：自訂主色、底色風格（含純黑 OLED）、圓角大小、介面字型\n・參照視窗：四邊都能拉大小、拖曳工具列移動；按住比對顯示完整畫布\n・SAI2 介面主題新增群組顏色、橙色高光、棕色標題文字設定\n（SAI2 相關功能僅支援 SAI2 2026 版）",
+    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.4.1/DrawCompanion2.zip",
+    "sha256": "c57d762965efe3a2806899b4d7671bd1a94b91f3ef9553614aa426c1d1f6e774",
+    "size": 40729257
   },
-  "signature": "8e96edad56af40d8da6ec8d7afb58128591322dc5169f1968c51d815ee093d161682f9ca6d2baf32a037ec8e3f03ba677f941d9480c0d2116c5d31b538a5b70d"
+  "signature": "84bd746f20460005a291c4bbba5f65099a17231fc89c55e5cc079517baefdef227302ba7fd6fe891f8416697e962bbbe8f907350ccc80ddffc38b14dca1be004"
 }
