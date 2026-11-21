@@ -1,12 +1,12 @@
 {
   "format": 1,
   "payload": {
-    "version": "2.5.0",
-    "published": "2026-11-19T12:26:35+00:00",
-    "notes": "v2.5.0\n・筆刷頁：瀏覽與整理 SAI2 的筆刷形狀、紋理、紙張材質與自訂工具，匯出匯入 .dcbrush 素材包\n・匯入 Procreate、Photoshop（.abr）、CLIP STUDIO PAINT（.sut）筆刷與網路上的 SAI2 素材（受限於 SAI2 的筆刷引擎，效果只能近似，無法與原始軟體完全一致）\n・SAI2 筆刷新參數：不累加 / 重疊不加深、水彩邊界、散布顏色抖動跟筆壓\n・寵物沿著螢幕與視窗四周走、爬牆、跳上視窗；自訂角色可以加走路、爬牆動畫\n・寵物提示時跑到你正在看的螢幕；泡泡排隊不再互相蓋掉\n・規則：離開繪圖軟體 N 分鐘提醒、進階設定（時段、再提醒、冷卻、每天上限、稍後提醒）、上次觸發與「試一下」\n・隱藏直到叫回來、新快捷鍵、模組頁分組、修正寵物卡在拖曳動畫\n（SAI2 相關功能僅支援 SAI2 2026 版）",
-    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.5.0/DrawCompanion2.zip",
-    "sha256": "59c792b084134351ae2aa5a1e787df584d993078b5fc594be845d3854f98fb1f",
-    "size": 41040557
+    "version": "2.5.1",
+    "published": "2026-11-21T04:32:31+00:00",
+    "notes": "・支援 SAI2 Ver.2 Alpha 2026.11.20：模組功能與授權都支援新版，2026.10.19 版也能繼續用\n・SAI2 之後再更新時先保留授權：還沒支援的新版 SAI2 不會變成未授權（模組功能等 DrawCompanion 更新支援後出現）\n・小幫手、每日任務等頁面加上左側區段導覽；自製寵物頁改成一頁往下捲動\n・修正自製寵物的動作面板會撐到畫面外",
+    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.5.1/DrawCompanion2.zip",
+    "sha256": "12dc7c7d93ddbcdca39ef7029cbc0260b6b107998e2eeec8fe262ac076cb39f3",
+    "size": 41072063
   },
-  "signature": "d8fb9825dc5a835e08559dbbd2f88056c5d3ea44859f22b71ddf7563aa922d3a941eff344fede26a7dc82e9b57fd05dd7fa4468165e07ebcd65c386c202b0502"
+  "signature": "cb86d68231ea9f83c9a8c7d2d7f4aa64c343131b389d45e4f825f93b6e9f76c189048758316ac045ae4917ac924fc54918216c86f2704e4d39430757cdfdc00a"
 }
