@@ -1,12 +1,12 @@
 {
   "format": 1,
   "payload": {
-    "version": "2.5.1",
-    "published": "2026-11-21T04:32:31+00:00",
-    "notes": "・支援 SAI2 Ver.2 Alpha 2026.11.20：模組功能與授權都支援新版，2026.10.19 版也能繼續用\n・SAI2 之後再更新時先保留授權：還沒支援的新版 SAI2 不會變成未授權（模組功能等 DrawCompanion 更新支援後出現）\n・小幫手、每日任務等頁面加上左側區段導覽；自製寵物頁改成一頁往下捲動\n・修正自製寵物的動作面板會撐到畫面外",
-    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.5.1/DrawCompanion2.zip",
-    "sha256": "12dc7c7d93ddbcdca39ef7029cbc0260b6b107998e2eeec8fe262ac076cb39f3",
-    "size": 41072063
+    "version": "2.5.2",
+    "published": "2026-11-22T05:51:47+00:00",
+    "notes": "・匯入筆刷支援 CLIP STUDIO PAINT 工具群組（.sutg），也可以一次選多個筆刷檔匯入\n・匯入預覽清單可以用 Shift / Ctrl 多選\n・SAI2 主題：圖示顏色維持原色，不再出現藍線與白邊；開啟 / 儲存對話框的檔案面板跟著主題變色\n・修正按「編輯主題」偶爾會讓程式被強制關閉",
+    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.5.2/DrawCompanion2.zip",
+    "sha256": "bc6189af1c61971c2a7f407730d232e9d8da072c0eb9f24ac1f9d3e6fda332e4",
+    "size": 41077703
   },
-  "signature": "cb86d68231ea9f83c9a8c7d2d7f4aa64c343131b389d45e4f825f93b6e9f76c189048758316ac045ae4917ac924fc54918216c86f2704e4d39430757cdfdc00a"
+  "signature": "eb2d108022cc9b710c571cfbb30bc762979681aed292e44a92b2ed2c33fbb9b12bb40b21d5f6dbbe18f58873a142f4c50b0bfbfb6c844a0cd2adef7b24ad1406"
 }
