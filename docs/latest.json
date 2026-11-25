@@ -1,12 +1,12 @@
 {
   "format": 1,
   "payload": {
-    "version": "2.5.2",
-    "published": "2026-11-22T05:51:47+00:00",
-    "notes": "・匯入筆刷支援 CLIP STUDIO PAINT 工具群組（.sutg），也可以一次選多個筆刷檔匯入\n・匯入預覽清單可以用 Shift / Ctrl 多選\n・SAI2 主題：圖示顏色維持原色，不再出現藍線與白邊；開啟 / 儲存對話框的檔案面板跟著主題變色\n・修正按「編輯主題」偶爾會讓程式被強制關閉",
-    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.5.2/DrawCompanion2.zip",
-    "sha256": "bc6189af1c61971c2a7f407730d232e9d8da072c0eb9f24ac1f9d3e6fda332e4",
-    "size": 41077703
+    "version": "2.5.3",
+    "published": "2026-11-25T11:28:33+00:00",
+    "notes": "修正\n- SAI2 Ver.2 Alpha 2026.11.20 無法使用圖層效果（筆畫、外光暈、浮雕、投影、內光暈）\n- 動畫匯出（GIF / APNG / MP4 / 連續圖）在畫布比畫面大時只剩畫面上看得到的部分，下半部或右邊被裁掉；動畫預覽也一併修正",
+    "url": "https://github.com/straydog3301/SAI2_DrawCompanion/releases/download/v2.5.3/DrawCompanion2.zip",
+    "sha256": "4446ccf959eb51376ada210b4c9de9e615c8d2e44d674f8b7b9cfa8ee08e24bb",
+    "size": 41078211
   },
-  "signature": "eb2d108022cc9b710c571cfbb30bc762979681aed292e44a92b2ed2c33fbb9b12bb40b21d5f6dbbe18f58873a142f4c50b0bfbfb6c844a0cd2adef7b24ad1406"
+  "signature": "5f1b5955b21d87bf1ab3b763b762dba0657001065d519fd88e6012f57df30459cf318069c289ffe96fd7433222046500b947ee017d294e576c5cc1a637721903"
 }
